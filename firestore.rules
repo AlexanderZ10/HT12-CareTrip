@@ -1,0 +1,35 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    match /profiles/{userId} {
+      allow read, create, update: if isOwner(userId);
+      allow delete: if false;
+    }
+
+    match /usernames/{username} {
+      // Demo setup: public read is needed because email/password auth resolves
+      // username -> email before the user is signed in.
+      allow read: if true;
+
+      allow create: if signedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.usernameLower == username;
+
+      allow update: if signedIn()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.usernameLower == resource.data.usernameLower;
+
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+  }
+}
