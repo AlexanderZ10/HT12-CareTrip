@@ -4,7 +4,7 @@ import { getFirestore, initializeFirestore } from "firebase/firestore";
 import { getFunctions } from "firebase/functions";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyC3D7LJg3E5SdlC-JrRyUjNKpwTHd37PLk",
+  apiKey: "PUT_your_API_KEY",
   authDomain: "travelapp-f7ff4.firebaseapp.com",
   projectId: "travelapp-f7ff4",
   storageBucket: "travelapp-f7ff4.firebasestorage.app",
