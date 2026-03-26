@@ -7,6 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { auth, db } from "../firebase";
 import { isFirestorePermissionError } from "../utils/firestore-errors";
+import React from "react";
 
 export default function EntryScreen() {
   const router = useRouter();

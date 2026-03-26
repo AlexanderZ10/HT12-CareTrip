@@ -173,6 +173,7 @@ export default function Register() {
           {
             uid: userCredential.user.uid,
             email: normalizedEmail,
+            profileVisibility: "private",
             username: trimmedUsername,
             onboardingCompleted: false,
             createdAt: serverTimestamp(),

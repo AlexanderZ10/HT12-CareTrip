@@ -414,6 +414,7 @@ export default function HomeTabScreen() {
     chats: [],
     currentChatId: null,
   });
+  const [chatMenuVisible, setChatMenuVisible] = useState(false);
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
 
@@ -611,6 +612,7 @@ export default function HomeTabScreen() {
       currentChatId: chatId,
     };
 
+    setChatMenuVisible(false);
     setChatInput("");
     setError("");
     setSaveError("");
@@ -630,6 +632,7 @@ export default function HomeTabScreen() {
       currentChatId: nextChat.id,
     };
 
+    setChatMenuVisible(false);
     setChatInput("");
     setError("");
     setSaveError("");
@@ -1199,160 +1202,23 @@ export default function HomeTabScreen() {
             !isWideLayout && styles.layoutStacked,
           ]}
         >
-          <View
-            style={[
-              styles.sidebar,
-              !isWideLayout && styles.sidebarStacked,
-              isPhoneLayout && styles.sidebarPhone,
-            ]}
-          >
-            <View
-              style={[
-                styles.sidebarHeader,
-                isPhoneLayout && styles.sidebarHeaderPhone,
-              ]}
-            >
-              <Text style={[styles.sidebarTitle, isPhoneLayout && styles.sidebarTitlePhone]}>
-                AI Chats
-              </Text>
-              <TouchableOpacity
-                style={[styles.newChatButton, isPhoneLayout && styles.newChatButtonPhone]}
-                onPress={() => {
-                  void handleCreateChat();
-                }}
-                activeOpacity={0.9}
-              >
-                <MaterialIcons
-                  name="add"
-                  size={isPhoneLayout ? 16 : 18}
-                  color="#FFFFFF"
-                />
-                <Text
-                  style={[
-                    styles.newChatButtonText,
-                    isPhoneLayout && styles.newChatButtonTextPhone,
-                  ]}
-                >
-                  Нов чат
+          <View style={styles.main}>
+            <View style={[styles.plannerTopBar, isPhoneLayout && styles.plannerTopBarPhone]}>
+              <View style={styles.plannerTopBarTextWrap}>
+                <Text style={styles.plannerTopBarTitle}>AI Planner</Text>
+                <Text numberOfLines={1} style={styles.plannerTopBarMeta}>
+                  {currentChat?.title ?? "Последен чат"}
                 </Text>
+              </View>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() => setChatMenuVisible(true)}
+                style={styles.plannerMenuButton}
+              >
+                <MaterialIcons color="#29440F" name="more-horiz" size={26} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView
-              style={styles.sidebarList}
-              contentContainerStyle={styles.sidebarListContent}
-              showsVerticalScrollIndicator={false}
-              horizontal={!isWideLayout}
-            >
-              {sortHomePlannerChats(homeStore.chats).map((chat) => {
-                const isActive = currentChat?.id === chat.id;
-                const isRenaming = renamingChatId === chat.id;
-
-                return (
-                  <View
-                    key={chat.id}
-                    style={[
-                      styles.chatListItem,
-                      isActive && styles.chatListItemActive,
-                      !isWideLayout && styles.chatListItemStacked,
-                      isPhoneLayout && styles.chatListItemPhone,
-                    ]}
-                  >
-                    {isRenaming ? (
-                      <View style={styles.renameWrap}>
-                        <TextInput
-                          style={styles.renameInput}
-                          value={renameValue}
-                          onChangeText={setRenameValue}
-                          placeholder="Име на чат"
-                          placeholderTextColor="#78876C"
-                        />
-                        <View style={styles.renameActions}>
-                          <TouchableOpacity
-                            style={styles.iconButton}
-                            onPress={() => {
-                              void handleSaveRename();
-                            }}
-                            activeOpacity={0.9}
-                          >
-                            <MaterialIcons name="check" size={18} color="#3B6D11" />
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={styles.iconButton}
-                            onPress={() => {
-                              setRenamingChatId(null);
-                              setRenameValue("");
-                            }}
-                            activeOpacity={0.9}
-                          >
-                            <MaterialIcons name="close" size={18} color="#8A3D35" />
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    ) : (
-                      <>
-                        <TouchableOpacity
-                          onPress={() => {
-                            void handleSelectChat(chat.id);
-                          }}
-                          activeOpacity={0.9}
-                        >
-                          <View style={styles.chatTitleRow}>
-                            <Text style={styles.chatItemTitle} numberOfLines={2}>
-                              {chat.title}
-                            </Text>
-                            {chat.pinned ? (
-                              <MaterialIcons name="push-pin" size={16} color="#8B5611" />
-                            ) : null}
-                          </View>
-                          <Text style={styles.chatItemMeta}>
-                            {formatUpdatedDate(chat.updatedAtMs)}
-                          </Text>
-                        </TouchableOpacity>
-
-                        <View style={styles.chatItemActions}>
-                          <TouchableOpacity
-                            style={styles.iconButton}
-                            onPress={() => {
-                              setRenamingChatId(chat.id);
-                              setRenameValue(chat.title);
-                            }}
-                            activeOpacity={0.9}
-                          >
-                            <MaterialIcons name="edit" size={16} color="#5A6E41" />
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={styles.iconButton}
-                            onPress={() => {
-                              void handleTogglePin(chat.id);
-                            }}
-                            activeOpacity={0.9}
-                          >
-                            <MaterialIcons
-                              name={chat.pinned ? "push-pin" : "outlined-flag"}
-                              size={16}
-                              color="#5A6E41"
-                            />
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={styles.iconButton}
-                            onPress={() => {
-                              void handleDeleteChat(chat.id);
-                            }}
-                            activeOpacity={0.9}
-                          >
-                            <MaterialIcons name="delete-outline" size={16} color="#8A3D35" />
-                          </TouchableOpacity>
-                        </View>
-                      </>
-                    )}
-                  </View>
-                );
-              })}
-            </ScrollView>
-          </View>
-
-          <View style={styles.main}>
             <View style={[styles.chatCard, isPhoneLayout && styles.chatCardPhone]}>
               {[currentPlannerState.budget,
                 currentPlannerState.days,
@@ -1799,11 +1665,164 @@ export default function HomeTabScreen() {
               </View>
             </View>
           </View>
+          </View>
         </View>
-      </View>
 
-      <Modal
-        visible={bookingModalVisible}
+        <Modal
+          visible={chatMenuVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setChatMenuVisible(false)}
+        >
+          <View style={styles.historyMenuBackdrop}>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => setChatMenuVisible(false)}
+              style={styles.historyMenuDismissArea}
+            />
+            <View style={styles.historyMenuCard}>
+              <View style={styles.historyMenuHeader}>
+                <View>
+                  <Text style={styles.historyMenuTitle}>AI Chats</Text>
+                  <Text style={styles.historyMenuSubtitle}>
+                    {homeStore.chats.length} запазени chat-а
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.historyMenuClose}
+                  onPress={() => setChatMenuVisible(false)}
+                  activeOpacity={0.9}
+                >
+                  <MaterialIcons name="close" size={22} color="#3E5B21" />
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.newChatButton, styles.historyMenuNewChatButton]}
+                onPress={() => {
+                  void handleCreateChat();
+                }}
+                activeOpacity={0.9}
+              >
+                <MaterialIcons name="add" size={18} color="#FFFFFF" />
+                <Text style={styles.newChatButtonText}>Нов чат</Text>
+              </TouchableOpacity>
+
+              <ScrollView
+                style={styles.sidebarList}
+                contentContainerStyle={styles.sidebarListContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {sortHomePlannerChats(homeStore.chats).map((chat) => {
+                  const isActive = currentChat?.id === chat.id;
+                  const isRenaming = renamingChatId === chat.id;
+
+                  return (
+                    <View
+                      key={chat.id}
+                      style={[
+                        styles.chatListItem,
+                        isActive && styles.chatListItemActive,
+                      ]}
+                    >
+                      {isRenaming ? (
+                        <View style={styles.renameWrap}>
+                          <TextInput
+                            style={styles.renameInput}
+                            value={renameValue}
+                            onChangeText={setRenameValue}
+                            placeholder="Име на чат"
+                            placeholderTextColor="#78876C"
+                          />
+                          <View style={styles.renameActions}>
+                            <TouchableOpacity
+                              style={styles.iconButton}
+                              onPress={() => {
+                                void handleSaveRename();
+                              }}
+                              activeOpacity={0.9}
+                            >
+                              <MaterialIcons name="check" size={18} color="#3B6D11" />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.iconButton}
+                              onPress={() => {
+                                setRenamingChatId(null);
+                                setRenameValue("");
+                              }}
+                              activeOpacity={0.9}
+                            >
+                              <MaterialIcons name="close" size={18} color="#8A3D35" />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      ) : (
+                        <>
+                          <TouchableOpacity
+                            onPress={() => {
+                              void handleSelectChat(chat.id);
+                            }}
+                            activeOpacity={0.9}
+                          >
+                            <View style={styles.chatTitleRow}>
+                              <Text style={styles.chatItemTitle} numberOfLines={2}>
+                                {chat.title}
+                              </Text>
+                              {chat.pinned ? (
+                                <MaterialIcons name="push-pin" size={16} color="#8B5611" />
+                              ) : null}
+                            </View>
+                            <Text style={styles.chatItemMeta}>
+                              {formatUpdatedDate(chat.updatedAtMs)}
+                            </Text>
+                          </TouchableOpacity>
+
+                          <View style={styles.chatItemActions}>
+                            <TouchableOpacity
+                              style={styles.iconButton}
+                              onPress={() => {
+                                setRenamingChatId(chat.id);
+                                setRenameValue(chat.title);
+                              }}
+                              activeOpacity={0.9}
+                            >
+                              <MaterialIcons name="edit" size={16} color="#5A6E41" />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.iconButton}
+                              onPress={() => {
+                                void handleTogglePin(chat.id);
+                              }}
+                              activeOpacity={0.9}
+                            >
+                              <MaterialIcons
+                                name={chat.pinned ? "push-pin" : "outlined-flag"}
+                                size={16}
+                                color="#5A6E41"
+                              />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.iconButton}
+                              onPress={() => {
+                                void handleDeleteChat(chat.id);
+                              }}
+                              activeOpacity={0.9}
+                            >
+                              <MaterialIcons name="delete-outline" size={16} color="#8A3D35" />
+                            </TouchableOpacity>
+                          </View>
+                        </>
+                      )}
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={bookingModalVisible}
         transparent
         animationType="slide"
         onRequestClose={closeBookingModal}
@@ -2335,6 +2354,93 @@ const styles = StyleSheet.create({
   },
   main: {
     flex: 1,
+  },
+  plannerTopBar: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 12,
+    minHeight: 54,
+  },
+  plannerTopBarPhone: {
+    marginBottom: 10,
+  },
+  plannerTopBarTextWrap: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  plannerTopBarTitle: {
+    color: "#29440F",
+    fontSize: 24,
+    fontWeight: "800",
+  },
+  plannerTopBarMeta: {
+    color: "#5F6E53",
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 4,
+  },
+  plannerMenuButton: {
+    alignItems: "center",
+    backgroundColor: "#FAFCF5",
+    borderColor: "#DDE8C7",
+    borderRadius: 22,
+    borderWidth: 1,
+    height: 44,
+    justifyContent: "center",
+    width: 44,
+  },
+  historyMenuBackdrop: {
+    backgroundColor: "rgba(34,56,20,0.18)",
+    flex: 1,
+    justifyContent: "flex-start",
+    paddingHorizontal: 20,
+    paddingTop: 76,
+  },
+  historyMenuDismissArea: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  historyMenuCard: {
+    alignSelf: "flex-start",
+    backgroundColor: "#FAFCF5",
+    borderColor: "#DDE8C7",
+    borderRadius: 24,
+    borderWidth: 1,
+    maxHeight: "82%",
+    maxWidth: 420,
+    padding: 16,
+    shadowColor: "#1E2A12",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.14,
+    shadowRadius: 24,
+    width: "100%",
+  },
+  historyMenuHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  historyMenuTitle: {
+    color: "#29440F",
+    fontSize: 22,
+    fontWeight: "800",
+  },
+  historyMenuSubtitle: {
+    color: "#5F6E53",
+    fontSize: 13,
+    marginTop: 4,
+  },
+  historyMenuClose: {
+    alignItems: "center",
+    backgroundColor: "#EEF4E5",
+    borderRadius: 999,
+    height: 38,
+    justifyContent: "center",
+    width: 38,
+  },
+  historyMenuNewChatButton: {
+    marginBottom: 14,
   },
   contextStrip: {
     backgroundColor: "#F3F8E8",
