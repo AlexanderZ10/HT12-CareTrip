@@ -34,6 +34,7 @@ import {
   type ProfileVisibility,
 } from "../../utils/public-profiles";
 import { extractDiscoverProfile } from "../../utils/trip-recommendations";
+import React from "react";
 
 type ProfileFormState = PersonalProfileInfo;
 

@@ -17,6 +17,7 @@ import { parseBookingOrders, type BookingOrder } from "../../utils/bookings";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
 import { getProfileDisplayName } from "../../utils/profile-info";
 import { parseSavedTrips, type SavedTrip } from "../../utils/saved-trips";
+import React from "react";
 
 const FILTER_OPTIONS = [
   { id: "all", label: "All" },

@@ -1,5 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import * as Linking from "expo-linking";
+import * as WebBrowser from "expo-web-browser";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
@@ -7,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -39,12 +41,16 @@ import {
   type PlannerTransportOption,
 } from "../../utils/home-travel-planner";
 import { getProfileDisplayName } from "../../utils/profile-info";
-import { createTestPaymentIntent } from "../../utils/travel-offers";
+import {
+  createTestCheckoutSession,
+  verifyTestCheckoutSession,
+} from "../../utils/travel-offers";
 import {
   buildBookingOrder,
   getBookingEstimate,
   saveBookingForUser,
 } from "../../utils/bookings";
+import { savePendingStripeCheckout } from "../../utils/pending-stripe-checkout";
 import {
   buildSavedTripFromHome,
   getHomeSavedSourceKey,
@@ -75,6 +81,8 @@ const TIMING_SUGGESTIONS = [
   "Гъвкаво",
 ];
 const PAYMENT_METHODS = ["Банкова карта", "Apple Pay", "Google Pay"];
+
+WebBrowser.maybeCompleteAuthSession();
 
 type BookingCheckoutStage = "form" | "processing" | "success";
 
@@ -329,6 +337,27 @@ function createAuthorizationCode(value: string) {
     .toUpperCase();
 
   return compactValue || "A47K92";
+}
+
+function parseCheckoutReturnState(url: string) {
+  const parsedUrl = Linking.parse(url);
+  const rawCheckoutValue = parsedUrl.queryParams?.checkout;
+  const rawSessionIdValue = parsedUrl.queryParams?.session_id;
+
+  return {
+    checkout:
+      typeof rawCheckoutValue === "string"
+        ? rawCheckoutValue
+        : Array.isArray(rawCheckoutValue)
+          ? rawCheckoutValue[0] ?? ""
+          : "",
+    sessionId:
+      typeof rawSessionIdValue === "string"
+        ? rawSessionIdValue
+        : Array.isArray(rawSessionIdValue)
+          ? rawSessionIdValue[0] ?? ""
+          : "",
+  };
 }
 
 function normalizeLatestPlan(plan: StoredHomePlan): StoredHomePlan {
@@ -1090,37 +1119,84 @@ export default function HomeTabScreen() {
       setBookingProcessing(true);
       setBookingError("");
       setBookingStage("processing");
-      setBookingProgress(0.18);
-      setBookingProgressLabel("Свързваме се със secure checkout...");
+      setBookingProgress(0.14);
+      setBookingProgressLabel("Подготвяме Stripe test checkout...");
 
-      await wait(500);
+      await wait(300);
 
       const amountCents =
         bookingEstimate.totalEstimate !== null
           ? Math.max(bookingEstimate.totalEstimate, 1) * 100
           : 100;
-      const paymentIntent = await createTestPaymentIntent({
+      const checkoutReturnBaseUrl = Linking.createURL("/payment-return");
+      const checkoutSession = await createTestCheckoutSession({
         amountCents,
+        cancelUrl: `${checkoutReturnBaseUrl}?checkout=cancel`,
+        contactEmail: trimmedEmail,
+        contactName: trimmedName,
         currency: "eur",
         description: `${latestPlan.plan.title} • ${latestPlan.destination}`,
         destination: latestPlan.destination,
         paymentMethod: bookingForm.paymentMethod,
+        successUrl: `${checkoutReturnBaseUrl}?checkout=success`,
         userId: user.uid,
       });
 
-      setBookingProgress(0.52);
-      setBookingProgressLabel(
-        bookingForm.paymentMethod.includes("Apple")
-          ? "Потвърждаваме Apple Pay..."
-          : bookingForm.paymentMethod.includes("Google")
-            ? "Потвърждаваме Google Pay..."
-            : "Потвърждаваме картовото плащане..."
+      setBookingProgress(0.36);
+      setBookingProgressLabel("Отваряме Stripe Checkout...");
+
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        savePendingStripeCheckout({
+          budget: latestPlan.budget,
+          contactEmail: trimmedEmail,
+          contactName: trimmedName,
+          createdAtMs: Date.now(),
+          days: latestPlan.days,
+          destination: latestPlan.destination,
+          note: bookingForm.note,
+          paymentMethod: bookingForm.paymentMethod,
+          stay: selectedStay,
+          timing: latestPlan.timing,
+          title: latestPlan.plan.title,
+          totalLabel: bookingEstimate.totalLabel,
+          transport: selectedTransport,
+          travelers: latestPlan.travelers,
+        });
+
+        setBookingProgress(0.52);
+        setBookingProgressLabel("Пренасочваме към Stripe Checkout...");
+        window.location.assign(checkoutSession.checkoutUrl);
+        return;
+      }
+
+      const checkoutResult = await WebBrowser.openAuthSessionAsync(
+        checkoutSession.checkoutUrl,
+        checkoutReturnBaseUrl
       );
 
-      await wait(900);
+      if (checkoutResult.type !== "success" || !checkoutResult.url) {
+        throw new Error("stripe-checkout-cancelled");
+      }
 
-      setBookingProgress(0.82);
-      setBookingProgressLabel("Финализираме резервацията...");
+      const checkoutState = parseCheckoutReturnState(checkoutResult.url);
+
+      if (checkoutState.checkout !== "success" || !checkoutState.sessionId) {
+        throw new Error("stripe-checkout-incomplete");
+      }
+
+      setBookingProgress(0.68);
+      setBookingProgressLabel("Потвърждаваме Stripe checkout...");
+
+      const checkoutVerification = await verifyTestCheckoutSession({
+        sessionId: checkoutState.sessionId,
+      });
+
+      if (!checkoutVerification.paid || !checkoutVerification.paymentIntentId) {
+        throw new Error("stripe-session-not-paid");
+      }
+
+      setBookingProgress(0.86);
+      setBookingProgressLabel("Записваме потвърдената резервация...");
 
       await saveBookingForUser(
         user.uid,
@@ -1131,9 +1207,9 @@ export default function HomeTabScreen() {
           days: latestPlan.days,
           destination: latestPlan.destination,
           note: bookingForm.note,
-          paymentIntentId: paymentIntent.paymentIntentId,
+          paymentIntentId: checkoutVerification.paymentIntentId,
           paymentMethod: bookingForm.paymentMethod,
-          paymentMode: paymentIntent.mode,
+          paymentMode: checkoutVerification.mode,
           stay: selectedStay,
           timing: latestPlan.timing,
           title: latestPlan.plan.title,
@@ -1142,16 +1218,16 @@ export default function HomeTabScreen() {
         })
       );
 
-      await wait(650);
+      await wait(350);
 
       setBookingProgress(1);
-      setBookingProgressLabel("Плащането е потвърдено.");
+      setBookingProgressLabel("Stripe test плащането е потвърдено.");
       setBookingReceipt({
-        authorizationCode: createAuthorizationCode(paymentIntent.paymentIntentId),
+        authorizationCode: createAuthorizationCode(checkoutVerification.paymentIntentId),
         destination: latestPlan.destination,
-        paymentIntentId: paymentIntent.paymentIntentId,
+        paymentIntentId: checkoutVerification.paymentIntentId,
         paymentMethod: bookingForm.paymentMethod,
-        paymentMode: paymentIntent.mode,
+        paymentMode: checkoutVerification.mode,
         processedAtLabel: formatProcessedAt(Date.now()),
         selectedStayLabel: selectedStay
           ? `${selectedStay.name} • ${selectedStay.pricePerNight}`
@@ -1163,22 +1239,85 @@ export default function HomeTabScreen() {
       });
       setBookingStage("success");
       setBookingSuccess(
-        "Плащането е потвърдено и резервацията е добавена в Saved."
+        "Stripe test плащането е потвърдено и резервацията е добавена в Saved."
       );
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : "";
+      const errorCode =
+        nextError &&
+        typeof nextError === "object" &&
+        "code" in nextError &&
+        typeof nextError.code === "string"
+          ? nextError.code
+          : "";
+      const errorDetails =
+        nextError &&
+        typeof nextError === "object" &&
+        "details" in nextError &&
+        typeof nextError.details === "string"
+          ? nextError.details
+          : "";
+      console.error("Booking checkout/save failed", nextError);
+
       setBookingStage("form");
       setBookingProgress(0);
       setBookingProgressLabel("");
 
-      if (message.includes("functions/not-found")) {
+      if (message.includes("functions/not-found") || errorCode === "functions/not-found") {
         setBookingError(
-          "Липсва Firebase функцията createTestPaymentIntent. Deploy-ни backend-а и опитай пак."
+          "Липсват Stripe checkout Firebase функциите. Deploy-ни backend-а и опитай пак."
         );
-      } else if (message.includes("functions/internal")) {
-        setBookingError("Payment backend-ът върна грешка. Провери Stripe env настройките.");
+      } else if (message.includes("stripe-test-mode-disabled")) {
+        setBookingError(
+          "Stripe test mode е изключен. Задай EXPO_PUBLIC_TEST_PAYMENTS_MODE=functions и рестартирай app-а."
+        );
+      } else if (
+        message.includes("Failed to fetch") ||
+        message.includes("functions/unavailable") ||
+        errorCode === "functions/unavailable"
+      ) {
+        setBookingError(
+          "Stripe Functions emulator не е стартиран. Пусни `npm run payments:emulator` и опитай пак."
+        );
+      } else if (message.includes("stripe-checkout-cancelled")) {
+        setBookingError("Плащането беше прекъснато преди потвърждение.");
+      } else if (
+        message.includes("stripe-checkout-incomplete") ||
+        message.includes("stripe-session-not-paid")
+      ) {
+        setBookingError(
+          "Stripe Checkout не върна потвърдено test плащане. Опитай отново."
+        );
+      } else if (
+        message.includes("functions/failed-precondition") ||
+        errorCode === "functions/failed-precondition" ||
+        message.includes("STRIPE_SECRET_KEY") ||
+        errorDetails.includes("STRIPE_SECRET_KEY")
+      ) {
+        setBookingError(
+          "Липсва Stripe test secret key във Firebase Functions. Добави STRIPE_SECRET_KEY и deploy-ни функциите."
+        );
+      } else if (
+        message.includes("functions/internal") ||
+        errorCode === "functions/internal" ||
+        message === "internal"
+      ) {
+        setBookingError(
+          errorDetails ||
+            "Stripe backend върна internal грешка. Ако си локално, пусни `npm run payments:emulator`. Ако си на production, трябва deploy на Firebase Functions."
+        );
       } else {
-        setBookingError(getFirestoreUserMessage(nextError, "write"));
+        const fallbackMessage = getFirestoreUserMessage(nextError, "write");
+
+        if (fallbackMessage === "Не успяхме да запазим профила. Опитай отново.") {
+          setBookingError(
+            message
+              ? `Не успяхме да запазим резервацията. ${message}`
+              : "Не успяхме да запазим резервацията. Опитай отново."
+          );
+        } else {
+          setBookingError(fallbackMessage.replace("профила", "резервацията"));
+        }
       }
     } finally {
       setBookingProcessing(false);

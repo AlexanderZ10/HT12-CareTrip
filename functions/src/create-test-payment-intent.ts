@@ -1,4 +1,5 @@
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import Stripe from "stripe";
 
 type PaymentIntentPayload = {
   amountCents?: number;
@@ -31,6 +32,25 @@ function toStripeWalletType(value: string) {
   return "card";
 }
 
+let stripeClient: Stripe | null = null;
+
+function getStripeClient() {
+  const stripeSecretKey = sanitizeString(process.env.STRIPE_SECRET_KEY);
+
+  if (!stripeSecretKey) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Missing STRIPE_SECRET_KEY. Add your Stripe test secret key in Firebase Functions."
+    );
+  }
+
+  if (!stripeClient) {
+    stripeClient = new Stripe(stripeSecretKey);
+  }
+
+  return stripeClient;
+}
+
 export const createTestPaymentIntent = onCall(
   { region: "us-central1" },
   async (request) => {
@@ -42,56 +62,29 @@ export const createTestPaymentIntent = onCall(
       throw new HttpsError("invalid-argument", "amountCents must be a positive integer.");
     }
 
-    const stripeSecretKey = sanitizeString(process.env.STRIPE_SECRET_KEY);
     const walletType = toStripeWalletType(sanitizeString(data.paymentMethod));
-
-    if (!stripeSecretKey) {
-      return {
-        clientSecret: `pi_mock_${Date.now()}_secret_school_project`,
-        mode: "mock",
-        paymentIntentId: `pi_mock_${Date.now()}`,
-        provider: "stripe",
-        status: `test_${walletType}_ready`,
-      };
-    }
-
-    const body = new URLSearchParams();
-    body.set("amount", String(Math.round(amountCents)));
-    body.set("currency", currency);
-    body.set("automatic_payment_methods[enabled]", "true");
-    body.set("capture_method", "automatic");
-    body.set("description", sanitizeString(data.description, "TravelApp test payment"));
-    body.set("metadata[userId]", sanitizeString(data.userId));
-    body.set("metadata[destination]", sanitizeString(data.destination));
-    body.set("metadata[paymentMethod]", sanitizeString(data.paymentMethod));
-    body.set("metadata[paymentMode]", "school_project_test");
-
-    const response = await fetch("https://api.stripe.com/v1/payment_intents", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${stripeSecretKey}`,
-        "Content-Type": "application/x-www-form-urlencoded",
+    const stripe = getStripeClient();
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(amountCents),
+      automatic_payment_methods: { enabled: true },
+      capture_method: "automatic",
+      currency,
+      description: sanitizeString(data.description, "TravelApp test payment"),
+      metadata: {
+        destination: sanitizeString(data.destination),
+        paymentMethod: sanitizeString(data.paymentMethod),
+        paymentMode: "school_project_test",
+        userId: sanitizeString(data.userId),
+        walletType,
       },
-      body: body.toString(),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new HttpsError("internal", `Stripe create PaymentIntent failed: ${errorText}`);
-    }
-
-    const payload = (await response.json()) as {
-      client_secret?: string;
-      id?: string;
-      status?: string;
-    };
-
     return {
-      clientSecret: sanitizeString(payload.client_secret),
+      clientSecret: sanitizeString(paymentIntent.client_secret),
       mode: "stripe_test",
-      paymentIntentId: sanitizeString(payload.id),
+      paymentIntentId: sanitizeString(paymentIntent.id),
       provider: "stripe",
-      status: sanitizeString(payload.status, "requires_payment_method"),
+      status: sanitizeString(paymentIntent.status, "requires_payment_method"),
     };
   }
 );

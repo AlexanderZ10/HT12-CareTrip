@@ -27,6 +27,7 @@ import {
   type AuthField,
 } from "../utils/auth-errors";
 import { createMathCaptcha } from "../utils/math-captcha";
+import React from "react";
 
 export default function Register() {
   const router = useRouter();

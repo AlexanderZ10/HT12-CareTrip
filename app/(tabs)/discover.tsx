@@ -37,6 +37,7 @@ import {
   type StoredDiscoverData,
   type TripRecommendation,
 } from "../../utils/trip-recommendations";
+import React from "react";
 
 export default function DiscoverTabScreen() {
   const router = useRouter();

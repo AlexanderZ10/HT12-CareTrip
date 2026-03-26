@@ -1,4 +1,4 @@
-import { httpsCallable } from "firebase/functions";
+import { httpsCallable, httpsCallableFromURL } from "firebase/functions";
 
 import { functions } from "../firebase";
 import { GEMINI_MODEL, type DiscoverProfile } from "./trip-recommendations";
@@ -67,10 +67,44 @@ export type TestPaymentIntentResponse = {
   status: string;
 };
 
+export type CreateTestCheckoutSessionInput = {
+  amountCents: number;
+  cancelUrl: string;
+  contactEmail: string;
+  contactName: string;
+  currency: string;
+  description: string;
+  destination: string;
+  paymentMethod: string;
+  successUrl: string;
+  userId: string;
+};
+
+export type TestCheckoutSessionResponse = {
+  checkoutUrl: string;
+  mode: "stripe_test";
+  provider: "stripe";
+  sessionId: string;
+  status: string;
+};
+
+export type VerifyTestCheckoutSessionInput = {
+  sessionId: string;
+};
+
+export type TestCheckoutVerificationResponse = {
+  mode: "stripe_test";
+  paid: boolean;
+  paymentIntentId: string;
+  provider: "stripe";
+  sessionStatus: string;
+  status: string;
+};
+
 type GeminiFallbackOfferPayload = {
   notes?: string[];
-  stayOptions?: Array<Partial<LiveStayOffer>>;
-  transportOptions?: Array<Partial<LiveTravelOffer>>;
+  stayOptions?: Partial<LiveStayOffer>[];
+  transportOptions?: Partial<LiveTravelOffer>[];
 };
 
 function sanitizeString(value: unknown, fallback = "") {
@@ -99,6 +133,20 @@ function isLocalWebRuntime() {
   return hostname === "localhost" || hostname === "127.0.0.1";
 }
 
+function shouldUseLocalFunctionsEmulator() {
+  const forcedMode = process.env.EXPO_PUBLIC_FIREBASE_FUNCTIONS_MODE?.trim().toLowerCase();
+
+  if (forcedMode === "production") {
+    return false;
+  }
+
+  if (forcedMode === "emulator") {
+    return true;
+  }
+
+  return isLocalWebRuntime();
+}
+
 function shouldUseFunctionsBackend() {
   const forcedMode = process.env.EXPO_PUBLIC_TRAVEL_OFFERS_MODE?.trim().toLowerCase();
 
@@ -116,15 +164,22 @@ function shouldUseFunctionsBackend() {
 function shouldUseFunctionsForPayments() {
   const forcedMode = process.env.EXPO_PUBLIC_TEST_PAYMENTS_MODE?.trim().toLowerCase();
 
-  if (forcedMode === "functions") {
-    return true;
-  }
-
-  if (forcedMode === "mock") {
+  if (forcedMode === "mock" || forcedMode === "fallback") {
     return false;
   }
 
-  return !isLocalWebRuntime();
+  return true;
+}
+
+function createCallable<Input, Output>(name: string) {
+  if (shouldUseLocalFunctionsEmulator()) {
+    return httpsCallableFromURL<Input, Output>(
+      functions,
+      `http://127.0.0.1:5001/travelapp-f7ff4/us-central1/${name}`
+    );
+  }
+
+  return httpsCallable<Input, Output>(functions, name);
 }
 
 function getResponseText(responsePayload: any) {
@@ -144,7 +199,7 @@ async function callGeminiGenerateContent(params: {
   apiKey: string;
   generationConfig?: Record<string, unknown>;
   prompt: string;
-  tools?: Array<Record<string, unknown>>;
+  tools?: Record<string, unknown>[];
 }) {
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
@@ -560,10 +615,10 @@ export async function createTestPaymentIntent(
   }
 
   try {
-    const callable = httpsCallable<
+    const callable = createCallable<
       CreateTestPaymentIntentInput,
       TestPaymentIntentResponse
-    >(functions, "createTestPaymentIntent");
+    >("createTestPaymentIntent");
     const response = await callable(input);
     const data = response.data as unknown as Record<string, unknown>;
 
@@ -594,4 +649,51 @@ export async function createTestPaymentIntent(
 
     throw error;
   }
+}
+
+export async function createTestCheckoutSession(
+  input: CreateTestCheckoutSessionInput
+) {
+  if (!shouldUseFunctionsForPayments()) {
+    throw new Error("stripe-test-mode-disabled");
+  }
+
+  const callable = createCallable<
+    CreateTestCheckoutSessionInput,
+    TestCheckoutSessionResponse
+  >("createTestCheckoutSession");
+  const response = await callable(input);
+  const data = response.data as unknown as Record<string, unknown>;
+
+  return {
+    checkoutUrl: sanitizeString(data.checkoutUrl),
+    mode: "stripe_test",
+    provider: "stripe",
+    sessionId: sanitizeString(data.sessionId),
+    status: sanitizeString(data.status, "open"),
+  } satisfies TestCheckoutSessionResponse;
+}
+
+export async function verifyTestCheckoutSession(
+  input: VerifyTestCheckoutSessionInput
+) {
+  if (!shouldUseFunctionsForPayments()) {
+    throw new Error("stripe-test-mode-disabled");
+  }
+
+  const callable = createCallable<
+    VerifyTestCheckoutSessionInput,
+    TestCheckoutVerificationResponse
+  >("verifyTestCheckoutSession");
+  const response = await callable(input);
+  const data = response.data as unknown as Record<string, unknown>;
+
+  return {
+    mode: "stripe_test",
+    paid: data.paid === true,
+    paymentIntentId: sanitizeString(data.paymentIntentId),
+    provider: "stripe",
+    sessionStatus: sanitizeString(data.sessionStatus, "open"),
+    status: sanitizeString(data.status, "unpaid"),
+  } satisfies TestCheckoutVerificationResponse;
 }
