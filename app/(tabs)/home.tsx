@@ -1204,19 +1204,19 @@ export default function HomeTabScreen() {
         >
           <View style={styles.main}>
             <View style={[styles.plannerTopBar, isPhoneLayout && styles.plannerTopBarPhone]}>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() => setChatMenuVisible(true)}
+                style={styles.plannerMenuButton}
+              >
+                <MaterialIcons color="#29440F" name="menu" size={26} />
+              </TouchableOpacity>
               <View style={styles.plannerTopBarTextWrap}>
                 <Text style={styles.plannerTopBarTitle}>AI Planner</Text>
                 <Text numberOfLines={1} style={styles.plannerTopBarMeta}>
                   {currentChat?.title ?? "Последен чат"}
                 </Text>
               </View>
-              <TouchableOpacity
-                activeOpacity={0.9}
-                onPress={() => setChatMenuVisible(true)}
-                style={styles.plannerMenuButton}
-              >
-                <MaterialIcons color="#29440F" name="more-horiz" size={26} />
-              </TouchableOpacity>
             </View>
 
             <View style={[styles.chatCard, isPhoneLayout && styles.chatCardPhone]}>
@@ -1674,12 +1674,7 @@ export default function HomeTabScreen() {
           animationType="fade"
           onRequestClose={() => setChatMenuVisible(false)}
         >
-          <View style={styles.historyMenuBackdrop}>
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={() => setChatMenuVisible(false)}
-              style={styles.historyMenuDismissArea}
-            />
+          <SafeAreaView style={styles.historyMenuBackdrop} edges={["top", "bottom", "left"]}>
             <View style={styles.historyMenuCard}>
               <View style={styles.historyMenuHeader}>
                 <View>
@@ -1818,7 +1813,12 @@ export default function HomeTabScreen() {
                 })}
               </ScrollView>
             </View>
-          </View>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => setChatMenuVisible(false)}
+              style={styles.historyMenuDismissArea}
+            />
+          </SafeAreaView>
         </Modal>
 
         <Modal
@@ -2358,7 +2358,6 @@ const styles = StyleSheet.create({
   plannerTopBar: {
     alignItems: "center",
     flexDirection: "row",
-    justifyContent: "space-between",
     marginBottom: 12,
     minHeight: 54,
   },
@@ -2367,7 +2366,7 @@ const styles = StyleSheet.create({
   },
   plannerTopBarTextWrap: {
     flex: 1,
-    paddingRight: 12,
+    paddingLeft: 12,
   },
   plannerTopBarTitle: {
     color: "#29440F",
@@ -2393,27 +2392,27 @@ const styles = StyleSheet.create({
   historyMenuBackdrop: {
     backgroundColor: "rgba(34,56,20,0.18)",
     flex: 1,
-    justifyContent: "flex-start",
-    paddingHorizontal: 20,
-    paddingTop: 76,
+    flexDirection: "row",
+    paddingBottom: 16,
+    paddingRight: 16,
   },
   historyMenuDismissArea: {
-    ...StyleSheet.absoluteFillObject,
+    flex: 1,
   },
   historyMenuCard: {
-    alignSelf: "flex-start",
     backgroundColor: "#FAFCF5",
     borderColor: "#DDE8C7",
-    borderRadius: 24,
+    borderBottomRightRadius: 28,
+    borderTopRightRadius: 28,
     borderWidth: 1,
-    maxHeight: "82%",
-    maxWidth: 420,
+    height: "100%",
+    maxWidth: 380,
     padding: 16,
     shadowColor: "#1E2A12",
-    shadowOffset: { width: 0, height: 12 },
+    shadowOffset: { width: 10, height: 0 },
     shadowOpacity: 0.14,
     shadowRadius: 24,
-    width: "100%",
+    width: "82%",
   },
   historyMenuHeader: {
     alignItems: "center",
