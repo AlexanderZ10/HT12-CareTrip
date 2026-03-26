@@ -327,17 +327,17 @@ export function parseStoredDiscoverData(profileData: Record<string, unknown>) {
     .map((trip, index) =>
       normalizeTrip(
         {
-          accessibilityNotes: trip.accessibilityNotes,
+          accessibilityNotes: sanitizeString(trip.accessibilityNotes),
           attractions: Array.isArray(trip.attractions) ? trip.attractions : [],
-          country: trip.country,
-          destination: trip.destination,
+          country: sanitizeString(trip.country),
+          destination: sanitizeString(trip.destination),
           highlights: Array.isArray(trip.highlights) ? trip.highlights : [],
-          latitude: trip.latitude,
-          longitude: trip.longitude,
-          popularityNote: trip.popularityNote,
-          title: trip.title,
-          whyItFits: trip.whyItFits,
-          wikipediaTitle: trip.wikipediaTitle,
+          latitude: sanitizeNumber(trip.latitude),
+          longitude: sanitizeNumber(trip.longitude),
+          popularityNote: sanitizeString(trip.popularityNote),
+          title: sanitizeString(trip.title),
+          whyItFits: sanitizeString(trip.whyItFits),
+          wikipediaTitle: sanitizeString(trip.wikipediaTitle),
         },
         index,
         sanitizeString(trip.imageUrl)

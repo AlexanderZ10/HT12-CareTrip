@@ -1,10 +1,12 @@
 import { MaterialIcons } from "@expo/vector-icons";
+import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -37,6 +39,12 @@ import {
   type PlannerTransportOption,
 } from "../../utils/home-travel-planner";
 import { getProfileDisplayName } from "../../utils/profile-info";
+import { createTestPaymentIntent } from "../../utils/travel-offers";
+import {
+  buildBookingOrder,
+  getBookingEstimate,
+  saveBookingForUser,
+} from "../../utils/bookings";
 import {
   buildSavedTripFromHome,
   getHomeSavedSourceKey,
@@ -66,6 +74,21 @@ const TIMING_SUGGESTIONS = [
   "Това лято",
   "Гъвкаво",
 ];
+const PAYMENT_METHODS = ["Банкова карта", "Apple Pay", "Google Pay"];
+
+type BookingCheckoutStage = "form" | "processing" | "success";
+
+type BookingReceipt = {
+  authorizationCode: string;
+  destination: string;
+  paymentIntentId: string;
+  paymentMethod: string;
+  paymentMode: "mock" | "stripe_test";
+  processedAtLabel: string;
+  selectedStayLabel: string | null;
+  selectedTransportLabel: string | null;
+  totalLabel: string;
+};
 
 const LOW_BUDGET_DESTINATIONS = ["Солун", "Белград", "Букурещ", "Скопие"];
 const MID_BUDGET_DESTINATIONS = ["Будапеща", "Тоскана", "Прованс", "Коста Брава"];
@@ -242,6 +265,72 @@ function formatUpdatedDate(value: number) {
   }).format(new Date(value));
 }
 
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getPaymentMethodIcon(method: string) {
+  if (method.includes("Apple")) {
+    return "phone-iphone";
+  }
+
+  if (method.includes("Google")) {
+    return "android";
+  }
+
+  return "credit-card";
+}
+
+function getPaymentMethodDisplayLabel(method: string) {
+  if (method.includes("Apple")) {
+    return "Apple Pay";
+  }
+
+  if (method.includes("Google")) {
+    return "Google Pay";
+  }
+
+  return "Visa •••• 4242";
+}
+
+function formatCheckoutReference(value: string) {
+  const compactValue = value
+    .replace(/^pi_/, "")
+    .replace(/^local_/, "")
+    .replace(/^fallback_/, "")
+    .replace(/^mock_/, "")
+    .replace(/_secret.*$/, "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(-10)
+    .toUpperCase();
+
+  return `BK-${compactValue || "2475A1F9"}`;
+}
+
+function formatProcessedAt(value: number) {
+  return new Intl.DateTimeFormat("bg-BG", {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(value));
+}
+
+function createAuthorizationCode(value: string) {
+  const compactValue = value
+    .replace(/^pi_/, "")
+    .replace(/^local_/, "")
+    .replace(/^fallback_/, "")
+    .replace(/^mock_/, "")
+    .replace(/_secret.*$/, "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(-6)
+    .toUpperCase();
+
+  return compactValue || "A47K92";
+}
+
 function normalizeLatestPlan(plan: StoredHomePlan): StoredHomePlan {
   if (!plan) {
     return null;
@@ -304,6 +393,22 @@ export default function HomeTabScreen() {
   const [error, setError] = useState("");
   const [saveError, setSaveError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState("");
+  const [bookingError, setBookingError] = useState("");
+  const [bookingSuccess, setBookingSuccess] = useState("");
+  const [bookingModalVisible, setBookingModalVisible] = useState(false);
+  const [bookingProcessing, setBookingProcessing] = useState(false);
+  const [bookingStage, setBookingStage] = useState<BookingCheckoutStage>("form");
+  const [bookingProgress, setBookingProgress] = useState(0);
+  const [bookingProgressLabel, setBookingProgressLabel] = useState("");
+  const [bookingReceipt, setBookingReceipt] = useState<BookingReceipt | null>(null);
+  const [selectedTransportIndex, setSelectedTransportIndex] = useState<number | null>(0);
+  const [selectedStayIndex, setSelectedStayIndex] = useState<number | null>(0);
+  const [bookingForm, setBookingForm] = useState({
+    contactEmail: "",
+    contactName: "",
+    note: "",
+    paymentMethod: PAYMENT_METHODS[0] ?? "Банкова карта",
+  });
   const [savedSourceKeys, setSavedSourceKeys] = useState<string[]>([]);
   const [homeStore, setHomeStore] = useState<HomePlannerStore>({
     chats: [],
@@ -326,13 +431,25 @@ export default function HomeTabScreen() {
   const currentPlannerState =
     currentChat?.state ?? createEmptyPlannerState(buildInitialAssistantMessage(profileName));
   const latestPlan = currentPlannerState.latestPlan;
-  const heroTitle = isPhoneLayout
-    ? "Планирай пътуване"
-    : "Чатове като в ChatGPT, но за travel planning";
-  const heroSubtitle = isPhoneLayout
-    ? `От ${profile?.personalProfile.homeBase || "твоя град"} с реални цени за транспорт и престой.`
-    : `Планираме от ${profile?.personalProfile.homeBase || "твоя град"} с фокус върху реални цени за транспорт и престой от интернет.`;
-
+  const selectedTransport =
+    selectedTransportIndex !== null
+      ? latestPlan?.plan.transportOptions[selectedTransportIndex] ?? null
+      : null;
+  const selectedStay =
+    selectedStayIndex !== null
+      ? latestPlan?.plan.stayOptions[selectedStayIndex] ?? null
+      : null;
+  const bookingEstimate = latestPlan
+    ? getBookingEstimate({
+        days: latestPlan.days,
+        stay: selectedStay,
+        transport: selectedTransport,
+        travelers: latestPlan.travelers,
+      })
+    : {
+        totalEstimate: null,
+        totalLabel: "Цена при запитване",
+      };
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
 
@@ -449,6 +566,23 @@ export default function HomeTabScreen() {
     } catch (nextError) {
       setError(getFirestoreUserMessage(nextError, "write"));
     }
+  };
+
+  const resetBookingUi = () => {
+    setBookingStage("form");
+    setBookingProgress(0);
+    setBookingProgressLabel("");
+    setBookingReceipt(null);
+    setBookingError("");
+  };
+
+  const closeBookingModal = () => {
+    if (bookingProcessing) {
+      return;
+    }
+
+    setBookingModalVisible(false);
+    resetBookingUi();
   };
 
   const replaceCurrentChat = async (
@@ -604,6 +738,8 @@ export default function HomeTabScreen() {
     }));
     setChatInput("");
     setError("");
+    setBookingError("");
+    setBookingSuccess("");
     setSaveError("");
     setSaveSuccess("");
   };
@@ -621,6 +757,8 @@ export default function HomeTabScreen() {
 
     setChatInput("");
     setError("");
+    setBookingError("");
+    setBookingSuccess("");
     setSaveError("");
     setSaveSuccess("");
 
@@ -868,6 +1006,182 @@ export default function HomeTabScreen() {
     }
   };
 
+  const openBookingModal = () => {
+    if (!latestPlan) {
+      return;
+    }
+
+    setSelectedTransportIndex(latestPlan.plan.transportOptions.length > 0 ? 0 : null);
+    setSelectedStayIndex(latestPlan.plan.stayOptions.length > 0 ? 0 : null);
+    resetBookingUi();
+    setBookingSuccess("");
+    setBookingForm({
+      contactEmail: user?.email ?? "",
+      contactName: profile?.personalProfile.fullName || profileName,
+      note: "",
+      paymentMethod: PAYMENT_METHODS[0] ?? "Банкова карта",
+    });
+    setBookingModalVisible(true);
+  };
+
+  const openBookingModalForTransport = (transportIndex: number) => {
+    if (!latestPlan) {
+      return;
+    }
+
+    setSelectedTransportIndex(transportIndex);
+    setSelectedStayIndex(null);
+    resetBookingUi();
+    setBookingSuccess("");
+    setBookingForm({
+      contactEmail: user?.email ?? "",
+      contactName: profile?.personalProfile.fullName || profileName,
+      note: "",
+      paymentMethod: PAYMENT_METHODS[0] ?? "Банкова карта",
+    });
+    setBookingModalVisible(true);
+  };
+
+  const openBookingModalForStay = (stayIndex: number) => {
+    if (!latestPlan) {
+      return;
+    }
+
+    setSelectedTransportIndex(null);
+    setSelectedStayIndex(stayIndex);
+    resetBookingUi();
+    setBookingSuccess("");
+    setBookingForm({
+      contactEmail: user?.email ?? "",
+      contactName: profile?.personalProfile.fullName || profileName,
+      note: "",
+      paymentMethod: PAYMENT_METHODS[0] ?? "Банкова карта",
+    });
+    setBookingModalVisible(true);
+  };
+
+  const handleConfirmBooking = async () => {
+    if (!user || !latestPlan || bookingProcessing) {
+      return;
+    }
+
+    const trimmedName = bookingForm.contactName.trim();
+    const trimmedEmail = bookingForm.contactEmail.trim();
+
+    if (!trimmedName) {
+      setBookingError("Добави име за резервацията.");
+      return;
+    }
+
+    if (!trimmedEmail || !trimmedEmail.includes("@")) {
+      setBookingError("Добави валиден email за потвърждение.");
+      return;
+    }
+
+    if (!selectedTransport && !selectedStay) {
+      setBookingError("Избери поне транспорт или настаняване.");
+      return;
+    }
+
+    try {
+      setBookingProcessing(true);
+      setBookingError("");
+      setBookingStage("processing");
+      setBookingProgress(0.18);
+      setBookingProgressLabel("Свързваме се със secure checkout...");
+
+      await wait(500);
+
+      const amountCents =
+        bookingEstimate.totalEstimate !== null
+          ? Math.max(bookingEstimate.totalEstimate, 1) * 100
+          : 100;
+      const paymentIntent = await createTestPaymentIntent({
+        amountCents,
+        currency: "eur",
+        description: `${latestPlan.plan.title} • ${latestPlan.destination}`,
+        destination: latestPlan.destination,
+        paymentMethod: bookingForm.paymentMethod,
+        userId: user.uid,
+      });
+
+      setBookingProgress(0.52);
+      setBookingProgressLabel(
+        bookingForm.paymentMethod.includes("Apple")
+          ? "Потвърждаваме Apple Pay..."
+          : bookingForm.paymentMethod.includes("Google")
+            ? "Потвърждаваме Google Pay..."
+            : "Потвърждаваме картовото плащане..."
+      );
+
+      await wait(900);
+
+      setBookingProgress(0.82);
+      setBookingProgressLabel("Финализираме резервацията...");
+
+      await saveBookingForUser(
+        user.uid,
+        buildBookingOrder({
+          budget: latestPlan.budget,
+          contactEmail: trimmedEmail,
+          contactName: trimmedName,
+          days: latestPlan.days,
+          destination: latestPlan.destination,
+          note: bookingForm.note,
+          paymentIntentId: paymentIntent.paymentIntentId,
+          paymentMethod: bookingForm.paymentMethod,
+          paymentMode: paymentIntent.mode,
+          stay: selectedStay,
+          timing: latestPlan.timing,
+          title: latestPlan.plan.title,
+          transport: selectedTransport,
+          travelers: latestPlan.travelers,
+        })
+      );
+
+      await wait(650);
+
+      setBookingProgress(1);
+      setBookingProgressLabel("Плащането е потвърдено.");
+      setBookingReceipt({
+        authorizationCode: createAuthorizationCode(paymentIntent.paymentIntentId),
+        destination: latestPlan.destination,
+        paymentIntentId: paymentIntent.paymentIntentId,
+        paymentMethod: bookingForm.paymentMethod,
+        paymentMode: paymentIntent.mode,
+        processedAtLabel: formatProcessedAt(Date.now()),
+        selectedStayLabel: selectedStay
+          ? `${selectedStay.name} • ${selectedStay.pricePerNight}`
+          : null,
+        selectedTransportLabel: selectedTransport
+          ? `${selectedTransport.mode} • ${selectedTransport.price}`
+          : null,
+        totalLabel: bookingEstimate.totalLabel,
+      });
+      setBookingStage("success");
+      setBookingSuccess(
+        "Плащането е потвърдено и резервацията е добавена в Saved."
+      );
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : "";
+      setBookingStage("form");
+      setBookingProgress(0);
+      setBookingProgressLabel("");
+
+      if (message.includes("functions/not-found")) {
+        setBookingError(
+          "Липсва Firebase функцията createTestPaymentIntent. Deploy-ни backend-а и опитай пак."
+        );
+      } else if (message.includes("functions/internal")) {
+        setBookingError("Payment backend-ът върна грешка. Провери Stripe env настройките.");
+      } else {
+        setBookingError(getFirestoreUserMessage(nextError, "write"));
+      }
+    } finally {
+      setBookingProcessing(false);
+    }
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.loader} edges={["top", "left", "right"]}>
@@ -1039,102 +1353,93 @@ export default function HomeTabScreen() {
           </View>
 
           <View style={styles.main}>
-            <View style={styles.hero}>
-              <View style={[styles.heroTopRow, isPhoneLayout && styles.heroTopRowPhone]}>
-                <View style={[styles.heroTextWrap, isPhoneLayout && styles.heroTextWrapPhone]}>
-                  <Text style={styles.kicker}>AI Trip Planner</Text>
-                  <Text style={[styles.title, isPhoneLayout && styles.titlePhone]}>
-                    {heroTitle}
-                  </Text>
-                  <Text style={[styles.subtitle, isPhoneLayout && styles.subtitlePhone]}>
-                    {heroSubtitle}
-                  </Text>
-                </View>
-
-                {!isPhoneLayout ? (
-                  <View style={styles.heroIconBadge}>
-                    <MaterialIcons name="auto-awesome" size={26} color="#F4E4B3" />
-                  </View>
-                ) : null}
-              </View>
-
-              <View style={[styles.profileMetaRow, isPhoneLayout && styles.profileMetaRowPhone]}>
-                {currentPlannerState.budget ? (
-                  <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
-                    <Text
-                      style={[
-                        styles.profileMetaChipText,
-                        isPhoneLayout && styles.profileMetaChipTextPhone,
-                      ]}
-                    >
-                      {currentPlannerState.budget}
-                    </Text>
-                  </View>
-                ) : null}
-                {currentPlannerState.days ? (
-                  <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
-                    <Text
-                      style={[
-                        styles.profileMetaChipText,
-                        isPhoneLayout && styles.profileMetaChipTextPhone,
-                      ]}
-                    >
-                      {currentPlannerState.days}
-                    </Text>
-                  </View>
-                ) : null}
-                {currentPlannerState.travelers ? (
-                  <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
-                    <Text
-                      style={[
-                        styles.profileMetaChipText,
-                        isPhoneLayout && styles.profileMetaChipTextPhone,
-                      ]}
-                    >
-                      {currentPlannerState.travelers}
-                    </Text>
-                  </View>
-                ) : null}
-                {currentPlannerState.transportPreference ? (
-                  <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
-                    <Text
-                      style={[
-                        styles.profileMetaChipText,
-                        isPhoneLayout && styles.profileMetaChipTextPhone,
-                      ]}
-                    >
-                      {currentPlannerState.transportPreference}
-                    </Text>
-                  </View>
-                ) : null}
-                {currentPlannerState.timing ? (
-                  <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
-                    <Text
-                      style={[
-                        styles.profileMetaChipText,
-                        isPhoneLayout && styles.profileMetaChipTextPhone,
-                      ]}
-                    >
-                      {currentPlannerState.timing}
-                    </Text>
-                  </View>
-                ) : null}
-                {currentPlannerState.destination ? (
-                  <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
-                    <Text
-                      style={[
-                        styles.profileMetaChipText,
-                        isPhoneLayout && styles.profileMetaChipTextPhone,
-                      ]}
-                    >
-                      {currentPlannerState.destination}
-                    </Text>
-                  </View>
-                ) : null}
-              </View>
-            </View>
-
             <View style={[styles.chatCard, isPhoneLayout && styles.chatCardPhone]}>
+              {[currentPlannerState.budget,
+                currentPlannerState.days,
+                currentPlannerState.travelers,
+                currentPlannerState.transportPreference,
+                currentPlannerState.timing,
+                currentPlannerState.destination,
+              ].filter(Boolean).length > 0 ? (
+                <View style={[styles.contextStrip, isPhoneLayout && styles.contextStripPhone]}>
+                  <Text style={styles.contextStripTitle}>Current plan</Text>
+                  <View style={[styles.profileMetaRow, isPhoneLayout && styles.profileMetaRowPhone]}>
+                    {currentPlannerState.budget ? (
+                      <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
+                        <Text
+                          style={[
+                            styles.profileMetaChipText,
+                            isPhoneLayout && styles.profileMetaChipTextPhone,
+                          ]}
+                        >
+                          {currentPlannerState.budget}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {currentPlannerState.days ? (
+                      <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
+                        <Text
+                          style={[
+                            styles.profileMetaChipText,
+                            isPhoneLayout && styles.profileMetaChipTextPhone,
+                          ]}
+                        >
+                          {currentPlannerState.days}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {currentPlannerState.travelers ? (
+                      <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
+                        <Text
+                          style={[
+                            styles.profileMetaChipText,
+                            isPhoneLayout && styles.profileMetaChipTextPhone,
+                          ]}
+                        >
+                          {currentPlannerState.travelers}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {currentPlannerState.transportPreference ? (
+                      <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
+                        <Text
+                          style={[
+                            styles.profileMetaChipText,
+                            isPhoneLayout && styles.profileMetaChipTextPhone,
+                          ]}
+                        >
+                          {currentPlannerState.transportPreference}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {currentPlannerState.timing ? (
+                      <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
+                        <Text
+                          style={[
+                            styles.profileMetaChipText,
+                            isPhoneLayout && styles.profileMetaChipTextPhone,
+                          ]}
+                        >
+                          {currentPlannerState.timing}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {currentPlannerState.destination ? (
+                      <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
+                        <Text
+                          style={[
+                            styles.profileMetaChipText,
+                            isPhoneLayout && styles.profileMetaChipTextPhone,
+                          ]}
+                        >
+                          {currentPlannerState.destination}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                </View>
+              ) : null}
+
               <ScrollView
                 style={[styles.messagesContainer, isPhoneLayout && styles.messagesContainerPhone]}
                 contentContainerStyle={styles.messagesContent}
@@ -1235,7 +1540,37 @@ export default function HomeTabScreen() {
                           <Text style={styles.optionProvider}>{option.provider}</Text>
                           <Text style={styles.optionRoute}>{option.route}</Text>
                           <Text style={styles.optionMeta}>{option.duration}</Text>
+                          {option.sourceLabel ? (
+                            <Text style={styles.offerSourceText}>Source: {option.sourceLabel}</Text>
+                          ) : null}
                           <Text style={styles.optionNote}>{option.note}</Text>
+
+                          <View style={styles.optionActionsRow}>
+                            {option.bookingUrl ? (
+                              <TouchableOpacity
+                                style={[styles.optionLinkButton, styles.optionHalfButton]}
+                                onPress={() => {
+                                  void Linking.openURL(option.bookingUrl);
+                                }}
+                                activeOpacity={0.9}
+                              >
+                                <MaterialIcons name="open-in-new" size={16} color="#365A14" />
+                                <Text style={styles.optionLinkButtonText}>Офертата</Text>
+                              </TouchableOpacity>
+                            ) : null}
+
+                            <TouchableOpacity
+                              style={[
+                                styles.optionActionButton,
+                                option.bookingUrl ? styles.optionHalfButton : null,
+                              ]}
+                              onPress={() => openBookingModalForTransport(index)}
+                              activeOpacity={0.9}
+                            >
+                              <MaterialIcons name="confirmation-number" size={16} color="#FFFFFF" />
+                              <Text style={styles.optionActionButtonText}>Купи билет</Text>
+                            </TouchableOpacity>
+                          </View>
                         </View>
                       ))}
                     </View>
@@ -1251,7 +1586,37 @@ export default function HomeTabScreen() {
                           <Text style={styles.optionRoute}>
                             {stay.type} • {stay.area}
                           </Text>
+                          {stay.sourceLabel ? (
+                            <Text style={styles.offerSourceText}>Source: {stay.sourceLabel}</Text>
+                          ) : null}
                           <Text style={styles.optionNote}>{stay.note}</Text>
+
+                          <View style={styles.optionActionsRow}>
+                            {stay.bookingUrl ? (
+                              <TouchableOpacity
+                                style={[styles.optionLinkButton, styles.optionHalfButton]}
+                                onPress={() => {
+                                  void Linking.openURL(stay.bookingUrl);
+                                }}
+                                activeOpacity={0.9}
+                              >
+                                <MaterialIcons name="open-in-new" size={16} color="#365A14" />
+                                <Text style={styles.optionLinkButtonText}>Офертата</Text>
+                              </TouchableOpacity>
+                            ) : null}
+
+                            <TouchableOpacity
+                              style={[
+                                styles.optionActionButton,
+                                stay.bookingUrl ? styles.optionHalfButton : null,
+                              ]}
+                              onPress={() => openBookingModalForStay(index)}
+                              activeOpacity={0.9}
+                            >
+                              <MaterialIcons name="hotel" size={16} color="#FFFFFF" />
+                              <Text style={styles.optionActionButtonText}>Резервирай</Text>
+                            </TouchableOpacity>
+                          </View>
                         </View>
                       ))}
                     </View>
@@ -1278,6 +1643,12 @@ export default function HomeTabScreen() {
                       </View>
                     ) : null}
 
+                    {bookingSuccess ? (
+                      <Text style={styles.bookingSuccessText}>{bookingSuccess}</Text>
+                    ) : null}
+                    {bookingError ? (
+                      <Text style={styles.bookingErrorText}>{bookingError}</Text>
+                    ) : null}
                     {saveSuccess ? <Text style={styles.saveSuccessText}>{saveSuccess}</Text> : null}
                     {saveError ? <Text style={styles.saveErrorText}>{saveError}</Text> : null}
 
@@ -1308,6 +1679,15 @@ export default function HomeTabScreen() {
                             ? "Saved in tab"
                             : "Save to Saved"}
                       </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.bookNowButton}
+                      onPress={openBookingModal}
+                      activeOpacity={0.9}
+                    >
+                      <MaterialIcons name="credit-card" size={18} color="#FFFFFF" />
+                      <Text style={styles.bookNowButtonText}>Pay & reserve in app</Text>
                     </TouchableOpacity>
                   </View>
                 ) : null}
@@ -1421,6 +1801,373 @@ export default function HomeTabScreen() {
           </View>
         </View>
       </View>
+
+      <Modal
+        visible={bookingModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={closeBookingModal}
+      >
+        <View style={styles.bookingModalOverlay}>
+          <View style={styles.bookingModalCard}>
+            <ScrollView
+              contentContainerStyle={styles.bookingModalContent}
+              showsVerticalScrollIndicator={false}
+            >
+                <View style={styles.bookingModalHeader}>
+                  <View style={styles.bookingModalHeaderText}>
+                  <Text style={styles.bookingModalKicker}>Secure checkout</Text>
+                  <Text style={styles.bookingModalTitle}>
+                    {bookingStage === "success"
+                      ? "Потвърдено плащане"
+                      : latestPlan?.plan.title || "Потвърди резервацията"}
+                  </Text>
+                  <Text style={styles.bookingModalSubtitle}>
+                    {bookingStage === "processing"
+                      ? "Подготвяме плащането и потвърждението на резервацията."
+                      : bookingStage === "success"
+                        ? "Сумата е обработена успешно и резервацията е потвърдена."
+                        : "Избери транспорт, място за престой и потвърди плащането директно от приложението."}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.bookingCloseButton}
+                  onPress={closeBookingModal}
+                  disabled={bookingProcessing}
+                  activeOpacity={0.9}
+                >
+                  <MaterialIcons name="close" size={18} color="#29440F" />
+                </TouchableOpacity>
+              </View>
+
+              {bookingStage === "processing" ? (
+                <View style={styles.checkoutProcessingCard}>
+                  <View style={styles.checkoutProcessingIcon}>
+                    <MaterialIcons
+                      name={getPaymentMethodIcon(bookingForm.paymentMethod)}
+                      size={34}
+                      color="#29440F"
+                    />
+                  </View>
+                  <Text style={styles.checkoutProcessingTitle}>
+                    Обработваме плащането
+                  </Text>
+                  <Text style={styles.checkoutProcessingSubtitle}>
+                    {bookingProgressLabel || "Подготвяме плащането..."}
+                  </Text>
+
+                  <View style={styles.checkoutProgressTrack}>
+                    <View
+                      style={[
+                        styles.checkoutProgressFill,
+                        { width: `${Math.max(8, bookingProgress * 100)}%` },
+                      ]}
+                    />
+                  </View>
+
+                  <View style={styles.checkoutProcessingSteps}>
+                    <Text style={styles.checkoutProcessingStep}>
+                      1. Авторизация на плащането
+                    </Text>
+                    <Text style={styles.checkoutProcessingStep}>
+                      2. Потвърждение на wallet / карта
+                    </Text>
+                    <Text style={styles.checkoutProcessingStep}>
+                      3. Финализиране на резервацията
+                    </Text>
+                  </View>
+
+                  <View style={styles.bookingSummaryCard}>
+                    <Text style={styles.bookingSummaryTitle}>Обобщение</Text>
+                    <Text style={styles.bookingSummaryLine}>
+                      {latestPlan?.destination || "Дестинация"}
+                    </Text>
+                    <Text style={styles.bookingSummaryLine}>{bookingEstimate.totalLabel}</Text>
+                    <Text style={styles.bookingSummaryHint}>
+                      Сумата е изчислена според избрания транспорт и мястото за престой.
+                    </Text>
+                  </View>
+                </View>
+              ) : bookingStage === "success" ? (
+                <View style={styles.checkoutSuccessCard}>
+                  <View style={styles.checkoutSuccessBadge}>
+                    <MaterialIcons name="check" size={34} color="#FFFFFF" />
+                  </View>
+                  <Text style={styles.checkoutSuccessTitle}>Плащането мина успешно</Text>
+                  <Text style={styles.checkoutSuccessSubtitle}>
+                    Резервацията е потвърдена и детайлите са готови за преглед.
+                  </Text>
+
+                  <View style={styles.checkoutReceiptCard}>
+                    <Text style={styles.checkoutReceiptKicker}>Потвърждение</Text>
+                    <Text style={styles.checkoutReceiptLine}>
+                      Дестинация: {bookingReceipt?.destination || latestPlan?.destination || "-"}
+                    </Text>
+                    <Text style={styles.checkoutReceiptLine}>
+                      Метод: {getPaymentMethodDisplayLabel(
+                        bookingReceipt?.paymentMethod || bookingForm.paymentMethod
+                      )}
+                    </Text>
+                    <Text style={styles.checkoutReceiptLine}>
+                      Статус: Потвърдено
+                    </Text>
+                    <Text style={styles.checkoutReceiptLine}>
+                      Обработено на: {bookingReceipt?.processedAtLabel || formatProcessedAt(Date.now())}
+                    </Text>
+                    <Text style={styles.checkoutReceiptLine}>
+                      Код за оторизация: {bookingReceipt?.authorizationCode || "A47K92"}
+                    </Text>
+                    {bookingReceipt?.selectedTransportLabel ? (
+                      <Text style={styles.checkoutReceiptLine}>
+                        Транспорт: {bookingReceipt.selectedTransportLabel}
+                      </Text>
+                    ) : null}
+                    {bookingReceipt?.selectedStayLabel ? (
+                      <Text style={styles.checkoutReceiptLine}>
+                        Престой: {bookingReceipt.selectedStayLabel}
+                      </Text>
+                    ) : null}
+                    <Text style={styles.checkoutReceiptTotal}>
+                      Обща сума: {bookingReceipt?.totalLabel || bookingEstimate.totalLabel}
+                    </Text>
+                    <Text style={styles.checkoutReceiptRef}>
+                      Референция: {formatCheckoutReference(
+                        bookingReceipt?.paymentIntentId || "test-payment"
+                      )}
+                    </Text>
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.bookingPayButton}
+                    onPress={closeBookingModal}
+                    activeOpacity={0.9}
+                  >
+                    <MaterialIcons name="done-all" size={18} color="#FFFFFF" />
+                    <Text style={styles.bookingPayButtonText}>Затвори</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <>
+              <View style={styles.bookingSection}>
+                <View style={styles.bookingSectionHeader}>
+                  <Text style={styles.bookingSectionTitle}>Транспорт</Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.bookingSkipChip,
+                      selectedTransportIndex === null && styles.bookingSkipChipSelected,
+                    ]}
+                    onPress={() => setSelectedTransportIndex(null)}
+                    activeOpacity={0.9}
+                  >
+                    <Text
+                      style={[
+                        styles.bookingSkipChipText,
+                        selectedTransportIndex === null &&
+                          styles.bookingSkipChipTextSelected,
+                      ]}
+                    >
+                      Без билет
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                {latestPlan?.plan.transportOptions.map((option, index) => {
+                  const isSelected = selectedTransportIndex === index;
+
+                  return (
+                    <TouchableOpacity
+                      key={`${option.provider}-${index}`}
+                      style={[
+                        styles.bookingOptionCard,
+                        isSelected && styles.bookingOptionCardSelected,
+                      ]}
+                      onPress={() => setSelectedTransportIndex(index)}
+                      activeOpacity={0.9}
+                    >
+                      <View style={styles.bookingOptionTopRow}>
+                        <Text style={styles.bookingOptionTitle}>{option.mode}</Text>
+                        <Text style={styles.bookingOptionPrice}>{option.price}</Text>
+                      </View>
+                      <Text style={styles.bookingOptionMeta}>{option.provider}</Text>
+                      <Text style={styles.bookingOptionMeta}>{option.route}</Text>
+                      <Text style={styles.bookingOptionNote}>{option.note}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <View style={styles.bookingSection}>
+                <View style={styles.bookingSectionHeader}>
+                  <Text style={styles.bookingSectionTitle}>Място за престой</Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.bookingSkipChip,
+                      selectedStayIndex === null && styles.bookingSkipChipSelected,
+                    ]}
+                    onPress={() => setSelectedStayIndex(null)}
+                    activeOpacity={0.9}
+                  >
+                    <Text
+                      style={[
+                        styles.bookingSkipChipText,
+                        selectedStayIndex === null && styles.bookingSkipChipTextSelected,
+                      ]}
+                    >
+                      Без хотел
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                {latestPlan?.plan.stayOptions.map((stay, index) => {
+                  const isSelected = selectedStayIndex === index;
+
+                  return (
+                    <TouchableOpacity
+                      key={`${stay.name}-${index}`}
+                      style={[
+                        styles.bookingOptionCard,
+                        isSelected && styles.bookingOptionCardSelected,
+                      ]}
+                      onPress={() => setSelectedStayIndex(index)}
+                      activeOpacity={0.9}
+                    >
+                      <View style={styles.bookingOptionTopRow}>
+                        <Text style={styles.bookingOptionTitle}>{stay.name}</Text>
+                        <Text style={styles.bookingOptionPrice}>{stay.pricePerNight}</Text>
+                      </View>
+                      <Text style={styles.bookingOptionMeta}>
+                        {stay.type} • {stay.area}
+                      </Text>
+                      <Text style={styles.bookingOptionNote}>{stay.note}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <View style={styles.bookingSection}>
+                <Text style={styles.bookingSectionTitle}>Данни за резервацията</Text>
+                <TextInput
+                  style={styles.bookingInput}
+                  placeholder="Име за резервацията"
+                  placeholderTextColor="#7B8870"
+                  value={bookingForm.contactName}
+                  onChangeText={(value) =>
+                    setBookingForm((current) => ({
+                      ...current,
+                      contactName: value,
+                    }))
+                  }
+                />
+                <TextInput
+                  style={styles.bookingInput}
+                  placeholder="Email за потвърждение"
+                  placeholderTextColor="#7B8870"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  value={bookingForm.contactEmail}
+                  onChangeText={(value) =>
+                    setBookingForm((current) => ({
+                      ...current,
+                      contactEmail: value,
+                    }))
+                  }
+                />
+                <TextInput
+                  style={[styles.bookingInput, styles.bookingNoteInput]}
+                  placeholder="Бележка по желание"
+                  placeholderTextColor="#7B8870"
+                  value={bookingForm.note}
+                  onChangeText={(value) =>
+                    setBookingForm((current) => ({
+                      ...current,
+                      note: value,
+                    }))
+                  }
+                  multiline
+                />
+              </View>
+
+              <View style={styles.bookingSection}>
+                <Text style={styles.bookingSectionTitle}>Метод на плащане</Text>
+                <View style={styles.paymentMethodsRow}>
+                  {PAYMENT_METHODS.map((method) => {
+                    const isSelected = bookingForm.paymentMethod === method;
+
+                    return (
+                      <TouchableOpacity
+                        key={method}
+                        style={[
+                          styles.paymentMethodChip,
+                          isSelected && styles.paymentMethodChipSelected,
+                        ]}
+                        onPress={() =>
+                          setBookingForm((current) => ({
+                            ...current,
+                            paymentMethod: method,
+                          }))
+                        }
+                        activeOpacity={0.9}
+                      >
+                        <Text
+                          style={[
+                            styles.paymentMethodChipText,
+                            isSelected && styles.paymentMethodChipTextSelected,
+                          ]}
+                        >
+                          {method}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <View style={styles.bookingSummaryCard}>
+                <Text style={styles.bookingSummaryTitle}>Обобщение</Text>
+                <Text style={styles.bookingSummaryLine}>
+                  {latestPlan?.destination || "Дестинация"} • {latestPlan?.days || "Пътуване"}
+                </Text>
+                <Text style={styles.bookingSummaryLine}>
+                  {latestPlan?.travelers || "Пътници"} • {latestPlan?.timing || "Период"}
+                </Text>
+                {selectedTransport ? (
+                  <Text style={styles.bookingSummaryLine}>
+                    Транспорт: {selectedTransport.mode} • {selectedTransport.price}
+                  </Text>
+                ) : null}
+                {selectedStay ? (
+                  <Text style={styles.bookingSummaryLine}>
+                    Престой: {selectedStay.name} • {selectedStay.pricePerNight}
+                  </Text>
+                ) : null}
+                <Text style={styles.bookingSummaryTotal}>{bookingEstimate.totalLabel}</Text>
+                <Text style={styles.bookingSummaryHint}>
+                  Сумата е изчислена спрямо избрания транспорт и мястото за престой.
+                </Text>
+              </View>
+
+              {bookingError ? <Text style={styles.bookingErrorText}>{bookingError}</Text> : null}
+
+              <TouchableOpacity
+                style={[
+                  styles.bookingPayButton,
+                  bookingProcessing && styles.disabledButton,
+                ]}
+                onPress={() => {
+                  void handleConfirmBooking();
+                }}
+                disabled={bookingProcessing}
+                activeOpacity={0.9}
+              >
+                <MaterialIcons name="lock" size={18} color="#FFFFFF" />
+                <Text style={styles.bookingPayButtonText}>
+                  {bookingProcessing ? "Обработваме..." : "Плати и потвърди"}
+                </Text>
+              </TouchableOpacity>
+                </>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1588,6 +2335,26 @@ const styles = StyleSheet.create({
   },
   main: {
     flex: 1,
+  },
+  contextStrip: {
+    backgroundColor: "#F3F8E8",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#DDE8C7",
+    padding: 14,
+    marginBottom: 12,
+  },
+  contextStripPhone: {
+    padding: 12,
+    borderRadius: 16,
+  },
+  contextStripTitle: {
+    color: "#47642A",
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    marginBottom: 8,
+    letterSpacing: 0.8,
   },
   hero: {
     backgroundColor: "#223814",
@@ -1890,6 +2657,51 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
   },
+  offerSourceText: {
+    color: "#7A6842",
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+  optionActionsRow: {
+    flexDirection: "row",
+    marginTop: 12,
+  },
+  optionHalfButton: {
+    flex: 1,
+  },
+  optionLinkButton: {
+    backgroundColor: "#EEF4E5",
+    borderRadius: 12,
+    paddingVertical: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: "#D8E3C2",
+  },
+  optionLinkButtonText: {
+    color: "#365A14",
+    fontSize: 13,
+    fontWeight: "800",
+    marginLeft: 8,
+  },
+  optionActionButton: {
+    backgroundColor: "#365A14",
+    borderRadius: 12,
+    paddingVertical: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+  },
+  optionActionButtonText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "800",
+    marginLeft: 8,
+  },
   dayCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 20,
@@ -1949,6 +2761,20 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginBottom: 10,
   },
+  bookingSuccessText: {
+    color: "#1D6C4D",
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "700",
+    marginBottom: 10,
+  },
+  bookingErrorText: {
+    color: "#A63228",
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "700",
+    marginBottom: 10,
+  },
   savePlanButton: {
     backgroundColor: "#5C8C1F",
     borderRadius: 14,
@@ -1966,6 +2792,20 @@ const styles = StyleSheet.create({
   },
   savedPlanButtonText: {
     color: "#3B6D11",
+  },
+  bookNowButton: {
+    marginTop: 10,
+    backgroundColor: "#223814",
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+  },
+  bookNowButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+    marginLeft: 8,
   },
   quickRepliesSection: {
     marginTop: 8,
@@ -2064,6 +2904,353 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: "#FFFFFF",
+    fontWeight: "800",
+    marginLeft: 8,
+  },
+  bookingModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(18, 27, 10, 0.54)",
+    justifyContent: "center",
+    padding: 18,
+  },
+  bookingModalCard: {
+    width: "100%",
+    maxWidth: 760,
+    alignSelf: "center",
+    maxHeight: "92%",
+    backgroundColor: "#FAFCF5",
+    borderRadius: 28,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "#DDE8C7",
+  },
+  bookingModalContent: {
+    paddingBottom: 6,
+  },
+  bookingModalHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  bookingModalHeaderText: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  bookingModalKicker: {
+    color: "#6A8F2A",
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  bookingModalTitle: {
+    color: "#29440F",
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: "800",
+    marginBottom: 8,
+  },
+  bookingModalSubtitle: {
+    color: "#5C694C",
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  bookingCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: "#EEF4E5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bookingSection: {
+    marginBottom: 16,
+  },
+  bookingSectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  bookingSectionTitle: {
+    color: "#365A14",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  bookingSkipChip: {
+    backgroundColor: "#EEF4E5",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: "#D8E3C2",
+  },
+  bookingSkipChipSelected: {
+    backgroundColor: "#365A14",
+    borderColor: "#365A14",
+  },
+  bookingSkipChipText: {
+    color: "#365A14",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  bookingSkipChipTextSelected: {
+    color: "#FFFFFF",
+  },
+  bookingOptionCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#DDE8C7",
+    padding: 14,
+    marginBottom: 10,
+  },
+  bookingOptionCardSelected: {
+    borderColor: "#5C8C1F",
+    backgroundColor: "#F0F7E3",
+  },
+  bookingOptionTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 6,
+  },
+  bookingOptionTitle: {
+    color: "#29440F",
+    fontSize: 15,
+    fontWeight: "800",
+    flex: 1,
+    paddingRight: 10,
+  },
+  bookingOptionPrice: {
+    color: "#8B5611",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  bookingOptionMeta: {
+    color: "#516244",
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 4,
+  },
+  bookingOptionNote: {
+    color: "#627254",
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  bookingInput: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#DDE8C7",
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    color: "#29440F",
+    fontSize: 14,
+    marginBottom: 10,
+  },
+  bookingNoteInput: {
+    minHeight: 86,
+    textAlignVertical: "top",
+  },
+  paymentMethodsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+  },
+  paymentMethodChip: {
+    backgroundColor: "#EEF4E5",
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginRight: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#D8E3C2",
+  },
+  paymentMethodChipSelected: {
+    backgroundColor: "#5C8C1F",
+    borderColor: "#5C8C1F",
+  },
+  paymentMethodChipText: {
+    color: "#365A14",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  paymentMethodChipTextSelected: {
+    color: "#FFFFFF",
+  },
+  bookingSummaryCard: {
+    backgroundColor: "#FFF8E7",
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#F1D7A5",
+    marginBottom: 16,
+  },
+  bookingSummaryTitle: {
+    color: "#8B5611",
+    fontSize: 15,
+    fontWeight: "800",
+    marginBottom: 8,
+  },
+  bookingSummaryLine: {
+    color: "#6A5731",
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 4,
+  },
+  bookingSummaryTotal: {
+    color: "#4E3A19",
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: "800",
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  bookingSummaryHint: {
+    color: "#7A6842",
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  checkoutProcessingCard: {
+    backgroundColor: "#F7FBEF",
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "#DDE8C7",
+    padding: 20,
+  },
+  checkoutProcessingIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 24,
+    backgroundColor: "#E7F0D7",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+    alignSelf: "center",
+  },
+  checkoutProcessingTitle: {
+    color: "#223814",
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: "800",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  checkoutProcessingSubtitle: {
+    color: "#5D6D50",
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+    marginBottom: 18,
+  },
+  checkoutProgressTrack: {
+    height: 12,
+    borderRadius: 999,
+    backgroundColor: "#E8F0DB",
+    overflow: "hidden",
+    marginBottom: 16,
+  },
+  checkoutProgressFill: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: "#5C8C1F",
+  },
+  checkoutProcessingSteps: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#DDE8C7",
+    padding: 14,
+    marginBottom: 16,
+  },
+  checkoutProcessingStep: {
+    color: "#43563A",
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 6,
+  },
+  checkoutSuccessCard: {
+    backgroundColor: "#F7FBEF",
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "#DDE8C7",
+    padding: 20,
+    alignItems: "center",
+  },
+  checkoutSuccessBadge: {
+    width: 74,
+    height: 74,
+    borderRadius: 24,
+    backgroundColor: "#5C8C1F",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+  checkoutSuccessTitle: {
+    color: "#223814",
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: "800",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  checkoutSuccessSubtitle: {
+    color: "#5D6D50",
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+    marginBottom: 18,
+  },
+  checkoutReceiptCard: {
+    width: "100%",
+    backgroundColor: "#FFF8E7",
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#F1D7A5",
+    marginBottom: 16,
+  },
+  checkoutReceiptKicker: {
+    color: "#8B5611",
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    marginBottom: 10,
+  },
+  checkoutReceiptLine: {
+    color: "#654F29",
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 6,
+  },
+  checkoutReceiptTotal: {
+    color: "#3D2E15",
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: "800",
+    marginTop: 6,
+    marginBottom: 8,
+  },
+  checkoutReceiptRef: {
+    color: "#7B6844",
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  bookingPayButton: {
+    backgroundColor: "#223814",
+    borderRadius: 16,
+    paddingVertical: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+  },
+  bookingPayButtonText: {
+    color: "#FFFFFF",
+    fontSize: 15,
     fontWeight: "800",
     marginLeft: 8,
   },
