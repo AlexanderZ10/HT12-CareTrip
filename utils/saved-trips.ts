@@ -105,26 +105,29 @@ export function buildSavedTripFromHome(params: {
   } satisfies SavedTrip;
 }
 
-export function parseSavedTrips(profileData: Record<string, unknown>) {
+export function parseSavedTrips(profileData: Record<string, unknown>): SavedTrip[] {
   const rawSavedTrips = Array.isArray(profileData.savedTrips) ? profileData.savedTrips : [];
 
   return rawSavedTrips
     .filter(
       (item): item is Record<string, unknown> => !!item && typeof item === "object"
     )
-    .map((item, index) => ({
-      budget: normalizeBudgetToEuro(sanitizeString(item.budget)) || null,
-      createdAtMs:
-        typeof item.createdAtMs === "number" ? item.createdAtMs : Date.now() - index,
-      destination: sanitizeString(item.destination, "Unknown destination"),
-      details: sanitizeString(item.details),
-      duration: sanitizeString(item.duration) || null,
-      id: sanitizeString(item.id, `saved-${index}`),
-      source: item.source === "home" ? "home" : "discover",
-      sourceKey: sanitizeString(item.sourceKey, `saved-key-${index}`),
-      summary: sanitizeString(item.summary),
-      title: sanitizeString(item.title, "Saved trip"),
-    }))
+    .map(
+      (item, index) =>
+        ({
+          budget: normalizeBudgetToEuro(sanitizeString(item.budget)) || null,
+          createdAtMs:
+            typeof item.createdAtMs === "number" ? item.createdAtMs : Date.now() - index,
+          destination: sanitizeString(item.destination, "Unknown destination"),
+          details: sanitizeString(item.details),
+          duration: sanitizeString(item.duration) || null,
+          id: sanitizeString(item.id, `saved-${index}`),
+          source: item.source === "home" ? "home" : "discover",
+          sourceKey: sanitizeString(item.sourceKey, `saved-key-${index}`),
+          summary: sanitizeString(item.summary),
+          title: sanitizeString(item.title, "Saved trip"),
+        }) satisfies SavedTrip
+    )
     .sort((left, right) => right.createdAtMs - left.createdAtMs);
 }
 

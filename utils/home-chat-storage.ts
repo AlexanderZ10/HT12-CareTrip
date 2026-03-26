@@ -98,9 +98,13 @@ function parseStructuredPlan(value: unknown): GroundedTravelPlan | null {
           )
           .map((item) => ({
             area: sanitizeString(item.area),
+            bookingUrl: sanitizeString(item.bookingUrl),
+            imageUrl: sanitizeString(item.imageUrl),
             name: sanitizeString(item.name),
             note: sanitizeString(item.note),
             pricePerNight: sanitizeString(item.pricePerNight),
+            ratingLabel: sanitizeString(item.ratingLabel),
+            sourceLabel: sanitizeString(item.sourceLabel),
             type: sanitizeString(item.type),
           }))
       : [],
@@ -112,12 +116,14 @@ function parseStructuredPlan(value: unknown): GroundedTravelPlan | null {
             (item): item is Record<string, unknown> => !!item && typeof item === "object"
           )
           .map((item) => ({
+            bookingUrl: sanitizeString(item.bookingUrl),
             duration: sanitizeString(item.duration),
             mode: sanitizeString(item.mode),
             note: sanitizeString(item.note),
             price: sanitizeString(item.price),
             provider: sanitizeString(item.provider),
             route: sanitizeString(item.route),
+            sourceLabel: sanitizeString(item.sourceLabel),
           }))
       : [],
     tripDays: Array.isArray(rawPlan.tripDays)
@@ -229,7 +235,7 @@ function parsePlannerStep(value: unknown): HomePlannerStep {
     : "budget";
 }
 
-function parsePlannerMessages(value: unknown) {
+function parsePlannerMessages(value: unknown): HomeChatMessage[] {
   const rawMessages = Array.isArray(value) ? value : [];
 
   return rawMessages
@@ -237,13 +243,16 @@ function parsePlannerMessages(value: unknown) {
       (message): message is Record<string, unknown> =>
         !!message && typeof message === "object"
     )
-    .map((message, index) => ({
-      createdAtMs:
-        typeof message.createdAtMs === "number" ? message.createdAtMs : Date.now() + index,
-      id: sanitizeString(message.id, `chat-message-${index}`),
-      role: message.role === "user" ? "user" : "assistant",
-      text: sanitizeString(message.text),
-    }))
+    .map(
+      (message, index) =>
+        ({
+          createdAtMs:
+            typeof message.createdAtMs === "number" ? message.createdAtMs : Date.now() + index,
+          id: sanitizeString(message.id, `chat-message-${index}`),
+          role: message.role === "user" ? "user" : "assistant",
+          text: sanitizeString(message.text),
+        }) satisfies HomeChatMessage
+    )
     .filter((message) => message.text.length > 0)
     .slice(-40);
 }
