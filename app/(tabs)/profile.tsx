@@ -1,7 +1,12 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import {
+  doc,
+  onSnapshot,
+  serverTimestamp,
+  writeBatch,
+} from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -23,6 +28,11 @@ import {
   TRAVEL_PACE_OPTIONS,
   type PersonalProfileInfo,
 } from "../../utils/profile-info";
+import {
+  buildPublicProfilePayload,
+  getProfileVisibility,
+  type ProfileVisibility,
+} from "../../utils/public-profiles";
 import { extractDiscoverProfile } from "../../utils/trip-recommendations";
 
 type ProfileFormState = PersonalProfileInfo;
@@ -62,6 +72,8 @@ export default function ProfileTabScreen() {
   const [profileName, setProfileName] = useState("Traveler");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
+  const [profileVisibility, setProfileVisibility] =
+    useState<ProfileVisibility>("private");
   const [form, setForm] = useState<ProfileFormState>(EMPTY_FORM);
   const [error, setError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState("");
@@ -124,6 +136,7 @@ export default function ProfileTabScreen() {
           setUsername(
             typeof profileData.username === "string" ? profileData.username : ""
           );
+          setProfileVisibility(getProfileVisibility(profileData.profileVisibility));
           setForm(personalProfile);
           setOnboardingSummary({
             assistance: onboardingProfile?.assistance.selectedOptions ?? [],
@@ -166,23 +179,49 @@ export default function ProfileTabScreen() {
       setError("");
       setSaveSuccess("");
 
-      await setDoc(
-        doc(db, "profiles", currentUser.uid),
+      const nextProfileInfo = {
+        aboutMe: form.aboutMe.trim(),
+        dreamDestinations: form.dreamDestinations.trim(),
+        fullName: form.fullName.trim(),
+        homeBase: form.homeBase.trim(),
+        stayStyle: form.stayStyle.trim(),
+        travelPace: form.travelPace.trim(),
+      };
+      const profileRef = doc(db, "profiles", currentUser.uid);
+      const publicProfileRef = doc(db, "publicProfiles", currentUser.uid);
+      const batch = writeBatch(db);
+
+      batch.set(
+        profileRef,
         {
-          profileInfo: {
-            aboutMe: form.aboutMe.trim(),
-            dreamDestinations: form.dreamDestinations.trim(),
-            fullName: form.fullName.trim(),
-            homeBase: form.homeBase.trim(),
-            stayStyle: form.stayStyle.trim(),
-            travelPace: form.travelPace.trim(),
-          },
+          profileInfo: nextProfileInfo,
+          profileVisibility,
           updatedAt: serverTimestamp(),
         },
         { merge: true }
       );
 
-      setSaveSuccess("Профилът е обновен и AI вече ще използва новата информация.");
+      if (profileVisibility === "public") {
+        batch.set(
+          publicProfileRef,
+          buildPublicProfilePayload({
+            email: currentUser.email,
+            profileInfo: nextProfileInfo,
+            uid: currentUser.uid,
+            username,
+          })
+        );
+      } else {
+        batch.delete(publicProfileRef);
+      }
+
+      await batch.commit();
+
+      setSaveSuccess(
+        profileVisibility === "public"
+          ? "Профилът е обновен и вече може да бъде намиран от други users."
+          : "Профилът е обновен и вече е private за останалите users."
+      );
     } catch (nextError) {
       setError(getFirestoreUserMessage(nextError, "write"));
     } finally {
@@ -226,6 +265,9 @@ export default function ProfileTabScreen() {
 
         {email ? <Text style={styles.heroMeta}>{email}</Text> : null}
         {username ? <Text style={styles.heroMeta}>@{username}</Text> : null}
+        <Text style={styles.heroMeta}>
+          Visibility: {profileVisibility === "public" ? "Public" : "Private"}
+        </Text>
 
         <Text style={styles.heroDescription}>
           Тук управляваш личната информация, която Gemini използва заедно с
@@ -247,6 +289,24 @@ export default function ProfileTabScreen() {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Информация за теб</Text>
+
+        <Text style={styles.fieldLabel}>Видимост на профила</Text>
+        <Text style={styles.visibilityText}>
+          Public профилите могат да бъдат виждани и канени в групи. Private профилите
+          остават скрити от discover и invite списъците.
+        </Text>
+        <View style={styles.pillsRow}>
+          <ChoicePill
+            label="Private"
+            selected={profileVisibility === "private"}
+            onPress={() => setProfileVisibility("private")}
+          />
+          <ChoicePill
+            label="Public"
+            selected={profileVisibility === "public"}
+            onPress={() => setProfileVisibility("public")}
+          />
+        </View>
 
         <Text style={styles.fieldLabel}>Име</Text>
         <TextInput
@@ -500,6 +560,12 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     fontSize: 15,
     color: "#29440F",
+  },
+  visibilityText: {
+    color: "#5F6E53",
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 8,
   },
   multilineInput: {
     minHeight: 120,

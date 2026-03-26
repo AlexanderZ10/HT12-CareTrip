@@ -10,6 +10,95 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == userId;
     }
 
+    function hasCurrentUser(memberIds) {
+      return signedIn() && memberIds is list && memberIds.hasAny([request.auth.uid]);
+    }
+
+    function groupData(groupId) {
+      return get(/databases/$(database)/documents/groups/$(groupId)).data;
+    }
+
+    function isGroupMember(groupId) {
+      return signedIn() && groupData(groupId).memberIds.hasAny([request.auth.uid]);
+    }
+
+    function isPublicGroup(groupId) {
+      return signedIn() && groupData(groupId).accessType == "public";
+    }
+
+    function validAccessType(data) {
+      return data.accessType == "public" || data.accessType == "private";
+    }
+
+    function validJoinKey(data) {
+      return data.accessType == "public"
+        ? data.joinKeyNormalized == null
+        : data.joinKeyNormalized is string
+          && data.joinKeyNormalized.size() >= 4
+          && data.joinKeyNormalized.size() <= 24;
+    }
+
+    function validGroupShape(data) {
+      return data.name is string
+        && data.name.size() >= 3
+        && data.name.size() <= 60
+        && data.description is string
+        && data.description.size() <= 280
+        && data.creatorId is string
+        && data.creatorLabel is string
+        && data.creatorLabel.size() >= 1
+        && data.creatorLabel.size() <= 80
+        && (data.invitedUserIds == null || data.invitedUserIds is list)
+        && data.memberIds is list
+        && data.memberIds.size() >= 1
+        && data.memberCount == data.memberIds.size()
+        && validAccessType(data)
+        && validJoinKey(data);
+    }
+
+    function validCreatedGroup() {
+      return validGroupShape(request.resource.data)
+        && request.resource.data.creatorId == request.auth.uid
+        && request.resource.data.memberIds.size() == 1
+        && request.resource.data.memberIds[0] == request.auth.uid;
+    }
+
+    function sameGroupMetadata() {
+      return request.resource.data.accessType == resource.data.accessType
+        && request.resource.data.creatorId == resource.data.creatorId
+        && request.resource.data.creatorLabel == resource.data.creatorLabel
+        && request.resource.data.description == resource.data.description
+        && request.resource.data.invitedUserIds == resource.data.invitedUserIds
+        && request.resource.data.joinKeyNormalized == resource.data.joinKeyNormalized
+        && request.resource.data.name == resource.data.name;
+    }
+
+    function validCreatorGroupEdit() {
+      return validGroupShape(request.resource.data)
+        && resource.data.creatorId == request.auth.uid
+        && request.resource.data.memberIds == resource.data.memberIds
+        && request.resource.data.memberCount == resource.data.memberCount;
+    }
+
+    function validSelfJoin() {
+      return validGroupShape(request.resource.data)
+        && sameGroupMetadata()
+        && !hasCurrentUser(resource.data.memberIds)
+        && hasCurrentUser(request.resource.data.memberIds)
+        && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1
+        && request.resource.data.memberIds.hasAll(resource.data.memberIds);
+    }
+
+    function validSelfLeave() {
+      return validGroupShape(request.resource.data)
+        && sameGroupMetadata()
+        && resource.data.creatorId != request.auth.uid
+        && hasCurrentUser(resource.data.memberIds)
+        && !hasCurrentUser(request.resource.data.memberIds)
+        && request.resource.data.memberIds.size() + 1 == resource.data.memberIds.size()
+        && resource.data.memberIds.hasAll(request.resource.data.memberIds);
+    }
+
     match /profiles/{userId} {
       allow read, create, update: if isOwner(userId);
       allow delete: if false;
@@ -30,6 +119,33 @@ service cloud.firestore {
         && request.resource.data.usernameLower == resource.data.usernameLower;
 
       allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    match /groups/{groupId} {
+      allow read: if signedIn();
+      allow create: if validCreatedGroup();
+      allow update: if validCreatorGroupEdit() || validSelfJoin() || validSelfLeave();
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isGroupMember(groupId) || isPublicGroup(groupId);
+
+        allow create: if isGroupMember(groupId)
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.senderLabel is string
+          && request.resource.data.senderLabel.size() >= 1
+          && request.resource.data.senderLabel.size() <= 80
+          && request.resource.data.text is string
+          && request.resource.data.text.size() >= 1
+          && request.resource.data.text.size() <= 1000;
+
+        allow update, delete: if false;
+      }
+    }
+
+    match /publicProfiles/{userId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isOwner(userId);
     }
   }
 }

@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import DiscoverTripMap from "../../components/discover-trip-map";
 import { auth, db } from "../../firebase";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
 import { getProfileDisplayName } from "../../utils/profile-info";
@@ -25,7 +26,6 @@ import {
   saveTripForUser,
 } from "../../utils/saved-trips";
 import {
-  buildSettlementMapUrl,
   enrichDiscoverTrips,
   GEMINI_MODEL,
   extractDiscoverProfile,
@@ -37,19 +37,6 @@ import {
   type StoredDiscoverData,
   type TripRecommendation,
 } from "../../utils/trip-recommendations";
-
-function formatGeneratedDate(value: number | null) {
-  if (!value) {
-    return "Още не е генерирано";
-  }
-
-  return new Intl.DateTimeFormat("bg-BG", {
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    month: "long",
-  }).format(new Date(value));
-}
 
 export default function DiscoverTabScreen() {
   const router = useRouter();
@@ -77,7 +64,7 @@ export default function DiscoverTabScreen() {
   const heroTitle = isPhoneLayout ? `Discover за ${profileName}` : `Settlements for ${profileName}`;
   const heroSubtitle = isPhoneLayout
     ? "Реални селища със снимка, карта и идеи какво да видиш."
-    : "Вместо generic trip идеи, тук получаваш реални селища с tourism activity, активности, забележителности, снимка и map preview.";
+    : "Реални селища с активности, забележителности и истинска карта на местата.";
 
   const generateAndStoreTrips = useCallback(
     async (
@@ -329,53 +316,42 @@ export default function DiscoverTabScreen() {
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
         >
-          <View style={[styles.hero, isPhoneLayout && styles.heroPhone]}>
+          <View style={styles.headerBlock}>
             <Text style={styles.kicker}>Discover</Text>
-            <Text style={[styles.heroTitle, isPhoneLayout && styles.heroTitlePhone]}>
+            <Text style={[styles.pageTitle, isPhoneLayout && styles.pageTitlePhone]}>
               {heroTitle}
             </Text>
-            <Text style={[styles.heroSubtitle, isPhoneLayout && styles.heroSubtitlePhone]}>
+            <Text style={[styles.pageSubtitle, isPhoneLayout && styles.pageSubtitlePhone]}>
               {heroSubtitle}
             </Text>
-
-          <View style={[styles.heroMetaRow, isPhoneLayout && styles.heroMetaRowPhone]}>
-            <View style={[styles.metaChip, isPhoneLayout && styles.metaChipPhone]}>
-              <Text style={styles.metaLabel}>Model</Text>
-              <Text style={styles.metaValue}>{discoverData?.sourceModel ?? GEMINI_MODEL}</Text>
-            </View>
-            <View style={[styles.metaChip, isPhoneLayout && styles.metaChipPhone]}>
-              <Text style={styles.metaLabel}>Generated</Text>
-              <Text style={styles.metaValue}>
-                {formatGeneratedDate(discoverData?.generatedAtMs ?? null)}
-              </Text>
-            </View>
           </View>
 
-          <TouchableOpacity
-            style={[
-              styles.primaryButton,
-              isPhoneLayout && styles.primaryButtonPhone,
-              (generating || refreshUsedToday) && styles.primaryButtonDisabled,
-            ]}
-            onPress={handleRefresh}
-            disabled={generating || refreshUsedToday}
-            activeOpacity={0.9}
-          >
-            <Text style={styles.primaryButtonText}>
-              {generating
-                ? "Refreshing settlements..."
-                : refreshUsedToday
-                  ? "Refresh used today"
-                  : "Refresh settlements"}
-            </Text>
-          </TouchableOpacity>
+          <View style={[styles.discoverControlsCard, isPhoneLayout && styles.discoverControlsCardPhone]}>
+            <TouchableOpacity
+              style={[
+                styles.primaryButton,
+                isPhoneLayout && styles.primaryButtonPhone,
+                (generating || refreshUsedToday) && styles.primaryButtonDisabled,
+              ]}
+              onPress={handleRefresh}
+              disabled={generating || refreshUsedToday}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.primaryButtonText}>
+                {generating
+                  ? "Refreshing settlements..."
+                  : refreshUsedToday
+                    ? "Refresh used today"
+                    : "Refresh settlements"}
+              </Text>
+            </TouchableOpacity>
 
-          <Text style={styles.refreshNote}>
-            {refreshUsedToday
-              ? "Днес вече беше използван refresh. Утре можеш да заредиш нови селища."
-              : "Можеш да поискаш нов set settlements веднъж на ден."}
-          </Text>
-        </View>
+            <Text style={styles.refreshNote}>
+              {refreshUsedToday
+                ? "Днес вече беше използван refresh. Утре можеш да заредиш нови селища."
+                : "Можеш да поискаш нов set settlements веднъж на ден."}
+            </Text>
+          </View>
 
         {error ? (
           <View style={styles.errorCard}>
@@ -418,7 +394,6 @@ export default function DiscoverTabScreen() {
           const sourceKey = getDiscoverSavedSourceKey(trip);
           const isSaved = savedSourceKeys.includes(sourceKey);
           const isSaving = savingTripKey === sourceKey;
-          const mapUrl = buildSettlementMapUrl(trip.latitude, trip.longitude);
 
           return (
             <View key={trip.id} style={[styles.tripCard, isPhoneLayout && styles.tripCardPhone]}>
@@ -447,26 +422,22 @@ export default function DiscoverTabScreen() {
 
                 <View style={styles.mapPanel}>
                   <Text style={styles.mapPanelTitle}>Map preview</Text>
-                  {mapUrl ? (
-                    <>
-                      <Image
-                        source={{ uri: mapUrl }}
-                        style={[styles.mapImage, isPhoneLayout && styles.mapImagePhone]}
-                        contentFit="cover"
-                      />
-                      <TouchableOpacity
-                        style={[styles.expandButton, isPhoneLayout && styles.expandButtonPhone]}
-                        onPress={() => setExpandedMapTrip(trip)}
-                        activeOpacity={0.9}
-                      >
-                        <Text style={styles.expandButtonText}>Expand map</Text>
-                      </TouchableOpacity>
-                    </>
-                  ) : (
-                    <View style={[styles.mapFallback, isPhoneLayout && styles.mapImagePhone]}>
-                      <Text style={styles.mapFallbackText}>Map coordinates not available</Text>
-                    </View>
-                  )}
+                  <DiscoverTripMap
+                    attractions={trip.attractions}
+                    country={trip.country}
+                    destination={trip.destination}
+                    height={isPhoneLayout ? 152 : 196}
+                    latitude={trip.latitude}
+                    longitude={trip.longitude}
+                    title={trip.title}
+                  />
+                  <TouchableOpacity
+                    style={[styles.expandButton, isPhoneLayout && styles.expandButtonPhone]}
+                    onPress={() => setExpandedMapTrip(trip)}
+                    activeOpacity={0.9}
+                  >
+                    <Text style={styles.expandButtonText}>Expand map</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
 
@@ -550,15 +521,14 @@ export default function DiscoverTabScreen() {
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>{expandedMapTrip?.title}</Text>
             {expandedMapTrip ? (
-              <Image
-                source={{
-                  uri: buildSettlementMapUrl(
-                    expandedMapTrip.latitude,
-                    expandedMapTrip.longitude
-                  ),
-                }}
-                style={styles.modalMapImage}
-                contentFit="cover"
+              <DiscoverTripMap
+                attractions={expandedMapTrip.attractions}
+                country={expandedMapTrip.country}
+                destination={expandedMapTrip.destination}
+                height={420}
+                latitude={expandedMapTrip.latitude}
+                longitude={expandedMapTrip.longitude}
+                title={expandedMapTrip.title}
               />
             ) : null}
             <TouchableOpacity
@@ -593,81 +563,49 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#EEF4E5",
   },
-  hero: {
-    backgroundColor: "#223814",
-    borderRadius: 28,
-    padding: 24,
-    marginBottom: 18,
-  },
-  heroPhone: {
-    borderRadius: 22,
-    padding: 16,
-    marginBottom: 14,
+  headerBlock: {
+    marginBottom: 12,
   },
   kicker: {
-    color: "#C8E08E",
+    color: "#5C8C1F",
     fontSize: 13,
     fontWeight: "700",
     letterSpacing: 0.8,
     textTransform: "uppercase",
     marginBottom: 10,
   },
-  heroTitle: {
-    color: "#FFFFFF",
+  pageTitle: {
+    color: "#29440F",
     fontSize: 28,
     lineHeight: 36,
     fontWeight: "800",
     marginBottom: 10,
   },
-  heroTitlePhone: {
+  pageTitlePhone: {
     fontSize: 20,
     lineHeight: 26,
     marginBottom: 8,
   },
-  heroSubtitle: {
-    color: "#EAF3DE",
+  pageSubtitle: {
+    color: "#5F6E53",
     fontSize: 15,
     lineHeight: 22,
-    marginBottom: 16,
   },
-  heroSubtitlePhone: {
+  pageSubtitlePhone: {
     fontSize: 13,
     lineHeight: 18,
-    marginBottom: 12,
   },
-  heroMetaRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+  discoverControlsCard: {
+    backgroundColor: "#F6F8EE",
+    borderRadius: 22,
+    padding: 18,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#DDE8C7",
   },
-  heroMetaRowPhone: {
-    marginBottom: 12,
-  },
-  metaChip: {
-    backgroundColor: "rgba(255,255,255,0.12)",
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginRight: 10,
-    marginBottom: 10,
-  },
-  metaChipPhone: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginRight: 8,
-    marginBottom: 8,
-  },
-  metaLabel: {
-    color: "#D6E8AE",
-    fontSize: 11,
-    fontWeight: "700",
-    marginBottom: 4,
-    textTransform: "uppercase",
-  },
-  metaValue: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "600",
+  discoverControlsCardPhone: {
+    borderRadius: 18,
+    padding: 14,
   },
   primaryButton: {
     backgroundColor: "#BA7517",
@@ -689,7 +627,7 @@ const styles = StyleSheet.create({
   },
   refreshNote: {
     marginTop: 10,
-    color: "#DCEAC0",
+    color: "#5F6E53",
     fontSize: 13,
     lineHeight: 18,
   },
@@ -867,16 +805,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     textTransform: "uppercase",
   },
-  mapImage: {
-    width: "100%",
-    height: 196,
-    borderRadius: 20,
-    backgroundColor: "#DDE8C7",
-  },
-  mapImagePhone: {
-    height: 152,
-    borderRadius: 18,
-  },
   expandButton: {
     marginTop: 10,
     backgroundColor: "#FFF2DA",
@@ -891,19 +819,6 @@ const styles = StyleSheet.create({
   expandButtonText: {
     color: "#8B5611",
     fontWeight: "800",
-  },
-  mapFallback: {
-    height: 196,
-    borderRadius: 20,
-    backgroundColor: "#EEF4E5",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 16,
-  },
-  mapFallbackText: {
-    color: "#627254",
-    fontSize: 13,
-    textAlign: "center",
   },
   tripHeader: {
     flexDirection: "row",
