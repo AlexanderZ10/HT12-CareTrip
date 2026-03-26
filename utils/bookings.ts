@@ -1,4 +1,4 @@
-import { doc, runTransaction } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 
 import { db } from "../firebase";
 import { normalizeBudgetToEuro } from "./currency";
@@ -192,12 +192,12 @@ export function buildBookingOrder(params: {
     paymentProvider: "stripe",
     paymentStatus: "paid",
     source: "home",
-    stay: params.stay,
+    stay: sanitizeStayOption(params.stay),
     timing: params.timing.trim(),
     title: params.title.trim(),
     totalEstimate: estimate.totalEstimate,
     totalLabel: estimate.totalLabel,
-    transport: params.transport,
+    transport: sanitizeTransportOption(params.transport),
     travelers: params.travelers.trim(),
   } satisfies BookingOrder;
 }
@@ -246,28 +246,33 @@ export function parseBookingOrders(profileData: Record<string, unknown>): Bookin
 
 export async function saveBookingForUser(userId: string, bookingOrder: BookingOrder) {
   const profileRef = doc(db, "profiles", userId);
+  const profileSnapshot = await getDoc(profileRef);
+  const profileData = profileSnapshot.exists()
+    ? (profileSnapshot.data() as Record<string, unknown>)
+    : {};
+  const currentBookingOrders = parseBookingOrders(profileData);
 
-  let nextBookingOrders: BookingOrder[] = [];
+  if (
+    bookingOrder.paymentIntentId &&
+    currentBookingOrders.some(
+      (currentBookingOrder) =>
+        currentBookingOrder.paymentIntentId &&
+        currentBookingOrder.paymentIntentId === bookingOrder.paymentIntentId
+    )
+  ) {
+    return currentBookingOrders;
+  }
 
-  await runTransaction(db, async (transaction) => {
-    const profileSnapshot = await transaction.get(profileRef);
-    const profileData = profileSnapshot.exists()
-      ? (profileSnapshot.data() as Record<string, unknown>)
-      : {};
+  const nextBookingOrders = [bookingOrder, ...currentBookingOrders].slice(0, 30);
 
-    const currentBookingOrders = parseBookingOrders(profileData);
-
-    nextBookingOrders = [bookingOrder, ...currentBookingOrders].slice(0, 30);
-
-    transaction.set(
-      profileRef,
-      {
-        bookingOrders: nextBookingOrders,
-        bookingOrdersUpdatedAtMs: Date.now(),
-      },
-      { merge: true }
-    );
-  });
+  await setDoc(
+    profileRef,
+    {
+      bookingOrders: nextBookingOrders,
+      bookingOrdersUpdatedAtMs: Date.now(),
+    },
+    { merge: true }
+  );
 
   return nextBookingOrders;
 }

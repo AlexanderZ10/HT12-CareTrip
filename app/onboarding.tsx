@@ -15,6 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { auth, db } from "../firebase";
 import { getFirestoreUserMessage } from "../utils/firestore-errors";
+import React from "react";
 
 const INTEREST_OPTIONS = [
   "🌿 Природа и планини",
