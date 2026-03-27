@@ -1,7 +1,7 @@
 import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   ScrollView,
@@ -12,12 +12,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { useAppTheme } from "../../components/app-theme-provider";
 import { auth, db } from "../../firebase";
 import { parseBookingOrders, type BookingOrder } from "../../utils/bookings";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
 import { getProfileDisplayName } from "../../utils/profile-info";
 import { parseSavedTrips, type SavedTrip } from "../../utils/saved-trips";
-import React from "react";
 
 const FILTER_OPTIONS = [
   { id: "all", label: "All" },
@@ -39,6 +39,7 @@ function formatSavedDate(value: number) {
 
 export default function SavedTabScreen() {
   const router = useRouter();
+  const { colors, isDark } = useAppTheme();
   const [loading, setLoading] = useState(true);
   const [profileName, setProfileName] = useState("Traveler");
   const [bookingOrders, setBookingOrders] = useState<BookingOrder[]>([]);
@@ -115,20 +116,26 @@ export default function SavedTabScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loader} edges={["top", "left", "right"]}>
+      <SafeAreaView
+        style={[styles.loader, { backgroundColor: colors.screenSoft }]}
+        edges={["top", "left", "right"]}
+      >
         <ActivityIndicator size="large" color="#639922" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
+    <SafeAreaView
+      style={[styles.screen, { backgroundColor: colors.screenSoft }]}
+      edges={["top", "left", "right"]}
+    >
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.hero}>
-          <Text style={styles.kicker}>Saved</Text>
+        <View style={[styles.hero, { backgroundColor: colors.heroAlt }]}>
+          <Text style={[styles.kicker, { color: isDark ? "#B7E07C" : "#D6E8AE" }]}>Saved</Text>
           <Text style={styles.title}>Запазени маршрути за {profileName}</Text>
           <Text style={styles.subtitle}>
             Тук събираме trip идеи от Discover и AI маршрутите от Home на едно място.
@@ -180,21 +187,35 @@ export default function SavedTabScreen() {
         </View>
 
       {error ? (
-        <View style={styles.errorCard}>
+        <View
+          style={[
+            styles.errorCard,
+            { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
+          ]}
+        >
           <Text style={styles.errorTitle}>Не успяхме да заредим запазените трипове</Text>
-          <Text style={styles.errorText}>{error}</Text>
+          <Text style={[styles.errorText, { color: colors.errorText }]}>{error}</Text>
         </View>
       ) : null}
 
       {!error && filteredBookingOrders.length > 0 ? (
         <View style={styles.bookingsSection}>
-          <Text style={styles.bookingsSectionTitle}>Booked in app</Text>
-          <Text style={styles.bookingsSectionSubtitle}>
+          <Text style={[styles.bookingsSectionTitle, { color: colors.textPrimary }]}>Booked in app</Text>
+          <Text style={[styles.bookingsSectionSubtitle, { color: colors.textSecondary }]}>
             Потвърдените transport и stay резервации се пазят тук.
           </Text>
 
           {filteredBookingOrders.map((booking) => (
-            <View key={booking.id} style={styles.bookingCard}>
+            <View
+              key={booking.id}
+              style={[
+                styles.bookingCard,
+                {
+                  backgroundColor: colors.warningBackground,
+                  borderColor: colors.warningBorder,
+                },
+              ]}
+            >
               <View style={styles.bookingTopRow}>
                 <View style={styles.bookingPaidBadge}>
                   <Text style={styles.bookingPaidBadgeText}>Paid</Text>
@@ -245,16 +266,22 @@ export default function SavedTabScreen() {
       ) : null}
 
       {!error && filteredBookingOrders.length === 0 && filteredSavedTrips.length === 0 ? (
-        <View style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>Няма елементи за този филтър</Text>
-          <Text style={styles.emptyText}>
+        <View style={[styles.emptyCard, { backgroundColor: colors.cardAlt }]}>
+          <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>Няма елементи за този филтър</Text>
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
             Смени dropdown филтъра или запази нов trip / booking, за да се появи тук.
           </Text>
         </View>
       ) : null}
 
         {filteredSavedTrips.map((trip) => (
-          <View key={trip.id} style={styles.tripCard}>
+          <View
+            key={trip.id}
+            style={[
+              styles.tripCard,
+              { backgroundColor: colors.cardAlt, borderColor: colors.border },
+            ]}
+          >
           <View style={styles.cardTopRow}>
             <View
               style={[

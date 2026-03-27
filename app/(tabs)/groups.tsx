@@ -1,5 +1,6 @@
 import { FirebaseError } from "firebase/app";
 import { MaterialIcons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import {
@@ -9,8 +10,9 @@ import {
   runTransaction,
   serverTimestamp,
   setDoc,
+  writeBatch,
 } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -23,9 +25,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { useAppTheme } from "../../components/app-theme-provider";
 import { auth, db } from "../../firebase";
 import {
   createSuggestedGroupKey,
+  deleteGroupWithMessages,
   normalizeGroupJoinKey,
   parseTravelGroup,
   sortGroupsByCreatedAt,
@@ -37,9 +41,15 @@ import {
   parsePublicProfile,
   type PublicProfile,
 } from "../../utils/public-profiles";
+import {
+  parseTripRequest,
+  sortTripRequestsByActivity,
+  type TripRequest,
+} from "../../utils/trip-requests";
 
 type AvatarProps = {
   label: string;
+  photoUrl?: string;
   size?: number;
   subtitle?: string;
 };
@@ -53,6 +63,7 @@ type ComposerUserRowProps = {
 type GroupRowProps = {
   actionLabel?: string;
   actionLoading?: boolean;
+  actionVariant?: "primary" | "danger";
   badge?: string;
   group: TravelGroup;
   onActionPress?: () => void;
@@ -61,14 +72,25 @@ type GroupRowProps = {
   rightMeta: string;
 };
 
+type TripRequestCardProps = {
+  currentUserId: string;
+  onClosePress: () => void;
+  onCreateGroupPress: () => void;
+  onToggleInterestPress: () => void;
+  request: TripRequest;
+  updating: boolean;
+};
+
 function sanitizeString(value: string) {
   return value.trim().toLowerCase();
 }
 
-function getGroupsErrorMessage(error: unknown, action: "read" | "write") {
+function getGroupsErrorMessage(error: unknown, action: "read" | "write" | "delete") {
   if (!(error instanceof FirebaseError)) {
     return action === "write"
       ? "Не успяхме да запазим групата. Опитай отново."
+      : action === "delete"
+        ? "Не успяхме да изтрием групата. Опитай отново."
       : "Не успяхме да заредим групите. Опитай отново.";
   }
 
@@ -76,6 +98,8 @@ function getGroupsErrorMessage(error: unknown, action: "read" | "write") {
     case "permission-denied":
       return action === "write"
         ? "Firestore rules блокират промяната на групите. Обнови правилата и опитай пак."
+        : action === "delete"
+          ? "Firestore rules блокират изтриването на групата. Обнови правилата и опитай пак."
         : "Firestore rules блокират зареждането на групите. Обнови правилата и опитай пак.";
     case "failed-precondition":
       return "Firestore Database още не е създадена. Създай Firestore Database в Firebase Console.";
@@ -84,6 +108,8 @@ function getGroupsErrorMessage(error: unknown, action: "read" | "write") {
     default:
       return action === "write"
         ? "Не успяхме да запазим групата. Опитай отново."
+        : action === "delete"
+          ? "Не успяхме да изтрием групата. Опитай отново."
         : "Не успяхме да заредим групите. Опитай отново.";
   }
 }
@@ -147,7 +173,7 @@ function matchesQuery(source: string[], query: string) {
   return source.some((entry) => sanitizeString(entry).includes(normalizedQuery));
 }
 
-function Avatar({ label, size = 72, subtitle }: AvatarProps) {
+function Avatar({ label, photoUrl, size = 72, subtitle }: AvatarProps) {
   return (
     <View style={styles.avatarWrap}>
       <View
@@ -156,9 +182,13 @@ function Avatar({ label, size = 72, subtitle }: AvatarProps) {
           { backgroundColor: getAvatarColor(label), height: size, width: size, borderRadius: size / 2 },
         ]}
       >
-        <Text style={[styles.avatarText, { fontSize: Math.max(16, size * 0.26) }]}>
-          {getInitials(label)}
-        </Text>
+        {photoUrl ? (
+          <Image contentFit="cover" source={{ uri: photoUrl }} style={styles.avatarImage} />
+        ) : (
+          <Text style={[styles.avatarText, { fontSize: Math.max(16, size * 0.26) }]}>
+            {getInitials(label)}
+          </Text>
+        )}
       </View>
       {subtitle ? <Text style={styles.avatarSubtitle}>{subtitle}</Text> : null}
     </View>
@@ -168,7 +198,11 @@ function Avatar({ label, size = 72, subtitle }: AvatarProps) {
 function ComposerUserRow({ profile, selected, onPress }: ComposerUserRowProps) {
   return (
     <TouchableOpacity activeOpacity={0.9} onPress={onPress} style={styles.composerUserRow}>
-      <Avatar label={profile.displayName || profile.username || "Traveler"} size={48} />
+      <Avatar
+        label={profile.displayName || profile.username || "Traveler"}
+        photoUrl={profile.photoUrl}
+        size={48}
+      />
       <View style={styles.composerUserTextWrap}>
         <Text style={styles.composerUserName}>{profile.displayName}</Text>
         <Text style={styles.composerUserMeta}>
@@ -186,6 +220,7 @@ function ComposerUserRow({ profile, selected, onPress }: ComposerUserRowProps) {
 function GroupRow({
   actionLabel,
   actionLoading = false,
+  actionVariant = "primary",
   badge,
   group,
   onActionPress,
@@ -237,7 +272,10 @@ function GroupRow({
           activeOpacity={0.9}
           disabled={actionLoading}
           onPress={onActionPress}
-          style={styles.rowActionButton}
+          style={[
+            styles.rowActionButton,
+            actionVariant === "danger" && styles.rowActionButtonDanger,
+          ]}
         >
           <Text style={styles.rowActionText}>
             {actionLoading ? "..." : actionLabel}
@@ -248,21 +286,194 @@ function GroupRow({
   );
 }
 
+function TripRequestCard({
+  currentUserId,
+  onClosePress,
+  onCreateGroupPress,
+  onToggleInterestPress,
+  request,
+  updating,
+}: TripRequestCardProps) {
+  const { colors, isDark } = useAppTheme();
+  const isCreator = request.creatorId === currentUserId;
+  const isInterested = request.interestedUserIds.includes(currentUserId);
+  const interestedCount = Math.max(1, request.interestedUserIds.length);
+
+  return (
+    <View
+      style={[
+        styles.requestCard,
+        {
+          backgroundColor: colors.card,
+          borderColor: colors.border,
+          shadowColor: isDark ? "#000000" : "#1E2A12",
+        },
+      ]}
+    >
+      <View style={styles.requestCardTopRow}>
+        <View style={styles.requestCardTitleWrap}>
+          <Text style={[styles.requestCardEyebrow, { color: colors.accent }]}>
+            Trip request
+          </Text>
+          <Text style={[styles.requestCardTitle, { color: colors.textPrimary }]}>
+            {request.destination}
+          </Text>
+          <Text style={[styles.requestCardCreator, { color: colors.textSecondary }]}>
+            {request.creatorLabel} is looking for travel buddies
+          </Text>
+        </View>
+        <View
+          style={[
+            styles.requestCountBadge,
+            { backgroundColor: colors.accentMuted, borderColor: colors.border },
+          ]}
+        >
+          <MaterialIcons color={colors.accent} name="groups" size={16} />
+          <Text style={[styles.requestCountText, { color: colors.textPrimary }]}>
+            {interestedCount}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.requestChipsRow}>
+        <View
+          style={[
+            styles.requestChip,
+            { backgroundColor: colors.accentMuted, borderColor: colors.border },
+          ]}
+        >
+          <MaterialIcons color={colors.accent} name="payments" size={15} />
+          <Text style={[styles.requestChipText, { color: colors.textPrimary }]}>
+            {request.budgetLabel}
+          </Text>
+        </View>
+        <View
+          style={[
+            styles.requestChip,
+            { backgroundColor: colors.warningBackground, borderColor: colors.warningBorder },
+          ]}
+        >
+          <MaterialIcons color={colors.warningText} name="schedule" size={15} />
+          <Text style={[styles.requestChipText, { color: colors.textPrimary }]}>
+            {request.timingLabel}
+          </Text>
+        </View>
+        <View
+          style={[
+            styles.requestChip,
+            { backgroundColor: colors.cardAlt, borderColor: colors.border },
+          ]}
+        >
+          <MaterialIcons color={colors.textMuted} name="airline-seat-recline-normal" size={15} />
+          <Text style={[styles.requestChipText, { color: colors.textPrimary }]}>
+            {request.travelersLabel}
+          </Text>
+        </View>
+      </View>
+
+      <Text
+        numberOfLines={3}
+        style={[styles.requestCardNote, { color: colors.textSecondary }]}
+      >
+        {request.note || "Open vibe check: food, route, budget and timing can be refined with the group."}
+      </Text>
+
+      <View style={styles.requestCardFooter}>
+        <Text style={[styles.requestFooterText, { color: colors.textMuted }]}>
+          {isCreator
+            ? "You created this request."
+            : isInterested
+              ? "You already joined the interest list."
+              : "Tap in if you want to join this trip idea."}
+        </Text>
+
+        <View style={styles.requestActionsRow}>
+          {isCreator ? (
+            <>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                disabled={updating}
+                onPress={onCreateGroupPress}
+                style={[
+                  styles.requestPrimaryButton,
+                  { backgroundColor: colors.accent },
+                  updating && styles.requestButtonDisabled,
+                ]}
+              >
+                <Text style={styles.requestPrimaryButtonText}>
+                  {updating ? "..." : "Create group"}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                disabled={updating}
+                onPress={onClosePress}
+                style={[
+                  styles.requestSecondaryButton,
+                  {
+                    backgroundColor: colors.warningBackground,
+                    borderColor: colors.warningBorder,
+                  },
+                  updating && styles.requestButtonDisabled,
+                ]}
+              >
+                <Text style={[styles.requestSecondaryButtonText, { color: colors.warningText }]}>
+                  Close
+                </Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <TouchableOpacity
+              activeOpacity={0.9}
+              disabled={updating}
+              onPress={onToggleInterestPress}
+              style={[
+                styles.requestPrimaryButton,
+                {
+                  backgroundColor: isInterested ? colors.cardAlt : colors.accent,
+                  borderColor: isInterested ? colors.border : colors.accent,
+                  borderWidth: isInterested ? 1 : 0,
+                },
+                updating && styles.requestButtonDisabled,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.requestPrimaryButtonText,
+                  { color: isInterested ? colors.textPrimary : "#FFFFFF" },
+                ]}
+              >
+                {updating ? "..." : isInterested ? "Interested" : "I'm in"}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    </View>
+  );
+}
+
 export default function GroupsTabScreen() {
   const router = useRouter();
+  const { colors } = useAppTheme();
 
   const [user, setUser] = useState<User | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [loadingGroups, setLoadingGroups] = useState(true);
   const [loadingPublicProfiles, setLoadingPublicProfiles] = useState(true);
+  const [loadingTripRequests, setLoadingTripRequests] = useState(true);
   const [savingGroup, setSavingGroup] = useState(false);
+  const [savingTripRequest, setSavingTripRequest] = useState(false);
   const [joiningGroupId, setJoiningGroupId] = useState<string | null>(null);
   const [joiningByKey, setJoiningByKey] = useState(false);
+  const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null);
+  const [updatingTripRequestId, setUpdatingTripRequestId] = useState<string | null>(null);
 
   const [profileName, setProfileName] = useState("Traveler");
   const [username, setUsername] = useState("");
   const [groups, setGroups] = useState<TravelGroup[]>([]);
   const [publicProfiles, setPublicProfiles] = useState<PublicProfile[]>([]);
+  const [tripRequests, setTripRequests] = useState<TripRequest[]>([]);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [joinKeyValue, setJoinKeyValue] = useState("");
@@ -270,12 +481,20 @@ export default function GroupsTabScreen() {
   const [joinKeyModalVisible, setJoinKeyModalVisible] = useState(false);
 
   const [composerVisible, setComposerVisible] = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [groupDescription, setGroupDescription] = useState("");
   const [groupAccess, setGroupAccess] = useState<GroupAccessType>("public");
   const [groupJoinKey, setGroupJoinKey] = useState("");
   const [inviteSearchQuery, setInviteSearchQuery] = useState("");
   const [selectedInviteIds, setSelectedInviteIds] = useState<string[]>([]);
+  const [groupPendingDelete, setGroupPendingDelete] = useState<TravelGroup | null>(null);
+  const [requestComposerVisible, setRequestComposerVisible] = useState(false);
+  const [requestDestination, setRequestDestination] = useState("");
+  const [requestBudget, setRequestBudget] = useState("");
+  const [requestTiming, setRequestTiming] = useState("");
+  const [requestTravelers, setRequestTravelers] = useState("");
+  const [requestNote, setRequestNote] = useState("");
 
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -284,22 +503,27 @@ export default function GroupsTabScreen() {
     let unsubscribeProfile: (() => void) | null = null;
     let unsubscribeGroups: (() => void) | null = null;
     let unsubscribePublicProfiles: (() => void) | null = null;
+    let unsubscribeTripRequests: (() => void) | null = null;
 
     const unsubscribeAuth = onAuthStateChanged(auth, (nextUser) => {
       unsubscribeProfile?.();
       unsubscribeGroups?.();
       unsubscribePublicProfiles?.();
+      unsubscribeTripRequests?.();
       unsubscribeProfile = null;
       unsubscribeGroups = null;
       unsubscribePublicProfiles = null;
+      unsubscribeTripRequests = null;
 
       if (!nextUser) {
         setUser(null);
         setGroups([]);
         setPublicProfiles([]);
+        setTripRequests([]);
         setLoadingProfile(false);
         setLoadingGroups(false);
         setLoadingPublicProfiles(false);
+        setLoadingTripRequests(false);
         router.replace("/login");
         return;
       }
@@ -308,6 +532,7 @@ export default function GroupsTabScreen() {
       setLoadingProfile(true);
       setLoadingGroups(true);
       setLoadingPublicProfiles(true);
+      setLoadingTripRequests(true);
       setError("");
       setSuccessMessage("");
 
@@ -376,12 +601,33 @@ export default function GroupsTabScreen() {
           setLoadingPublicProfiles(false);
         }
       );
+
+      unsubscribeTripRequests = onSnapshot(
+        collection(db, "tripRequests"),
+        (requestsSnapshot) => {
+          const nextRequests = sortTripRequestsByActivity(
+            requestsSnapshot.docs.map((requestDocument) =>
+              parseTripRequest(
+                requestDocument.id,
+                requestDocument.data() as Record<string, unknown>
+              )
+            )
+          );
+          setTripRequests(nextRequests);
+          setLoadingTripRequests(false);
+        },
+        (nextError) => {
+          setError(getGroupsErrorMessage(nextError, "read"));
+          setLoadingTripRequests(false);
+        }
+      );
     });
 
     return () => {
       unsubscribeProfile?.();
       unsubscribeGroups?.();
       unsubscribePublicProfiles?.();
+      unsubscribeTripRequests?.();
       unsubscribeAuth();
     };
   }, [router]);
@@ -405,6 +651,10 @@ export default function GroupsTabScreen() {
           !group.memberIds.includes(userId) && group.invitedUserIds.includes(userId)
       ),
     [groups, userId]
+  );
+  const openTripRequests = useMemo(
+    () => tripRequests.filter((request) => request.status === "open"),
+    [tripRequests]
   );
   const searchedPublicGroups = useMemo(
     () =>
@@ -434,7 +684,6 @@ export default function GroupsTabScreen() {
       Object.fromEntries(publicProfiles.map((profile) => [profile.uid, profile])),
     [publicProfiles]
   );
-
   const clearFeedback = () => {
     setError("");
     setSuccessMessage("");
@@ -456,6 +705,21 @@ export default function GroupsTabScreen() {
     setSelectedInviteIds([]);
   };
 
+  const resetRequestComposer = () => {
+    setRequestDestination("");
+    setRequestBudget("");
+    setRequestTiming("");
+    setRequestTravelers("");
+    setRequestNote("");
+  };
+
+  const openDeleteModal = (group: TravelGroup) => {
+    setActionMenuVisible(false);
+    setGroupPendingDelete(group);
+    clearFeedback();
+    setDeleteModalVisible(true);
+  };
+
   const openComposer = (preselectedUserId?: string) => {
     resetComposer();
     setActionMenuVisible(false);
@@ -467,6 +731,13 @@ export default function GroupsTabScreen() {
 
     clearFeedback();
     setComposerVisible(true);
+  };
+
+  const openRequestComposer = () => {
+    resetRequestComposer();
+    setActionMenuVisible(false);
+    clearFeedback();
+    setRequestComposerVisible(true);
   };
 
   const toggleInvite = (profileId: string) => {
@@ -611,56 +882,296 @@ export default function GroupsTabScreen() {
     }
   };
 
-  const loading = loadingProfile || loadingGroups || loadingPublicProfiles;
+  const handleCreateTripRequest = async () => {
+    if (!user) {
+      return;
+    }
+
+    const trimmedDestination = requestDestination.trim();
+    const trimmedBudget = requestBudget.trim();
+    const trimmedTiming = requestTiming.trim();
+    const trimmedTravelers = requestTravelers.trim();
+    const trimmedNote = requestNote.trim();
+
+    if (trimmedDestination.length < 2) {
+      setError("Добави дестинация за request-а.");
+      setSuccessMessage("");
+      return;
+    }
+
+    try {
+      setSavingTripRequest(true);
+      clearFeedback();
+
+      const newRequestRef = doc(collection(db, "tripRequests"));
+
+      await setDoc(newRequestRef, {
+        budgetLabel: trimmedBudget || "Open budget",
+        createdAt: serverTimestamp(),
+        creatorId: user.uid,
+        creatorLabel: profileName,
+        destination: trimmedDestination,
+        groupId: null,
+        interestedUserIds: [user.uid],
+        note: trimmedNote,
+        status: "open",
+        timingLabel: trimmedTiming || "Flexible timing",
+        travelersLabel: trimmedTravelers || "2-4 people",
+        updatedAt: serverTimestamp(),
+      });
+
+      resetRequestComposer();
+      setRequestComposerVisible(false);
+      setSuccessMessage("Trip request-ът е публикуван.");
+    } catch (nextError) {
+      setError(getGroupsErrorMessage(nextError, "write"));
+    } finally {
+      setSavingTripRequest(false);
+    }
+  };
+
+  const toggleTripRequestInterest = async (request: TripRequest) => {
+    if (!user) {
+      return;
+    }
+
+    try {
+      setUpdatingTripRequestId(request.id);
+      clearFeedback();
+
+      await runTransaction(db, async (transaction) => {
+        const requestRef = doc(db, "tripRequests", request.id);
+        const requestSnapshot = await transaction.get(requestRef);
+
+        if (!requestSnapshot.exists()) {
+          throw new Error("missing-request");
+        }
+
+        const currentRequest = parseTripRequest(
+          requestSnapshot.id,
+          requestSnapshot.data() as Record<string, unknown>
+        );
+
+        if (currentRequest.status !== "open") {
+          throw new Error("closed-request");
+        }
+
+        const nextInterestedUserIds = currentRequest.interestedUserIds.includes(user.uid)
+          ? currentRequest.interestedUserIds.filter((currentId) => currentId !== user.uid)
+          : [...currentRequest.interestedUserIds, user.uid];
+
+        transaction.update(requestRef, {
+          interestedUserIds: nextInterestedUserIds,
+          updatedAt: serverTimestamp(),
+        });
+      });
+    } catch (nextError) {
+      setError(getGroupsErrorMessage(nextError, "write"));
+    } finally {
+      setUpdatingTripRequestId(null);
+    }
+  };
+
+  const closeTripRequest = async (request: TripRequest) => {
+    if (!user || request.creatorId !== user.uid) {
+      setError("Само creator-ът може да затвори request-а.");
+      setSuccessMessage("");
+      return;
+    }
+
+    try {
+      setUpdatingTripRequestId(request.id);
+      clearFeedback();
+
+      await runTransaction(db, async (transaction) => {
+        const requestRef = doc(db, "tripRequests", request.id);
+        const requestSnapshot = await transaction.get(requestRef);
+
+        if (!requestSnapshot.exists()) {
+          throw new Error("missing-request");
+        }
+
+        transaction.update(requestRef, {
+          status: "closed",
+          updatedAt: serverTimestamp(),
+        });
+      });
+
+      setSuccessMessage("Trip request-ът е затворен.");
+    } catch (nextError) {
+      setError(getGroupsErrorMessage(nextError, "write"));
+    } finally {
+      setUpdatingTripRequestId(null);
+    }
+  };
+
+  const createGroupFromRequest = async (request: TripRequest) => {
+    if (!user || request.creatorId !== user.uid) {
+      setError("Само creator-ът може да превърне request-а в група.");
+      setSuccessMessage("");
+      return;
+    }
+
+    try {
+      setUpdatingTripRequestId(request.id);
+      clearFeedback();
+
+      const newGroupRef = doc(collection(db, "groups"));
+      const requestRef = doc(db, "tripRequests", request.id);
+      const batch = writeBatch(db);
+      const invitedUserIds = Array.from(
+        new Set(request.interestedUserIds.filter((inviteId) => inviteId !== user.uid))
+      );
+      const groupDescriptionParts = [
+        request.note,
+        request.timingLabel,
+        request.travelersLabel,
+        request.budgetLabel,
+      ].filter(Boolean);
+
+      batch.set(newGroupRef, {
+        accessType: "public",
+        createdAt: serverTimestamp(),
+        creatorId: user.uid,
+        creatorLabel: profileName,
+        description: groupDescriptionParts.join(" • "),
+        invitedUserIds,
+        joinKeyNormalized: null,
+        memberCount: 1,
+        memberIds: [user.uid],
+        name: request.destination,
+        updatedAt: serverTimestamp(),
+      });
+
+      batch.update(requestRef, {
+        groupId: newGroupRef.id,
+        status: "closed",
+        updatedAt: serverTimestamp(),
+      });
+
+      await batch.commit();
+
+      setSuccessMessage("Създадохме група от trip request-а.");
+      openGroupChat(newGroupRef.id);
+    } catch (nextError) {
+      setError(getGroupsErrorMessage(nextError, "write"));
+    } finally {
+      setUpdatingTripRequestId(null);
+    }
+  };
+
+  const handleDeleteGroup = async () => {
+    if (!user || !groupPendingDelete) {
+      return;
+    }
+
+    if (groupPendingDelete.creatorId !== user.uid) {
+      setDeleteModalVisible(false);
+      setGroupPendingDelete(null);
+      setError("Само creator-ът може да изтрива групата.");
+      setSuccessMessage("");
+      return;
+    }
+
+    try {
+      setDeletingGroupId(groupPendingDelete.id);
+      clearFeedback();
+      await deleteGroupWithMessages(db, groupPendingDelete.id);
+      setDeleteModalVisible(false);
+      setGroupPendingDelete(null);
+      setSuccessMessage("Групата беше изтрита.");
+    } catch (nextError) {
+      setError(getGroupsErrorMessage(nextError, "delete"));
+    } finally {
+      setDeletingGroupId(null);
+    }
+  };
+
+  const loading =
+    loadingProfile || loadingGroups || loadingPublicProfiles || loadingTripRequests;
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loader} edges={["top", "left", "right"]}>
+      <SafeAreaView
+        style={[styles.loader, { backgroundColor: colors.screenSoft }]}
+        edges={["top", "left", "right"]}
+      >
         <ActivityIndicator size="large" color="#5C8C1F" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
+    <SafeAreaView
+      style={[styles.screen, { backgroundColor: colors.screenSoft }]}
+      edges={["top", "left", "right"]}
+    >
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.topBar}>
           <View style={styles.topBarTextWrap}>
-            <Text style={styles.pageTitle}>Groups</Text>
-            <Text style={styles.pageSubtitle}>@{userHandle} • {profileName}</Text>
+            <Text style={[styles.pageTitle, { color: colors.textPrimary }]}>Groups</Text>
+            <Text style={[styles.pageSubtitle, { color: colors.textSecondary }]}>
+              @{userHandle} • {profileName}
+            </Text>
           </View>
           <TouchableOpacity
             activeOpacity={0.9}
             onPress={() => setActionMenuVisible(true)}
-            style={styles.topBarCircleButton}
+            style={[
+              styles.topBarCircleButton,
+              {
+                backgroundColor: colors.accent,
+                borderColor: colors.centerButtonBorder,
+              },
+            ]}
           >
             <MaterialIcons color="#FFFFFF" name="add" size={28} />
           </TouchableOpacity>
         </View>
 
-        <View style={styles.searchShell}>
-          <MaterialIcons color="#7B8A6D" name="search" size={24} />
+        <View
+          style={[
+            styles.searchShell,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <MaterialIcons color={colors.textMuted} name="search" size={24} />
           <TextInput
             onChangeText={(value) => {
               setSearchQuery(value);
               clearFeedback();
             }}
             placeholder="Search public groups"
-            placeholderTextColor="#809071"
-            style={styles.searchInput}
+            placeholderTextColor={colors.inputPlaceholder}
+            style={[styles.searchInput, { color: colors.textPrimary }]}
             value={searchQuery}
           />
         </View>
 
         {error ? (
-          <View style={styles.feedbackCardError}>
-            <Text style={styles.feedbackTextError}>{error}</Text>
+          <View
+            style={[
+              styles.feedbackCardError,
+              { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
+            ]}
+          >
+            <Text style={[styles.feedbackTextError, { color: colors.errorText }]}>{error}</Text>
           </View>
         ) : null}
 
         {successMessage ? (
-          <View style={styles.feedbackCardSuccess}>
-            <Text style={styles.feedbackTextSuccess}>{successMessage}</Text>
+          <View
+            style={[
+              styles.feedbackCardSuccess,
+              { backgroundColor: colors.successBackground, borderColor: colors.successBorder },
+            ]}
+          >
+            <Text style={[styles.feedbackTextSuccess, { color: colors.successText }]}>
+              {successMessage}
+            </Text>
           </View>
         ) : null}
 
@@ -679,6 +1190,7 @@ export default function GroupsTabScreen() {
             >
               <Avatar
                 label={profile.displayName || profile.username || "Traveler"}
+                photoUrl={profile.photoUrl}
                 size={74}
                 subtitle=""
               />
@@ -691,6 +1203,77 @@ export default function GroupsTabScreen() {
             </TouchableOpacity>
           ))}
         </ScrollView>
+
+        {!searchQuery.trim() ? (
+          <View style={styles.sectionBlock}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Trip requests</Text>
+              <Text style={styles.sectionMeta}>{openTripRequests.length} open</Text>
+            </View>
+            <Text style={[styles.sectionSupportText, { color: colors.textSecondary }]}>
+              Quick travel ideas that can turn into a real group when the vibe is right.
+            </Text>
+
+            {openTripRequests.length === 0 ? (
+              <View
+                style={[
+                  styles.requestEmptyState,
+                  {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.requestEmptyIcon,
+                    { backgroundColor: colors.accentMuted, borderColor: colors.border },
+                  ]}
+                >
+                  <MaterialIcons color={colors.accent} name="travel-explore" size={28} />
+                </View>
+                <Text style={[styles.requestEmptyTitle, { color: colors.textPrimary }]}>
+                  Няма active trip requests
+                </Text>
+                <Text style={[styles.requestEmptyText, { color: colors.textSecondary }]}>
+                  Пусни идея за trip, събери interested users и после я превърни в група.
+                </Text>
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={openRequestComposer}
+                  style={[styles.inlineCreateRequestButton, { backgroundColor: colors.accent }]}
+                >
+                  <MaterialIcons color="#FFFFFF" name="add" size={18} />
+                  <Text style={styles.inlineCreateRequestButtonText}>New trip request</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.requestCardsContent}
+              >
+                {openTripRequests.map((request) => (
+                  <TripRequestCard
+                    currentUserId={userId}
+                    key={request.id}
+                    onClosePress={() => {
+                      void closeTripRequest(request);
+                    }}
+                    onCreateGroupPress={() => {
+                      void createGroupFromRequest(request);
+                    }}
+                    onToggleInterestPress={() => {
+                      void toggleTripRequestInterest(request);
+                    }}
+                    request={request}
+                    updating={updatingTripRequestId === request.id}
+                  />
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        ) : null}
 
         {searchQuery.trim() ? (
           <View style={styles.sectionBlock}>
@@ -773,8 +1356,14 @@ export default function GroupsTabScreen() {
             return (
               <GroupRow
                 badge={group.accessType === "private" ? "Private" : "Public"}
+                actionLabel={group.creatorId === userId ? "Delete" : undefined}
+                actionLoading={deletingGroupId === group.id}
+                actionVariant="danger"
                 group={group}
                 key={group.id}
+                onActionPress={
+                  group.creatorId === userId ? () => openDeleteModal(group) : undefined
+                }
                 onPress={() => openGroupChat(group.id)}
                 preview={previewText}
                 rightMeta={formatRelativeTime(group.updatedAtMs ?? group.createdAtMs)}
@@ -866,6 +1455,84 @@ export default function GroupsTabScreen() {
                 </Text>
               </View>
             </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={openRequestComposer}
+              style={styles.actionMenuItem}
+            >
+              <View style={[styles.actionMenuIconWrap, styles.actionMenuIconWrapRequest]}>
+                <MaterialIcons color="#FFFFFF" name="tips-and-updates" size={18} />
+              </View>
+              <View style={styles.actionMenuTextWrap}>
+                <Text style={styles.actionMenuTitle}>Create trip request</Text>
+                <Text style={styles.actionMenuSubtitle}>
+                  Post a travel idea and collect interested people first.
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        animationType="slide"
+        onRequestClose={() => {
+          if (deletingGroupId) {
+            return;
+          }
+
+          setDeleteModalVisible(false);
+          setGroupPendingDelete(null);
+        }}
+        transparent
+        visible={deleteModalVisible}
+      >
+        <View style={[styles.modalBackdrop, { backgroundColor: colors.modalOverlay }]}>
+          <View style={styles.joinKeyModalSheet}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Delete group</Text>
+                <Text style={styles.modalSubtitle}>
+                  Only the creator can remove an outdated group for everyone.
+                </Text>
+              </View>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                disabled={!!deletingGroupId}
+                onPress={() => {
+                  setDeleteModalVisible(false);
+                  setGroupPendingDelete(null);
+                }}
+                style={styles.modalClose}
+              >
+                <MaterialIcons color="#3E5B21" name="close" size={22} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.deleteSummaryCard}>
+              <Text style={styles.deleteSummaryTitle}>{groupPendingDelete?.name ?? "Group"}</Text>
+              <Text style={styles.deleteSummaryText}>
+                This will permanently remove the group chat and all messages for every member.
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              activeOpacity={0.9}
+              disabled={!!deletingGroupId}
+              onPress={() => {
+                void handleDeleteGroup();
+              }}
+              style={[
+                styles.createButton,
+                styles.deleteButton,
+                deletingGroupId && styles.createButtonDisabled,
+              ]}
+            >
+              <Text style={styles.createButtonText}>
+                {deletingGroupId ? "Deleting..." : "Delete group"}
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -876,7 +1543,7 @@ export default function GroupsTabScreen() {
         transparent
         visible={joinKeyModalVisible}
       >
-        <View style={styles.modalBackdrop}>
+        <View style={[styles.modalBackdrop, { backgroundColor: colors.modalOverlay }]}>
           <View style={styles.joinKeyModalSheet}>
             <View style={styles.modalHeader}>
               <View>
@@ -926,7 +1593,7 @@ export default function GroupsTabScreen() {
         transparent
         visible={composerVisible}
       >
-        <View style={styles.modalBackdrop}>
+        <View style={[styles.modalBackdrop, { backgroundColor: colors.modalOverlay }]}>
           <View style={styles.modalSheet}>
             <View style={styles.modalHeader}>
               <View>
@@ -1064,7 +1731,11 @@ export default function GroupsTabScreen() {
                         onPress={() => toggleInvite(inviteId)}
                         style={styles.selectedInviteChip}
                       >
-                        <Avatar label={invitedProfile.displayName} size={36} />
+                        <Avatar
+                          label={invitedProfile.displayName}
+                          photoUrl={invitedProfile.photoUrl}
+                          size={36}
+                        />
                         <Text style={styles.selectedInviteText}>
                           {invitedProfile.username || invitedProfile.displayName}
                         </Text>
@@ -1110,6 +1781,142 @@ export default function GroupsTabScreen() {
             >
               <Text style={styles.createButtonText}>
                 {savingGroup ? "Creating..." : "Create group"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setRequestComposerVisible(false)}
+        transparent
+        visible={requestComposerVisible}
+      >
+        <View style={[styles.modalBackdrop, { backgroundColor: colors.modalOverlay }]}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>New trip request</Text>
+                <Text style={styles.modalSubtitle}>
+                  Tell the group tab where you want to go and what kind of people you want with you.
+                </Text>
+              </View>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() => setRequestComposerVisible(false)}
+                style={styles.modalClose}
+              >
+                <MaterialIcons color="#3E5B21" name="close" size={22} />
+              </TouchableOpacity>
+            </View>
+
+            {error ? (
+              <View
+                style={[
+                  styles.feedbackCardError,
+                  { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
+                ]}
+              >
+                <Text style={[styles.feedbackTextError, { color: colors.errorText }]}>{error}</Text>
+              </View>
+            ) : null}
+
+            {successMessage ? (
+              <View
+                style={[
+                  styles.feedbackCardSuccess,
+                  { backgroundColor: colors.successBackground, borderColor: colors.successBorder },
+                ]}
+              >
+                <Text style={[styles.feedbackTextSuccess, { color: colors.successText }]}>
+                  {successMessage}
+                </Text>
+              </View>
+            ) : null}
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <TextInput
+                onChangeText={setRequestDestination}
+                placeholder="Destination"
+                placeholderTextColor="#809071"
+                style={styles.modalInput}
+                value={requestDestination}
+              />
+
+              <View style={styles.requestInputGrid}>
+                <TextInput
+                  onChangeText={setRequestBudget}
+                  placeholder="Budget"
+                  placeholderTextColor="#809071"
+                  style={[styles.modalInput, styles.requestGridInput]}
+                  value={requestBudget}
+                />
+                <TextInput
+                  onChangeText={setRequestTiming}
+                  placeholder="When"
+                  placeholderTextColor="#809071"
+                  style={[styles.modalInput, styles.requestGridInput]}
+                  value={requestTiming}
+                />
+              </View>
+
+              <TextInput
+                onChangeText={setRequestTravelers}
+                placeholder="How many people"
+                placeholderTextColor="#809071"
+                style={styles.modalInput}
+                value={requestTravelers}
+              />
+
+              <TextInput
+                multiline
+                numberOfLines={4}
+                onChangeText={setRequestNote}
+                placeholder="What kind of trip is it? Food, beaches, budget vibe, roadtrip energy..."
+                placeholderTextColor="#809071"
+                style={[styles.modalInput, styles.modalTextarea]}
+                textAlignVertical="top"
+                value={requestNote}
+              />
+
+              <View style={styles.requestPreviewCard}>
+                <Text style={styles.requestPreviewKicker}>Preview</Text>
+                <Text style={styles.requestPreviewTitle}>
+                  {requestDestination.trim() || "Your next trip idea"}
+                </Text>
+                <View style={styles.requestPreviewChips}>
+                  <View style={styles.requestPreviewChip}>
+                    <Text style={styles.requestPreviewChipText}>
+                      {requestBudget.trim() || "Open budget"}
+                    </Text>
+                  </View>
+                  <View style={styles.requestPreviewChip}>
+                    <Text style={styles.requestPreviewChipText}>
+                      {requestTiming.trim() || "Flexible timing"}
+                    </Text>
+                  </View>
+                  <View style={styles.requestPreviewChip}>
+                    <Text style={styles.requestPreviewChipText}>
+                      {requestTravelers.trim() || "2-4 people"}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.requestPreviewNote}>
+                  {requestNote.trim() ||
+                    "People will see this inside Groups and can mark themselves as interested before you open a full chat."}
+                </Text>
+              </View>
+            </ScrollView>
+
+            <TouchableOpacity
+              activeOpacity={0.9}
+              disabled={savingTripRequest}
+              onPress={handleCreateTripRequest}
+              style={[styles.createButton, savingTripRequest && styles.createButtonDisabled]}
+            >
+              <Text style={styles.createButtonText}>
+                {savingTripRequest ? "Publishing..." : "Publish request"}
               </Text>
             </TouchableOpacity>
           </View>
@@ -1235,6 +2042,11 @@ const styles = StyleSheet.create({
   avatarCircle: {
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
+  },
+  avatarImage: {
+    height: "100%",
+    width: "100%",
   },
   avatarText: {
     color: "#FFFFFF",
@@ -1277,6 +2089,169 @@ const styles = StyleSheet.create({
     color: "#5F6E53",
     fontSize: 14,
     fontWeight: "700",
+  },
+  sectionSupportText: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 4,
+  },
+  requestCardsContent: {
+    paddingRight: 20,
+  },
+  requestCard: {
+    borderRadius: 28,
+    borderWidth: 1,
+    marginRight: 14,
+    minHeight: 252,
+    padding: 18,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.1,
+    shadowRadius: 18,
+    width: 300,
+  },
+  requestCardTopRow: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  requestCardTitleWrap: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  requestCardEyebrow: {
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0.7,
+    textTransform: "uppercase",
+  },
+  requestCardTitle: {
+    fontSize: 24,
+    fontWeight: "800",
+    lineHeight: 28,
+    marginTop: 6,
+  },
+  requestCardCreator: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 8,
+  },
+  requestCountBadge: {
+    alignItems: "center",
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  requestCountText: {
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  requestChipsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 14,
+  },
+  requestChip: {
+    alignItems: "center",
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  requestChipText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  requestCardNote: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 14,
+  },
+  requestCardFooter: {
+    marginTop: 16,
+  },
+  requestFooterText: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  requestActionsRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 12,
+  },
+  requestPrimaryButton: {
+    alignItems: "center",
+    borderRadius: 16,
+    justifyContent: "center",
+    minHeight: 46,
+    paddingHorizontal: 14,
+  },
+  requestPrimaryButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  requestSecondaryButton: {
+    alignItems: "center",
+    borderRadius: 16,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 46,
+    paddingHorizontal: 14,
+  },
+  requestSecondaryButtonText: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  requestButtonDisabled: {
+    opacity: 0.65,
+  },
+  requestEmptyState: {
+    alignItems: "center",
+    borderRadius: 28,
+    borderWidth: 1,
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+  },
+  requestEmptyIcon: {
+    alignItems: "center",
+    borderRadius: 22,
+    borderWidth: 1,
+    height: 62,
+    justifyContent: "center",
+    width: 62,
+  },
+  requestEmptyTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    marginTop: 14,
+    textAlign: "center",
+  },
+  requestEmptyText: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 8,
+    textAlign: "center",
+  },
+  inlineCreateRequestButton: {
+    alignItems: "center",
+    borderRadius: 16,
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  inlineCreateRequestButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "800",
   },
   groupRow: {
     alignItems: "center",
@@ -1360,6 +2335,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
+  rowActionButtonDanger: {
+    backgroundColor: "#B84B3A",
+  },
   rowActionText: {
     color: "#FFFFFF",
     fontSize: 13,
@@ -1434,6 +2412,9 @@ const styles = StyleSheet.create({
   actionMenuIconWrapAlt: {
     backgroundColor: "#BA7517",
   },
+  actionMenuIconWrapRequest: {
+    backgroundColor: "#246A7A",
+  },
   actionMenuTextWrap: {
     flex: 1,
     marginLeft: 12,
@@ -1465,6 +2446,25 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
     paddingHorizontal: 18,
     paddingTop: 18,
+  },
+  deleteSummaryCard: {
+    backgroundColor: "#FFF1EF",
+    borderColor: "#F0B6AE",
+    borderRadius: 18,
+    borderWidth: 1,
+    marginTop: 8,
+    padding: 14,
+  },
+  deleteSummaryTitle: {
+    color: "#8A3D35",
+    fontSize: 17,
+    fontWeight: "800",
+  },
+  deleteSummaryText: {
+    color: "#8A3D35",
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 8,
   },
   modalHeader: {
     alignItems: "center",
@@ -1504,6 +2504,59 @@ const styles = StyleSheet.create({
   },
   modalTextarea: {
     minHeight: 94,
+  },
+  requestInputGrid: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  requestGridInput: {
+    flex: 1,
+  },
+  requestPreviewCard: {
+    backgroundColor: "#F6F8EE",
+    borderColor: "#DDE8C7",
+    borderRadius: 22,
+    borderWidth: 1,
+    marginTop: 16,
+    padding: 16,
+  },
+  requestPreviewKicker: {
+    color: "#5C8C1F",
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+  },
+  requestPreviewTitle: {
+    color: "#29440F",
+    fontSize: 22,
+    fontWeight: "800",
+    marginTop: 6,
+  },
+  requestPreviewChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 14,
+  },
+  requestPreviewChip: {
+    backgroundColor: "#FFFFFF",
+    borderColor: "#DDE8C7",
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  requestPreviewChipText: {
+    color: "#4E6630",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  requestPreviewNote: {
+    color: "#5F6E53",
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 14,
   },
   accessRow: {
     flexDirection: "row",
@@ -1654,6 +2707,9 @@ const styles = StyleSheet.create({
   },
   createButtonDisabled: {
     opacity: 0.7,
+  },
+  deleteButton: {
+    backgroundColor: "#B84B3A",
   },
   createButtonText: {
     color: "#FFFFFF",

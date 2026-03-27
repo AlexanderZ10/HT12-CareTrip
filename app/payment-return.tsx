@@ -7,18 +7,24 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { auth } from "../firebase";
 import { buildBookingOrder, saveBookingForUser } from "../utils/bookings";
 import {
+  clearPendingStripeExpenseCheckout,
+  readPendingStripeExpenseCheckout,
+} from "../utils/pending-stripe-expense-checkout";
+import {
   clearPendingStripeCheckout,
   readPendingStripeCheckout,
 } from "../utils/pending-stripe-checkout";
+import { saveGroupExpenseRepayment } from "../utils/group-expense-repayments";
 import { verifyTestCheckoutSession } from "../utils/travel-offers";
 
 type ReturnStage = "processing" | "success" | "cancelled" | "error";
 
 type ReceiptState = {
-  destination: string;
+  kicker: string;
+  lines: string[];
   paymentIntentId: string;
-  paymentMethod: string;
-  processedAtLabel: string;
+  targetGroupId: string | null;
+  targetLabel: string;
   totalLabel: string;
 };
 
@@ -46,39 +52,68 @@ function formatCheckoutReference(value: string) {
   return `BK-${compactValue || "2475A1F9"}`;
 }
 
+function resolveParam(value: string | string[] | undefined) {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value[0] ?? "";
+  }
+
+  return "";
+}
+
 export default function PaymentReturnScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ checkout?: string | string[]; session_id?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    checkout?: string | string[];
+    kind?: string | string[];
+    session_id?: string | string[];
+  }>();
   const [stage, setStage] = useState<ReturnStage>("processing");
-  const [message, setMessage] = useState("Потвърждаваме Stripe checkout и запазваме резервацията.");
+  const [message, setMessage] = useState("Потвърждаваме Stripe checkout и довършваме действието.");
   const [receipt, setReceipt] = useState<ReceiptState | null>(null);
-  const checkoutState = useMemo(() => {
-    const checkoutValue = params.checkout;
-    const sessionIdValue = params.session_id;
+  const [returnTargetGroupId, setReturnTargetGroupId] = useState<string | null>(null);
+  const [returnTargetLabel, setReturnTargetLabel] = useState("Обратно към Home");
+  const returnState = useMemo(() => {
+    const kindValue = resolveParam(params.kind);
 
     return {
-      checkout:
-        typeof checkoutValue === "string"
-          ? checkoutValue
-          : Array.isArray(checkoutValue)
-            ? checkoutValue[0] ?? ""
-            : "",
-      sessionId:
-        typeof sessionIdValue === "string"
-          ? sessionIdValue
-          : Array.isArray(sessionIdValue)
-            ? sessionIdValue[0] ?? ""
-            : "",
+      checkout: resolveParam(params.checkout),
+      kind: kindValue === "expense-repayment" ? ("expense-repayment" as const) : ("booking" as const),
+      sessionId: resolveParam(params.session_id),
     };
-  }, [params.checkout, params.session_id]);
+  }, [params.checkout, params.kind, params.session_id]);
 
   useEffect(() => {
     let active = true;
 
-    if (checkoutState.checkout === "cancel") {
+    const resolveCancelState = () => {
+      if (returnState.kind === "expense-repayment") {
+        const pendingExpenseCheckout = readPendingStripeExpenseCheckout();
+        const targetGroupId = pendingExpenseCheckout?.groupId ?? null;
+
+        clearPendingStripeExpenseCheckout();
+        setReceipt(null);
+        setReturnTargetGroupId(targetGroupId);
+        setReturnTargetLabel(targetGroupId ? "Обратно към групата" : "Обратно към Home");
+        setStage("cancelled");
+        setMessage("Stripe checkout беше отказан. Expense repayment-ът не беше записан.");
+        return;
+      }
+
       clearPendingStripeCheckout();
+      setReceipt(null);
+      setReturnTargetGroupId(null);
+      setReturnTargetLabel("Обратно към Home");
       setStage("cancelled");
       setMessage("Stripe checkout беше отказан. Няма записана резервация.");
+    };
+
+    if (returnState.checkout === "cancel") {
+      resolveCancelState();
+
       return () => {
         active = false;
       };
@@ -91,13 +126,102 @@ export default function PaymentReturnScreen() {
 
       if (!nextUser) {
         setStage("error");
-        setMessage("Трябва да си логнат, за да завършим резервацията след Stripe checkout.");
+        setMessage("Трябва да си логнат, за да завършим Stripe checkout-а.");
         return;
       }
 
-      if (checkoutState.checkout !== "success" || !checkoutState.sessionId) {
+      if (returnState.checkout !== "success" || !returnState.sessionId) {
         setStage("error");
         setMessage("Stripe checkout не върна валиден session ID.");
+        return;
+      }
+
+      if (returnState.kind === "expense-repayment") {
+        const pendingExpenseCheckout = readPendingStripeExpenseCheckout();
+
+        if (!pendingExpenseCheckout) {
+          setStage("error");
+          setReturnTargetGroupId(null);
+          setReturnTargetLabel("Обратно към Home");
+          setMessage("Липсват запазените repayment данни. Върни се в групата и опитай отново.");
+          return;
+        }
+
+        setReturnTargetGroupId(pendingExpenseCheckout.groupId);
+        setReturnTargetLabel("Обратно към групата");
+
+        if (pendingExpenseCheckout.payerUserId !== nextUser.uid) {
+          setStage("error");
+          setMessage("Този Stripe checkout е свързан с друг user. Влез в правилния акаунт и опитай пак.");
+          return;
+        }
+
+        try {
+          const verification = await verifyTestCheckoutSession({
+            sessionId: returnState.sessionId,
+          });
+
+          if (!verification.paid || !verification.paymentIntentId) {
+            setStage("error");
+            setMessage("Stripe checkout не беше потвърден като платен.");
+            return;
+          }
+
+          await saveGroupExpenseRepayment({
+            amountValue: pendingExpenseCheckout.amountValue,
+            collectionMode: pendingExpenseCheckout.collectionMode,
+            expenseMessageId: pendingExpenseCheckout.expenseMessageId,
+            expenseTitle: pendingExpenseCheckout.expenseTitle,
+            groupId: pendingExpenseCheckout.groupId,
+            paidById: pendingExpenseCheckout.payerUserId,
+            paidByLabel: pendingExpenseCheckout.payerUserLabel,
+            paidToId: pendingExpenseCheckout.paidToId,
+            paidToLabel: pendingExpenseCheckout.paidToLabel,
+            paymentIntentId: verification.paymentIntentId,
+            paymentMethod: pendingExpenseCheckout.paymentMethod,
+            sessionId: returnState.sessionId,
+          });
+
+          clearPendingStripeExpenseCheckout();
+
+          if (!active) {
+            return;
+          }
+
+          setReceipt({
+            kicker: "Expense Repayment Receipt",
+            lines: [
+              `Група: ${pendingExpenseCheckout.groupName}`,
+              `Разход: ${pendingExpenseCheckout.expenseTitle}`,
+              pendingExpenseCheckout.collectionMode === "group-payment"
+                ? "Тип: Equal share in-app"
+                : `Към: ${pendingExpenseCheckout.paidToLabel}`,
+              `Метод: ${pendingExpenseCheckout.paymentMethod}`,
+              `Обработено на: ${formatProcessedAt(Date.now())}`,
+            ],
+            paymentIntentId: verification.paymentIntentId,
+            targetGroupId: pendingExpenseCheckout.groupId,
+            targetLabel: "Обратно към групата",
+            totalLabel: pendingExpenseCheckout.amountLabel,
+          });
+          setReturnTargetGroupId(pendingExpenseCheckout.groupId);
+          setReturnTargetLabel("Обратно към групата");
+          setStage("success");
+          setMessage(
+            pendingExpenseCheckout.collectionMode === "group-payment"
+              ? `Stripe test плащането е потвърдено и ${pendingExpenseCheckout.amountLabel} вече са отчетени като твоя equal share за ${pendingExpenseCheckout.expenseTitle}.`
+              : `Stripe test плащането е потвърдено и ${pendingExpenseCheckout.amountLabel} вече са отчетени към ${pendingExpenseCheckout.paidToLabel}.`
+          );
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message.trim() : "";
+          setStage("error");
+          setMessage(
+            errorMessage
+              ? `Не успяхме да финализираме Stripe repayment-а. ${errorMessage}`
+              : "Не успяхме да финализираме Stripe repayment-а."
+          );
+        }
+
         return;
       }
 
@@ -105,13 +229,15 @@ export default function PaymentReturnScreen() {
 
       if (!pendingCheckout) {
         setStage("error");
+        setReturnTargetGroupId(null);
+        setReturnTargetLabel("Обратно към Home");
         setMessage("Липсват запазените booking данни. Върни се в Home и опитай отново.");
         return;
       }
 
       try {
         const verification = await verifyTestCheckoutSession({
-          sessionId: checkoutState.sessionId,
+          sessionId: returnState.sessionId,
         });
 
         if (!verification.paid || !verification.paymentIntentId) {
@@ -147,12 +273,19 @@ export default function PaymentReturnScreen() {
         }
 
         setReceipt({
-          destination: pendingCheckout.destination,
+          kicker: "Stripe Test Receipt",
+          lines: [
+            `Дестинация: ${pendingCheckout.destination}`,
+            `Метод: ${pendingCheckout.paymentMethod}`,
+            `Обработено на: ${formatProcessedAt(Date.now())}`,
+          ],
           paymentIntentId: verification.paymentIntentId,
-          paymentMethod: pendingCheckout.paymentMethod,
-          processedAtLabel: formatProcessedAt(Date.now()),
+          targetGroupId: null,
+          targetLabel: "Обратно към Home",
           totalLabel: pendingCheckout.totalLabel,
         });
+        setReturnTargetGroupId(null);
+        setReturnTargetLabel("Обратно към Home");
         setStage("success");
         setMessage("Stripe test плащането е потвърдено и резервацията е записана в Saved.");
       } catch (error) {
@@ -170,7 +303,22 @@ export default function PaymentReturnScreen() {
       active = false;
       unsubscribe();
     };
-  }, [checkoutState.checkout, checkoutState.sessionId]);
+  }, [returnState.checkout, returnState.kind, returnState.sessionId]);
+
+  const handleBack = () => {
+    if (returnTargetGroupId) {
+      router.replace({
+        params: { groupId: returnTargetGroupId },
+        pathname: "/groups/[groupId]",
+      });
+      return;
+    }
+
+    router.replace("/home");
+  };
+
+  const buttonLabel =
+    receipt?.targetLabel ?? returnTargetLabel ?? (returnState.kind === "expense-repayment" ? "Обратно към групата" : "Обратно към Home");
 
   return (
     <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
@@ -185,14 +333,20 @@ export default function PaymentReturnScreen() {
 
         {stage === "success" ? (
           <>
-            <Text style={styles.title}>Плащането е потвърдено</Text>
+            <Text style={styles.title}>
+              {returnState.kind === "expense-repayment"
+                ? "Expense плащането е потвърдено"
+                : "Плащането е потвърдено"}
+            </Text>
             <Text style={styles.text}>{message}</Text>
             {receipt ? (
               <View style={styles.receiptCard}>
-                <Text style={styles.receiptTitle}>Stripe Test Receipt</Text>
-                <Text style={styles.receiptLine}>Дестинация: {receipt.destination}</Text>
-                <Text style={styles.receiptLine}>Метод: {receipt.paymentMethod}</Text>
-                <Text style={styles.receiptLine}>Обработено на: {receipt.processedAtLabel}</Text>
+                <Text style={styles.receiptTitle}>{receipt.kicker}</Text>
+                {receipt.lines.map((line) => (
+                  <Text key={line} style={styles.receiptLine}>
+                    {line}
+                  </Text>
+                ))}
                 <Text style={styles.receiptLine}>
                   Референция: {formatCheckoutReference(receipt.paymentIntentId)}
                 </Text>
@@ -217,12 +371,8 @@ export default function PaymentReturnScreen() {
         ) : null}
 
         {stage !== "processing" ? (
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={() => router.replace("/home")}
-            style={styles.button}
-          >
-            <Text style={styles.buttonText}>Обратно към Home</Text>
+          <TouchableOpacity activeOpacity={0.9} onPress={handleBack} style={styles.button}>
+            <Text style={styles.buttonText}>{buttonLabel}</Text>
           </TouchableOpacity>
         ) : null}
       </View>
@@ -263,31 +413,31 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   receiptCard: {
-    alignSelf: "stretch",
-    backgroundColor: "#FFF6E2",
-    borderColor: "#F2CB88",
-    borderRadius: 20,
+    backgroundColor: "#FFF8E7",
+    borderColor: "#F1D7A5",
+    borderRadius: 18,
     borderWidth: 1,
-    marginTop: 20,
-    padding: 18,
+    marginTop: 18,
+    padding: 16,
+    width: "100%",
   },
   receiptTitle: {
-    color: "#9A5F07",
-    fontSize: 13,
+    color: "#8B5611",
+    fontSize: 12,
     fontWeight: "800",
-    letterSpacing: 1,
+    letterSpacing: 0.8,
     marginBottom: 10,
     textTransform: "uppercase",
   },
   receiptLine: {
-    color: "#6B4A16",
-    fontSize: 16,
-    lineHeight: 24,
+    color: "#5C4826",
+    fontSize: 14,
+    lineHeight: 21,
     marginBottom: 6,
   },
   receiptTotal: {
-    color: "#553711",
-    fontSize: 18,
+    color: "#2C341E",
+    fontSize: 22,
     fontWeight: "800",
     marginTop: 10,
   },
@@ -296,13 +446,13 @@ const styles = StyleSheet.create({
     backgroundColor: "#5C8C1F",
     borderRadius: 16,
     marginTop: 20,
-    paddingHorizontal: 20,
+    paddingHorizontal: 18,
     paddingVertical: 14,
     width: "100%",
   },
   buttonText: {
     color: "#FFFFFF",
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "800",
   },
 });

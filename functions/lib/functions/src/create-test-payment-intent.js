@@ -33,7 +33,7 @@ function getStripeClient() {
     }
     return stripeClient;
 }
-exports.createTestPaymentIntent = (0, https_1.onCall)({ region: "us-central1" }, async (request) => {
+exports.createTestPaymentIntent = (0, https_1.onCall)({ invoker: "public", region: "us-central1", secrets: ["STRIPE_SECRET_KEY"] }, async (request) => {
     const data = (request.data ?? {});
     const amountCents = sanitizeNumber(data.amountCents);
     const currency = sanitizeString(data.currency, "eur").toLowerCase();

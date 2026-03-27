@@ -42,7 +42,7 @@ function getStripeClient() {
     }
     return stripeClient;
 }
-exports.verifyTestCheckoutSession = (0, https_1.onCall)({ region: "us-central1" }, async (request) => {
+exports.verifyTestCheckoutSession = (0, https_1.onCall)({ invoker: "public", region: "us-central1", secrets: ["STRIPE_SECRET_KEY"] }, async (request) => {
     const data = (request.data ?? {});
     const sessionId = sanitizeString(data.sessionId);
     if (!sessionId) {
