@@ -13,6 +13,7 @@ export const STAY_STYLE_OPTIONS = [
 
 export type PersonalProfileInfo = {
   aboutMe: string;
+  avatarUrl: string;
   dreamDestinations: string;
   fullName: string;
   homeBase: string;
@@ -33,6 +34,7 @@ export function sanitizeProfileString(value: unknown, fallback = "") {
 export function extractPersonalProfile(profileData: RawProfileInfoData): PersonalProfileInfo {
   return {
     aboutMe: sanitizeProfileString(profileData.profileInfo?.aboutMe),
+    avatarUrl: sanitizeProfileString(profileData.profileInfo?.avatarUrl),
     dreamDestinations: sanitizeProfileString(profileData.profileInfo?.dreamDestinations),
     fullName: sanitizeProfileString(profileData.profileInfo?.fullName),
     homeBase: sanitizeProfileString(profileData.profileInfo?.homeBase),
@@ -42,14 +44,14 @@ export function extractPersonalProfile(profileData: RawProfileInfoData): Persona
 }
 
 export function getProfileDisplayName(profileData: RawProfileInfoData) {
+  if (typeof profileData.username === "string" && profileData.username.trim()) {
+    return profileData.username.trim();
+  }
+
   const personalProfile = extractPersonalProfile(profileData);
 
   if (personalProfile.fullName) {
     return personalProfile.fullName;
-  }
-
-  if (typeof profileData.username === "string" && profileData.username.trim()) {
-    return profileData.username.trim();
   }
 
   if (typeof profileData.email === "string" && profileData.email.trim()) {

@@ -1,8 +1,9 @@
+import { MaterialIcons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -13,9 +14,10 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { WebView } from "react-native-webview";
 
-import DiscoverTripMap from "../../components/discover-trip-map";
 import { auth, db } from "../../firebase";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
 import { getProfileDisplayName } from "../../utils/profile-info";
@@ -26,6 +28,8 @@ import {
   saveTripForUser,
 } from "../../utils/saved-trips";
 import {
+  buildSettlementMapEmbedUrl,
+  DEFAULT_SETTLEMENT_MAP_ZOOM,
   enrichDiscoverTrips,
   GEMINI_MODEL,
   extractDiscoverProfile,
@@ -37,7 +41,120 @@ import {
   type StoredDiscoverData,
   type TripRecommendation,
 } from "../../utils/trip-recommendations";
-import React from "react";
+
+type ExpandedPreviewState =
+  | {
+      imageIndex: number;
+      kind: "image";
+      trip: TripRecommendation;
+    }
+  | {
+      kind: "map";
+      trip: TripRecommendation;
+    }
+  | null;
+
+function formatGeneratedDate(value: number | null) {
+  if (!value) {
+    return "Още не е генерирано";
+  }
+
+  return new Intl.DateTimeFormat("bg-BG", {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "long",
+  }).format(new Date(value));
+}
+
+function getTripImageUrls(trip: TripRecommendation) {
+  if (trip.imageUrls?.length) {
+    return trip.imageUrls;
+  }
+
+  return trip.imageUrl ? [trip.imageUrl] : [];
+}
+
+const MIN_MAP_LEVEL = 1;
+const MAX_MAP_LEVEL = 17;
+const PREVIEW_MAP_ZOOM = DEFAULT_SETTLEMENT_MAP_ZOOM + 1;
+
+function clampValue(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function ZoomableMap({
+  latitude,
+  longitude,
+}: {
+  latitude: number | null;
+  longitude: number | null;
+}) {
+  const [mapZoomLevel, setMapZoomLevel] = useState(DEFAULT_SETTLEMENT_MAP_ZOOM);
+
+  useEffect(() => {
+    setMapZoomLevel(DEFAULT_SETTLEMENT_MAP_ZOOM);
+  }, [latitude, longitude]);
+
+  const adjustZoom = (delta: number) => {
+    const nextMapZoom = clampValue(
+      mapZoomLevel + delta,
+      MIN_MAP_LEVEL,
+      MAX_MAP_LEVEL
+    );
+    setMapZoomLevel(nextMapZoom);
+  };
+
+  if (latitude === null || longitude === null) {
+    return (
+      <View style={styles.zoomableMapViewport}>
+        <View style={styles.mapFallback}>
+          <Text style={styles.mapFallbackText}>Map coordinates not available</Text>
+        </View>
+      </View>
+    );
+  }
+
+  const mapUri = buildSettlementMapEmbedUrl(latitude, longitude, mapZoomLevel);
+
+  return (
+    <GestureHandlerRootView style={styles.zoomableMapRoot}>
+      <View style={styles.zoomableMapViewport}>
+        <WebView
+          key={mapUri}
+          source={{ uri: mapUri }}
+          style={styles.modalMapWebView}
+          originWhitelist={["*"]}
+          startInLoadingState
+          scrollEnabled={false}
+          nestedScrollEnabled={false}
+          overScrollMode="never"
+          setSupportMultipleWindows={false}
+          javaScriptEnabled
+          domStorageEnabled
+          bounces={false}
+        />
+
+        <View style={styles.mapZoomControls}>
+          <TouchableOpacity
+            style={styles.mapZoomButton}
+            onPress={() => adjustZoom(2)}
+            activeOpacity={0.9}
+          >
+            <MaterialIcons name="add" size={18} color="#29440F" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.mapZoomButton}
+            onPress={() => adjustZoom(-2)}
+            activeOpacity={0.9}
+          >
+            <MaterialIcons name="remove" size={18} color="#29440F" />
+          </TouchableOpacity>
+        </View>
+      </View>
+    </GestureHandlerRootView>
+  );
+}
 
 export default function DiscoverTabScreen() {
   const router = useRouter();
@@ -56,7 +173,9 @@ export default function DiscoverTabScreen() {
   const [saveSuccess, setSaveSuccess] = useState("");
   const [savedSourceKeys, setSavedSourceKeys] = useState<string[]>([]);
   const [savingTripKey, setSavingTripKey] = useState<string | null>(null);
-  const [expandedMapTrip, setExpandedMapTrip] = useState<TripRecommendation | null>(null);
+  const [expandedPreview, setExpandedPreview] = useState<ExpandedPreviewState>(null);
+  const previewImageUrls =
+    expandedPreview?.kind === "image" ? getTripImageUrls(expandedPreview.trip) : [];
   const hasRequestedInitialTripsRef = useRef(false);
   const metadataRepairKeyRef = useRef<string | null>(null);
 
@@ -65,7 +184,7 @@ export default function DiscoverTabScreen() {
   const heroTitle = isPhoneLayout ? `Discover за ${profileName}` : `Settlements for ${profileName}`;
   const heroSubtitle = isPhoneLayout
     ? "Реални селища със снимка, карта и идеи какво да видиш."
-    : "Реални селища с активности, забележителности и истинска карта на местата.";
+    : "Вместо generic trip идеи, тук получаваш реални селища с tourism activity, активности, забележителности, снимка и map preview.";
 
   const generateAndStoreTrips = useCallback(
     async (
@@ -178,14 +297,16 @@ export default function DiscoverTabScreen() {
           const tripsMissingMetadata =
             storedDiscoverData?.trips.filter(
               (trip) =>
-                !trip.imageUrl || trip.latitude === null || trip.longitude === null
+                (!trip.imageUrl && (trip.imageUrls?.length ?? 0) === 0) ||
+                trip.latitude === null ||
+                trip.longitude === null
             ) ?? [];
 
           if (tripsMissingMetadata.length > 0) {
             const repairKey = tripsMissingMetadata
               .map(
                 (trip) =>
-                  `${trip.id}:${trip.imageUrl ? 1 : 0}:${trip.latitude ?? "x"}:${trip.longitude ?? "x"}`
+                  `${trip.id}:${trip.imageUrl ? 1 : 0}:${trip.imageUrls?.length ?? 0}:${trip.latitude ?? "x"}:${trip.longitude ?? "x"}`
               )
               .join("|");
 
@@ -278,7 +399,7 @@ export default function DiscoverTabScreen() {
 
     if (savedSourceKeys.includes(sourceKey)) {
       setSaveError("");
-      setSaveSuccess(`„${trip.title}“ вече е запазен в Saved.`);
+      setSaveSuccess(`"${trip.title}" is already in Trips.`);
       return;
     }
 
@@ -293,7 +414,7 @@ export default function DiscoverTabScreen() {
       );
 
       setSavedSourceKeys(nextSavedTrips.map((savedTrip) => savedTrip.sourceKey));
-      setSaveSuccess(`„${trip.title}“ е запазен в Saved.`);
+      setSaveSuccess(`"${trip.title}" was added to Trips.`);
     } catch (nextError) {
       setSaveSuccess("");
       setSaveError(getFirestoreUserMessage(nextError, "write"));
@@ -317,42 +438,49 @@ export default function DiscoverTabScreen() {
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.headerBlock}>
-            <Text style={styles.kicker}>Discover</Text>
-            <Text style={[styles.pageTitle, isPhoneLayout && styles.pageTitlePhone]}>
+          <View style={[styles.hero, isPhoneLayout && styles.heroPhone]}>
+            <Text style={styles.kicker}>CareTrip</Text>
+            <Text style={[styles.heroTitle, isPhoneLayout && styles.heroTitlePhone]}>
               {heroTitle}
             </Text>
-            <Text style={[styles.pageSubtitle, isPhoneLayout && styles.pageSubtitlePhone]}>
+            <Text style={[styles.heroSubtitle, isPhoneLayout && styles.heroSubtitlePhone]}>
               {heroSubtitle}
             </Text>
-          </View>
 
-          <View style={[styles.discoverControlsCard, isPhoneLayout && styles.discoverControlsCardPhone]}>
-            <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                isPhoneLayout && styles.primaryButtonPhone,
-                (generating || refreshUsedToday) && styles.primaryButtonDisabled,
-              ]}
-              onPress={handleRefresh}
-              disabled={generating || refreshUsedToday}
-              activeOpacity={0.9}
-            >
-              <Text style={styles.primaryButtonText}>
-                {generating
-                  ? "Refreshing settlements..."
-                  : refreshUsedToday
-                    ? "Refresh used today"
-                    : "Refresh settlements"}
+          <View style={[styles.heroMetaRow, isPhoneLayout && styles.heroMetaRowPhone]}>
+            <View style={[styles.metaChip, isPhoneLayout && styles.metaChipPhone]}>
+              <Text style={styles.metaLabel}>Generated</Text>
+              <Text style={styles.metaValue}>
+                {formatGeneratedDate(discoverData?.generatedAtMs ?? null)}
               </Text>
-            </TouchableOpacity>
-
-            <Text style={styles.refreshNote}>
-              {refreshUsedToday
-                ? "Днес вече беше използван refresh. Утре можеш да заредиш нови селища."
-                : "Можеш да поискаш нов set settlements веднъж на ден."}
-            </Text>
+            </View>
           </View>
+
+          <TouchableOpacity
+            style={[
+              styles.primaryButton,
+              isPhoneLayout && styles.primaryButtonPhone,
+              (generating || refreshUsedToday) && styles.primaryButtonDisabled,
+            ]}
+            onPress={handleRefresh}
+            disabled={generating || refreshUsedToday}
+            activeOpacity={0.9}
+          >
+            <Text style={styles.primaryButtonText}>
+              {generating
+                ? "Refreshing settlements..."
+                : refreshUsedToday
+                  ? "Refresh used today"
+                  : "Refresh settlements"}
+            </Text>
+          </TouchableOpacity>
+
+          <Text style={styles.refreshNote}>
+            {refreshUsedToday
+              ? "Днес вече беше използван refresh. Утре можеш да заредиш нови селища."
+              : "Можеш да поискаш нов set settlements веднъж на ден."}
+          </Text>
+        </View>
 
         {error ? (
           <View style={styles.errorCard}>
@@ -383,7 +511,7 @@ export default function DiscoverTabScreen() {
         {generating && !discoverData?.trips.length ? (
           <View style={[styles.loadingCard, isPhoneLayout && styles.loadingCardPhone]}>
             <ActivityIndicator size="large" color="#639922" />
-            <Text style={styles.loadingTitle}>Gemini is building your settlements feed</Text>
+            <Text style={styles.loadingTitle}>Preparing your settlements feed</Text>
             <Text style={styles.loadingText}>
               Комбинираме профила ти с internet research, за да върнем реални селища с
               какво да се прави в тях.
@@ -395,17 +523,36 @@ export default function DiscoverTabScreen() {
           const sourceKey = getDiscoverSavedSourceKey(trip);
           const isSaved = savedSourceKeys.includes(sourceKey);
           const isSaving = savingTripKey === sourceKey;
-
+          const mapUrl = buildSettlementMapEmbedUrl(
+            trip.latitude,
+            trip.longitude,
+            PREVIEW_MAP_ZOOM
+          );
           return (
             <View key={trip.id} style={[styles.tripCard, isPhoneLayout && styles.tripCardPhone]}>
+              <View style={styles.tripHeader}>
+                <View style={styles.tripHeaderText}>
+                  <Text style={[styles.tripTitle, isPhoneLayout && styles.tripTitlePhone]}>
+                    {trip.title}
+                  </Text>
+                </View>
+              </View>
+
               <View style={[styles.topRow, !isWideLayout && styles.topRowStacked]}>
                 <View style={[styles.imagePanel, !isWideLayout && styles.imagePanelStacked]}>
                   {trip.imageUrl ? (
-                    <Image
-                      source={{ uri: trip.imageUrl }}
-                      style={[styles.heroImage, isPhoneLayout && styles.heroImagePhone]}
-                      contentFit="cover"
-                    />
+                    <TouchableOpacity
+                      onPress={() =>
+                        setExpandedPreview({ kind: "image", trip, imageIndex: 0 })
+                      }
+                      activeOpacity={0.92}
+                    >
+                      <Image
+                        source={{ uri: trip.imageUrl }}
+                        style={[styles.heroImage, isPhoneLayout && styles.heroImagePhone]}
+                        contentFit="cover"
+                      />
+                    </TouchableOpacity>
                   ) : (
                     <View style={[styles.imageFallback, isPhoneLayout && styles.imageFallbackPhone]}>
                       <Text
@@ -422,35 +569,31 @@ export default function DiscoverTabScreen() {
                 </View>
 
                 <View style={styles.mapPanel}>
-                  <Text style={styles.mapPanelTitle}>Map preview</Text>
-                  <DiscoverTripMap
-                    attractions={trip.attractions}
-                    country={trip.country}
-                    destination={trip.destination}
-                    height={isPhoneLayout ? 152 : 196}
-                    latitude={trip.latitude}
-                    longitude={trip.longitude}
-                    title={trip.title}
-                  />
-                  <TouchableOpacity
-                    style={[styles.expandButton, isPhoneLayout && styles.expandButtonPhone]}
-                    onPress={() => setExpandedMapTrip(trip)}
-                    activeOpacity={0.9}
-                  >
-                    <Text style={styles.expandButtonText}>Expand map</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <View style={styles.tripHeader}>
-                <View style={styles.tripHeaderText}>
-                  <Text style={[styles.tripTitle, isPhoneLayout && styles.tripTitlePhone]}>
-                    {trip.title}
-                  </Text>
-                  <Text style={styles.tripDestination}>{trip.destination}</Text>
-                </View>
-                <View style={styles.popularityBadge}>
-                  <Text style={styles.popularityBadgeText}>Visited & active</Text>
+                  {mapUrl ? (
+                    <TouchableOpacity
+                      style={styles.previewTapContainer}
+                      onPress={() => setExpandedPreview({ kind: "map", trip })}
+                      activeOpacity={0.92}
+                    >
+                      <View style={[styles.mapImage, isPhoneLayout && styles.mapImagePhone]}>
+                        <WebView
+                          key={`${trip.id}-map-preview`}
+                          source={{ uri: mapUrl }}
+                          style={styles.previewMapWebView}
+                          pointerEvents="none"
+                          originWhitelist={["*"]}
+                          scrollEnabled={false}
+                          setSupportMultipleWindows={false}
+                          javaScriptEnabled
+                          domStorageEnabled
+                        />
+                      </View>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={[styles.mapFallback, isPhoneLayout && styles.mapImagePhone]}>
+                      <Text style={styles.mapFallbackText}>Map coordinates not available</Text>
+                    </View>
+                  )}
                 </View>
               </View>
 
@@ -502,8 +645,8 @@ export default function DiscoverTabScreen() {
                   {isSaving
                     ? "Saving..."
                     : isSaved
-                      ? "Saved in tab"
-                      : "Save settlement"}
+                      ? "Saved in Trips"
+                      : "Save to Trips"}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -513,34 +656,78 @@ export default function DiscoverTabScreen() {
       </SafeAreaView>
 
       <Modal
-        visible={!!expandedMapTrip}
+        visible={!!expandedPreview}
         transparent
         animationType="fade"
-        onRequestClose={() => setExpandedMapTrip(null)}
+        onRequestClose={() => setExpandedPreview(null)}
       >
-        <View style={styles.modalOverlay}>
+        <GestureHandlerRootView style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{expandedMapTrip?.title}</Text>
-            {expandedMapTrip ? (
-              <DiscoverTripMap
-                attractions={expandedMapTrip.attractions}
-                country={expandedMapTrip.country}
-                destination={expandedMapTrip.destination}
-                height={420}
-                latitude={expandedMapTrip.latitude}
-                longitude={expandedMapTrip.longitude}
-                title={expandedMapTrip.title}
-              />
+            <View style={styles.modalHeaderRow}>
+              <View style={styles.modalHeaderText}>
+                <Text style={styles.modalTitle}>{expandedPreview?.trip.title}</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setExpandedPreview(null)}
+                activeOpacity={0.9}
+              >
+                <MaterialIcons name="close" size={20} color="#29440F" />
+              </TouchableOpacity>
+            </View>
+            {expandedPreview ? (
+              expandedPreview.kind === "image" ? (
+                <View>
+                  {previewImageUrls[expandedPreview.imageIndex] ? (
+                    <View style={styles.modalHeroImageWrap}>
+                      <Image
+                        source={{ uri: previewImageUrls[expandedPreview.imageIndex] }}
+                        style={styles.modalHeroImage}
+                        contentFit="cover"
+                      />
+                    </View>
+                  ) : null}
+                  {previewImageUrls.length > 1 ? (
+                    <ScrollView
+                      horizontal
+                      style={styles.modalThumbnailScroll}
+                      contentContainerStyle={styles.modalThumbnailRow}
+                      showsHorizontalScrollIndicator={false}
+                    >
+                      {previewImageUrls.map((imageUrl, index) => (
+                        <TouchableOpacity
+                          key={`${expandedPreview.trip.id}-image-${index}`}
+                          onPress={() =>
+                            setExpandedPreview({
+                              ...expandedPreview,
+                              imageIndex: index,
+                            })
+                          }
+                          activeOpacity={0.92}
+                        >
+                          <Image
+                            source={{ uri: imageUrl }}
+                            style={[
+                              styles.modalThumbnailImage,
+                              index === expandedPreview.imageIndex &&
+                                styles.modalThumbnailImageActive,
+                            ]}
+                            contentFit="cover"
+                          />
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  ) : null}
+                </View>
+              ) : (
+                <ZoomableMap
+                  latitude={expandedPreview.trip.latitude}
+                  longitude={expandedPreview.trip.longitude}
+                />
+              )
             ) : null}
-            <TouchableOpacity
-              style={styles.modalCloseButton}
-              onPress={() => setExpandedMapTrip(null)}
-              activeOpacity={0.9}
-            >
-              <Text style={styles.modalCloseText}>Close</Text>
-            </TouchableOpacity>
           </View>
-        </View>
+        </GestureHandlerRootView>
       </Modal>
     </>
   );
@@ -564,49 +751,81 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#EEF4E5",
   },
-  headerBlock: {
-    marginBottom: 12,
+  hero: {
+    backgroundColor: "#223814",
+    borderRadius: 28,
+    padding: 24,
+    marginBottom: 18,
+  },
+  heroPhone: {
+    borderRadius: 22,
+    padding: 16,
+    marginBottom: 14,
   },
   kicker: {
-    color: "#5C8C1F",
+    color: "#C8E08E",
     fontSize: 13,
     fontWeight: "700",
     letterSpacing: 0.8,
     textTransform: "uppercase",
     marginBottom: 10,
   },
-  pageTitle: {
-    color: "#29440F",
+  heroTitle: {
+    color: "#FFFFFF",
     fontSize: 28,
     lineHeight: 36,
     fontWeight: "800",
     marginBottom: 10,
   },
-  pageTitlePhone: {
+  heroTitlePhone: {
     fontSize: 20,
     lineHeight: 26,
     marginBottom: 8,
   },
-  pageSubtitle: {
-    color: "#5F6E53",
+  heroSubtitle: {
+    color: "#EAF3DE",
     fontSize: 15,
     lineHeight: 22,
+    marginBottom: 16,
   },
-  pageSubtitlePhone: {
+  heroSubtitlePhone: {
     fontSize: 13,
     lineHeight: 18,
+    marginBottom: 12,
   },
-  discoverControlsCard: {
-    backgroundColor: "#F6F8EE",
-    borderRadius: 22,
-    padding: 18,
+  heroMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
     marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "#DDE8C7",
   },
-  discoverControlsCardPhone: {
-    borderRadius: 18,
-    padding: 14,
+  heroMetaRowPhone: {
+    marginBottom: 12,
+  },
+  metaChip: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginRight: 10,
+    marginBottom: 10,
+  },
+  metaChipPhone: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  metaLabel: {
+    color: "#D6E8AE",
+    fontSize: 11,
+    fontWeight: "700",
+    marginBottom: 4,
+    textTransform: "uppercase",
+  },
+  metaValue: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "600",
   },
   primaryButton: {
     backgroundColor: "#BA7517",
@@ -628,7 +847,7 @@ const styles = StyleSheet.create({
   },
   refreshNote: {
     marginTop: 10,
-    color: "#5F6E53",
+    color: "#DCEAC0",
     fontSize: 13,
     lineHeight: 18,
   },
@@ -750,7 +969,7 @@ const styles = StyleSheet.create({
     flexDirection: "column",
   },
   imagePanel: {
-    flex: 1.4,
+    flex: 1,
     marginRight: 14,
   },
   imagePanelStacked: {
@@ -799,12 +1018,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: "center",
   },
-  mapPanelTitle: {
-    color: "#3B6D11",
-    fontSize: 13,
-    fontWeight: "800",
-    marginBottom: 8,
-    textTransform: "uppercase",
+  mapImage: {
+    width: "100%",
+    height: 240,
+    borderRadius: 20,
+    backgroundColor: "#DDE8C7",
+    overflow: "hidden",
+  },
+  mapImagePhone: {
+    height: 180,
+    borderRadius: 18,
+  },
+  mapFrameContainer: {
+    width: "100%",
+    height: 196,
+    borderRadius: 20,
+    overflow: "hidden",
+    backgroundColor: "#DDE8C7",
+  },
+  previewTapContainer: {
+    position: "relative",
+    width: "100%",
   },
   expandButton: {
     marginTop: 10,
@@ -821,15 +1055,24 @@ const styles = StyleSheet.create({
     color: "#8B5611",
     fontWeight: "800",
   },
+  mapFallback: {
+    height: 196,
+    borderRadius: 20,
+    backgroundColor: "#EEF4E5",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+  },
+  mapFallbackText: {
+    color: "#627254",
+    fontSize: 13,
+    textAlign: "center",
+  },
   tripHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 10,
+    marginBottom: 14,
   },
   tripHeaderText: {
     flex: 1,
-    paddingRight: 12,
   },
   tripTitle: {
     color: "#29440F",
@@ -927,27 +1170,99 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     padding: 20,
   },
+  modalHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  modalHeaderText: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  modalCloseButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#EEF4E5",
+    borderWidth: 1,
+    borderColor: "#DDE8C7",
+  },
   modalTitle: {
     color: "#29440F",
     fontSize: 24,
     fontWeight: "800",
-    marginBottom: 14,
+  },
+  modalHeroImage: {
+    width: "100%",
+    height: 520,
+    borderRadius: 22,
+    backgroundColor: "#DDE8C7",
+  },
+  modalHeroImageWrap: {
+    position: "relative",
+  },
+  modalThumbnailScroll: {
+    marginTop: 14,
+  },
+  modalThumbnailRow: {
+    paddingBottom: 4,
+  },
+  modalThumbnailImage: {
+    width: 110,
+    height: 82,
+    borderRadius: 16,
+    backgroundColor: "#DDE8C7",
+    marginRight: 10,
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  modalThumbnailImageActive: {
+    borderColor: "#5C8C1F",
   },
   modalMapImage: {
     width: "100%",
     height: 420,
-    borderRadius: 22,
     backgroundColor: "#DDE8C7",
   },
-  modalCloseButton: {
-    backgroundColor: "#223814",
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: "center",
-    marginTop: 16,
+  previewMapWebView: {
+    flex: 1,
+    backgroundColor: "#DDE8C7",
   },
-  modalCloseText: {
-    color: "#FFFFFF",
-    fontWeight: "800",
+  modalMapWebView: {
+    flex: 1,
+    backgroundColor: "#DDE8C7",
+  },
+  zoomableMapRoot: {
+    width: "100%",
+  },
+  zoomableMapViewport: {
+    width: "100%",
+    height: 420,
+    borderRadius: 22,
+    overflow: "hidden",
+    backgroundColor: "#DDE8C7",
+  },
+  zoomableMapContent: {
+    width: "100%",
+    height: "100%",
+  },
+  mapZoomControls: {
+    position: "absolute",
+    left: 14,
+    top: 14,
+  },
+  mapZoomButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(250, 252, 245, 0.92)",
+    borderWidth: 1,
+    borderColor: "#DDE8C7",
+    marginBottom: 10,
   },
 });

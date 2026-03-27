@@ -559,7 +559,7 @@ export default function GroupChatScreen() {
             <View style={styles.emptyState}>
               <Text style={styles.emptyTitle}>Няма съобщения още</Text>
               <Text style={styles.emptyText}>
-                Изпрати първото съобщение или share-ни saved trip и започни разговора в тази група.
+                Send the first message or share a trip from Trips to start the conversation in this group.
               </Text>
             </View>
           ) : (
@@ -734,7 +734,7 @@ export default function GroupChatScreen() {
           <View style={styles.sheetCard}>
             <View style={styles.sheetHeader}>
               <View style={styles.sheetHeaderTextWrap}>
-                <Text style={styles.sheetTitle}>Share from Saved trips</Text>
+                <Text style={styles.sheetTitle}>Share from Trips</Text>
                 <Text style={styles.sheetSubtitle}>
                   Избери Trip Plan, който искаш да пратиш в групата.
                 </Text>
@@ -750,7 +750,7 @@ export default function GroupChatScreen() {
 
             {savedTrips.length === 0 ? (
               <View style={styles.sheetEmptyState}>
-                <Text style={styles.sheetEmptyTitle}>Нямаш saved trips още</Text>
+                <Text style={styles.sheetEmptyTitle}>You do not have Trips yet</Text>
                 <Text style={styles.sheetEmptyText}>
                   Запази план от Home или Discover и после ще можеш да го share-неш в групата.
                 </Text>
@@ -762,7 +762,7 @@ export default function GroupChatScreen() {
                   }}
                   style={styles.sheetPrimaryButton}
                 >
-                  <Text style={styles.sheetPrimaryButtonText}>Open Saved</Text>
+                  <Text style={styles.sheetPrimaryButtonText}>Open Trips</Text>
                 </TouchableOpacity>
               </View>
             ) : (

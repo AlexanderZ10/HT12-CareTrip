@@ -1,6 +1,7 @@
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import React, { useState } from "react";
 import { MaterialIcons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import {
   ScrollView,
   StyleSheet,
@@ -27,7 +28,9 @@ import {
   type AuthField,
 } from "../utils/auth-errors";
 import { createMathCaptcha } from "../utils/math-captcha";
-import React from "react";
+
+const CARETRIP_ICON = require("../assets/images/CareTrip.png");
+const CARETRIP_BACKGROUND = require("../assets/images/CareTrip-background.png");
 
 export default function Register() {
   const router = useRouter();
@@ -64,9 +67,9 @@ export default function Register() {
     if (/[0-9]/.test(pass)) score++;
     if (/[^A-Za-z0-9]/.test(pass)) score++;
 
-    if (score <= 2) return "Weak";
-    if (score <= 4) return "Medium";
-    return "Strong";
+    if (score <= 0.5) return "Weak";   //2
+    if (score <= 1) return "Medium";   //4
+    return "Strong";   
   };
 
   const handlePasswordChange = (text: string) => {
@@ -199,14 +202,18 @@ export default function Register() {
 
   return (
     <SafeAreaView style={styles.screen} edges={["top", "bottom", "left", "right"]}>
+      <Image source={CARETRIP_BACKGROUND} style={styles.backgroundImage} contentFit="cover" />
+      <View style={styles.backgroundOverlay} />
       <ScrollView
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        <Image source={CARETRIP_ICON} style={styles.logoImage} contentFit="contain" />
+
         <View style={styles.formCard}>
           <Text style={styles.title}>Register</Text>
-          <Text style={styles.subtitle}>Create an account</Text>
+          <Text style={styles.subtitle}>Welcome</Text>
 
         <TextInput
           placeholder="Email"
@@ -353,6 +360,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#EAF3DE",
   },
+  backgroundImage: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  backgroundOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(245, 250, 238, 0.54)",
+  },
   container: {
     justifyContent: "center",
     alignItems: "center",
@@ -362,7 +376,7 @@ const styles = StyleSheet.create({
   formCard: {
     width: "100%",
     maxWidth: 460,
-    backgroundColor: "#F6F8EE",
+    backgroundColor: "rgba(246, 248, 238, 0.92)",
     borderRadius: 24,
     padding: 24,
     shadowColor: "#1E2A12",
@@ -370,15 +384,23 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
     elevation: 4,
+    marginBottom: 65,
+  },
+  logoImage: {
+    width: 300,
+    height: 300,
+    marginBottom: -15,
   },
   title: {
-    fontSize: 32,
-    fontWeight: "bold",
+    fontSize: 30,
+    fontWeight: "800",
     color: "#3B6D11",
     textAlign: "center",
   },
   subtitle: {
     color: "#444441",
+    fontSize: 16,
+    marginTop: 6,
     marginBottom: 20,
     textAlign: "center",
   },

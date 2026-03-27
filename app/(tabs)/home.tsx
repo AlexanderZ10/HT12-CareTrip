@@ -1,24 +1,30 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import * as Linking from "expo-linking";
-import * as WebBrowser from "expo-web-browser";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Modal,
+  Animated,
+  KeyboardAvoidingView,
+  Easing,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Platform,
+  Pressable,
   ScrollView,
+  StyleProp,
   StyleSheet,
   Text,
   TextInput,
+  TextStyle,
   TouchableOpacity,
   View,
   useWindowDimensions,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { ConfirmDialog } from "../../components/confirm-dialog";
 import { auth, db } from "../../firebase";
 import { normalizeBudgetToEuro } from "../../utils/currency";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
@@ -36,21 +42,12 @@ import {
 } from "../../utils/home-chat-storage";
 import {
   formatGroundedTravelPlan,
+  generateGroundedTravelFollowUp,
   generateGroundedTravelPlan,
   getHomePlannerErrorMessage,
   type PlannerTransportOption,
 } from "../../utils/home-travel-planner";
 import { getProfileDisplayName } from "../../utils/profile-info";
-import {
-  createTestCheckoutSession,
-  verifyTestCheckoutSession,
-} from "../../utils/travel-offers";
-import {
-  buildBookingOrder,
-  getBookingEstimate,
-  saveBookingForUser,
-} from "../../utils/bookings";
-import { savePendingStripeCheckout } from "../../utils/pending-stripe-checkout";
 import {
   buildSavedTripFromHome,
   getHomeSavedSourceKey,
@@ -80,23 +77,6 @@ const TIMING_SUGGESTIONS = [
   "Това лято",
   "Гъвкаво",
 ];
-const PAYMENT_METHODS = ["Банкова карта", "Apple Pay", "Google Pay"];
-
-WebBrowser.maybeCompleteAuthSession();
-
-type BookingCheckoutStage = "form" | "processing" | "success";
-
-type BookingReceipt = {
-  authorizationCode: string;
-  destination: string;
-  paymentIntentId: string;
-  paymentMethod: string;
-  paymentMode: "mock" | "stripe_test";
-  processedAtLabel: string;
-  selectedStayLabel: string | null;
-  selectedTransportLabel: string | null;
-  totalLabel: string;
-};
 
 const LOW_BUDGET_DESTINATIONS = ["Солун", "Белград", "Букурещ", "Скопие"];
 const MID_BUDGET_DESTINATIONS = ["Будапеща", "Тоскана", "Прованс", "Коста Брава"];
@@ -273,93 +253,6 @@ function formatUpdatedDate(value: number) {
   }).format(new Date(value));
 }
 
-function wait(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function getPaymentMethodIcon(method: string) {
-  if (method.includes("Apple")) {
-    return "phone-iphone";
-  }
-
-  if (method.includes("Google")) {
-    return "android";
-  }
-
-  return "credit-card";
-}
-
-function getPaymentMethodDisplayLabel(method: string) {
-  if (method.includes("Apple")) {
-    return "Apple Pay";
-  }
-
-  if (method.includes("Google")) {
-    return "Google Pay";
-  }
-
-  return "Visa •••• 4242";
-}
-
-function formatCheckoutReference(value: string) {
-  const compactValue = value
-    .replace(/^pi_/, "")
-    .replace(/^local_/, "")
-    .replace(/^fallback_/, "")
-    .replace(/^mock_/, "")
-    .replace(/_secret.*$/, "")
-    .replace(/[^a-zA-Z0-9]/g, "")
-    .slice(-10)
-    .toUpperCase();
-
-  return `BK-${compactValue || "2475A1F9"}`;
-}
-
-function formatProcessedAt(value: number) {
-  return new Intl.DateTimeFormat("bg-BG", {
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(value));
-}
-
-function createAuthorizationCode(value: string) {
-  const compactValue = value
-    .replace(/^pi_/, "")
-    .replace(/^local_/, "")
-    .replace(/^fallback_/, "")
-    .replace(/^mock_/, "")
-    .replace(/_secret.*$/, "")
-    .replace(/[^a-zA-Z0-9]/g, "")
-    .slice(-6)
-    .toUpperCase();
-
-  return compactValue || "A47K92";
-}
-
-function parseCheckoutReturnState(url: string) {
-  const parsedUrl = Linking.parse(url);
-  const rawCheckoutValue = parsedUrl.queryParams?.checkout;
-  const rawSessionIdValue = parsedUrl.queryParams?.session_id;
-
-  return {
-    checkout:
-      typeof rawCheckoutValue === "string"
-        ? rawCheckoutValue
-        : Array.isArray(rawCheckoutValue)
-          ? rawCheckoutValue[0] ?? ""
-          : "",
-    sessionId:
-      typeof rawSessionIdValue === "string"
-        ? rawSessionIdValue
-        : Array.isArray(rawSessionIdValue)
-          ? rawSessionIdValue[0] ?? ""
-          : "",
-  };
-}
-
 function normalizeLatestPlan(plan: StoredHomePlan): StoredHomePlan {
   if (!plan) {
     return null;
@@ -405,12 +298,67 @@ function getAutoChatTitle(currentTitle: string, destination: string, planTitle: 
   return planTitle || destination || currentTitle;
 }
 
+function renderInlineMarkdownSegments(text: string, baseStyle: StyleProp<TextStyle>) {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((segment, index) => {
+    const isBold = segment.startsWith("**") && segment.endsWith("**") && segment.length > 4;
+
+    return (
+      <Text
+        key={`segment-${index}`}
+        style={[baseStyle, isBold && styles.messageTextBold]}
+      >
+        {isBold ? segment.slice(2, -2) : segment}
+      </Text>
+    );
+  });
+}
+
+function FormattedMessageText({
+  text,
+  textStyle,
+}: {
+  text: string;
+  textStyle: StyleProp<TextStyle>;
+}) {
+  const lines = text.split("\n");
+
+  return (
+    <View>
+      {lines.map((line, index) => {
+        const trimmedLine = line.trim();
+        const bulletMatch = trimmedLine.match(/^[-*]\s+(.*)$/);
+
+        if (!trimmedLine) {
+          return <View key={`line-${index}`} style={styles.messageSpacer} />;
+        }
+
+        if (bulletMatch) {
+          return (
+            <View key={`line-${index}`} style={styles.messageBulletRow}>
+              <Text style={[textStyle, styles.messageBulletMark]}>•</Text>
+              <Text style={[textStyle, styles.messageBulletText]}>
+                {renderInlineMarkdownSegments(bulletMatch[1], textStyle)}
+              </Text>
+            </View>
+          );
+        }
+
+        return (
+          <Text key={`line-${index}`} style={[textStyle, styles.messageParagraph]}>
+            {renderInlineMarkdownSegments(trimmedLine, textStyle)}
+          </Text>
+        );
+      })}
+    </View>
+  );
+}
+
 export default function HomeTabScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const isWideLayout = width >= 980;
   const isPhoneLayout = width < 768;
-  const isCompactPhone = width < 430;
 
   const [loading, setLoading] = useState(true);
   const [planning, setPlanning] = useState(false);
@@ -422,30 +370,40 @@ export default function HomeTabScreen() {
   const [error, setError] = useState("");
   const [saveError, setSaveError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState("");
-  const [bookingError, setBookingError] = useState("");
-  const [bookingSuccess, setBookingSuccess] = useState("");
-  const [bookingModalVisible, setBookingModalVisible] = useState(false);
-  const [bookingProcessing, setBookingProcessing] = useState(false);
-  const [bookingStage, setBookingStage] = useState<BookingCheckoutStage>("form");
-  const [bookingProgress, setBookingProgress] = useState(0);
-  const [bookingProgressLabel, setBookingProgressLabel] = useState("");
-  const [bookingReceipt, setBookingReceipt] = useState<BookingReceipt | null>(null);
-  const [selectedTransportIndex, setSelectedTransportIndex] = useState<number | null>(0);
-  const [selectedStayIndex, setSelectedStayIndex] = useState<number | null>(0);
-  const [bookingForm, setBookingForm] = useState({
-    contactEmail: "",
-    contactName: "",
-    note: "",
-    paymentMethod: PAYMENT_METHODS[0] ?? "Банкова карта",
-  });
   const [savedSourceKeys, setSavedSourceKeys] = useState<string[]>([]);
   const [homeStore, setHomeStore] = useState<HomePlannerStore>({
     chats: [],
     currentChatId: null,
   });
-  const [chatMenuVisible, setChatMenuVisible] = useState(false);
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [chatSearch, setChatSearch] = useState("");
+  const [isPhoneChatMenuOpen, setIsPhoneChatMenuOpen] = useState(false);
+  const [isPhoneChatDrawerMounted, setIsPhoneChatDrawerMounted] = useState(false);
+  const [pendingDeleteChat, setPendingDeleteChat] = useState<HomePlannerChatThread | null>(
+    null
+  );
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const phoneDrawerTranslateX = useRef(new Animated.Value(-320)).current;
+  const phoneDrawerWidth = Math.min(width * 0.84, 330);
+
+  const sortedChats = useMemo(
+    () => sortHomePlannerChats(homeStore.chats),
+    [homeStore.chats]
+  );
+  const filteredChats = useMemo(() => {
+    const query = chatSearch.trim().toLowerCase();
+
+    if (!query) {
+      return sortedChats;
+    }
+
+    return sortedChats.filter((chat) =>
+      [chat.title, chat.state.destination, chat.state.latestPlan?.destination]
+        .filter((value): value is string => !!value)
+        .some((value) => value.toLowerCase().includes(query))
+    );
+  }, [chatSearch, sortedChats]);
 
   const currentChat = useMemo(() => {
     if (homeStore.chats.length === 0) {
@@ -454,32 +412,82 @@ export default function HomeTabScreen() {
 
     return (
       homeStore.chats.find((chat) => chat.id === homeStore.currentChatId) ??
-      sortHomePlannerChats(homeStore.chats)[0]
+      sortedChats[0]
     );
-  }, [homeStore]);
+  }, [homeStore, sortedChats]);
 
   const currentPlannerState =
     currentChat?.state ?? createEmptyPlannerState(buildInitialAssistantMessage(profileName));
   const latestPlan = currentPlannerState.latestPlan;
-  const selectedTransport =
-    selectedTransportIndex !== null
-      ? latestPlan?.plan.transportOptions[selectedTransportIndex] ?? null
-      : null;
-  const selectedStay =
-    selectedStayIndex !== null
-      ? latestPlan?.plan.stayOptions[selectedStayIndex] ?? null
-      : null;
-  const bookingEstimate = latestPlan
-    ? getBookingEstimate({
-        days: latestPlan.days,
-        stay: selectedStay,
-        transport: selectedTransport,
-        travelers: latestPlan.travelers,
-      })
-    : {
-        totalEstimate: null,
-        totalLabel: "Цена при запитване",
-      };
+  const followUpMessages = currentPlannerState.followUpMessages ?? [];
+  const messagesScrollRef = useRef<ScrollView | null>(null);
+
+  const scrollMessagesToBottom = useCallback((animated: boolean) => {
+    const timer = setTimeout(() => {
+      setShowScrollToBottom(false);
+      messagesScrollRef.current?.scrollToEnd({ animated });
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  const handleMessagesScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const {
+        contentOffset,
+        contentSize,
+        layoutMeasurement,
+      } = event.nativeEvent;
+      const distanceFromBottom =
+        contentSize.height - (contentOffset.y + layoutMeasurement.height);
+
+      setShowScrollToBottom(distanceFromBottom > 96);
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!isPhoneLayout) {
+      setIsPhoneChatMenuOpen(false);
+      setIsPhoneChatDrawerMounted(false);
+      phoneDrawerTranslateX.setValue(-phoneDrawerWidth);
+      return;
+    }
+
+    if (isPhoneChatMenuOpen) {
+      setIsPhoneChatDrawerMounted(true);
+      phoneDrawerTranslateX.setValue(-phoneDrawerWidth);
+      Animated.timing(phoneDrawerTranslateX, {
+        toValue: 0,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+      return;
+    }
+
+    if (!isPhoneChatDrawerMounted) {
+      return;
+    }
+
+    Animated.timing(phoneDrawerTranslateX, {
+      toValue: -phoneDrawerWidth,
+      duration: 180,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        setIsPhoneChatDrawerMounted(false);
+      }
+    });
+  }, [
+    isPhoneChatDrawerMounted,
+    isPhoneChatMenuOpen,
+    isPhoneLayout,
+    phoneDrawerTranslateX,
+    phoneDrawerWidth,
+  ]);
+
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
 
@@ -551,6 +559,11 @@ export default function HomeTabScreen() {
     };
   }, [router]);
 
+  useEffect(() => {
+    setShowScrollToBottom(false);
+    return scrollMessagesToBottom(false);
+  }, [currentChat?.id, scrollMessagesToBottom]);
+
   const quickReplies = useMemo(() => {
     if (currentPlannerState.step === "budget") {
       return BUDGET_SUGGESTIONS;
@@ -583,37 +596,22 @@ export default function HomeTabScreen() {
     return [];
   }, [currentPlannerState, profile]);
 
-  const canSend =
-    chatInput.trim().length > 0 && !planning && currentPlannerState.step !== "done";
+  const canSend = chatInput.trim().length > 0 && !planning;
 
-  const persistStore = async (nextStore: HomePlannerStore) => {
-    if (!user) {
-      return;
-    }
+  const persistStore = useCallback(
+    async (nextStore: HomePlannerStore) => {
+      if (!user) {
+        return;
+      }
 
-    try {
-      await saveHomePlannerStoreForUser(user.uid, nextStore);
-    } catch (nextError) {
-      setError(getFirestoreUserMessage(nextError, "write"));
-    }
-  };
-
-  const resetBookingUi = () => {
-    setBookingStage("form");
-    setBookingProgress(0);
-    setBookingProgressLabel("");
-    setBookingReceipt(null);
-    setBookingError("");
-  };
-
-  const closeBookingModal = () => {
-    if (bookingProcessing) {
-      return;
-    }
-
-    setBookingModalVisible(false);
-    resetBookingUi();
-  };
+      try {
+        await saveHomePlannerStoreForUser(user.uid, nextStore);
+      } catch (nextError) {
+        setError(getFirestoreUserMessage(nextError, "write"));
+      }
+    },
+    [user]
+  );
 
   const replaceCurrentChat = async (
     updater: (chat: HomePlannerChatThread) => HomePlannerChatThread
@@ -641,8 +639,8 @@ export default function HomeTabScreen() {
       currentChatId: chatId,
     };
 
-    setChatMenuVisible(false);
     setChatInput("");
+    setIsPhoneChatMenuOpen(false);
     setError("");
     setSaveError("");
     setSaveSuccess("");
@@ -661,8 +659,9 @@ export default function HomeTabScreen() {
       currentChatId: nextChat.id,
     };
 
-    setChatMenuVisible(false);
     setChatInput("");
+    setChatSearch("");
+    setIsPhoneChatMenuOpen(false);
     setError("");
     setSaveError("");
     setSaveSuccess("");
@@ -700,6 +699,16 @@ export default function HomeTabScreen() {
     setSaveSuccess("");
     setHomeStore(nextStore);
     await persistStore(nextStore);
+  };
+
+  const confirmDeleteChat = async () => {
+    if (!pendingDeleteChat) {
+      return;
+    }
+
+    const chatId = pendingDeleteChat.id;
+    setPendingDeleteChat(null);
+    await handleDeleteChat(chatId);
   };
 
   const handleTogglePin = async (chatId: string) => {
@@ -758,23 +767,6 @@ export default function HomeTabScreen() {
     await persistStore(nextStore);
   };
 
-  const resetConversation = async () => {
-    await replaceCurrentChat((chat) => ({
-      ...chat,
-      updatedAtMs: Date.now(),
-      state: createEmptyPlannerState(buildInitialAssistantMessage(profileName)),
-      title:
-        chat.title.startsWith("Нов чат") || chat.title === "Последен чат"
-          ? chat.title
-          : chat.title,
-    }));
-    setChatInput("");
-    setError("");
-    setBookingError("");
-    setBookingSuccess("");
-    setSaveError("");
-    setSaveSuccess("");
-  };
 
   const sendPlannerMessage = async (rawValue: string) => {
     if (!currentChat || !profile || !user || planning) {
@@ -789,14 +781,99 @@ export default function HomeTabScreen() {
 
     setChatInput("");
     setError("");
-    setBookingError("");
-    setBookingSuccess("");
     setSaveError("");
     setSaveSuccess("");
 
     const plannerState = currentChat.state;
     const userMessage = createHomeChatMessage("user", value);
     const messagesAfterUser = [...plannerState.messages, userMessage];
+    const followUpMessagesAfterUser = [...(plannerState.followUpMessages ?? []), userMessage];
+
+    if (plannerState.step === "done") {
+      if (!plannerState.latestPlan) {
+        const assistantMessage = createHomeChatMessage(
+          "assistant",
+          "Кажи какво искаш да променим или започни нов чат, за да подготвя нов маршрут."
+        );
+
+        await replaceCurrentChat((chat) => ({
+          ...chat,
+          updatedAtMs: Date.now(),
+          state: {
+            ...chat.state,
+            followUpMessages: [...followUpMessagesAfterUser, assistantMessage],
+            step: "done",
+          },
+        }));
+
+        scrollMessagesToBottom(true);
+
+        return;
+      }
+
+      setPlanning(true);
+
+      await replaceCurrentChat((chat) => ({
+        ...chat,
+        updatedAtMs: Date.now(),
+        state: {
+          ...chat.state,
+          followUpMessages: followUpMessagesAfterUser,
+          step: "done",
+        },
+      }));
+
+      try {
+        const followUpText = await generateGroundedTravelFollowUp({
+          budget: plannerState.budget,
+          currentPlanText:
+            plannerState.latestPlan.formattedPlanText ||
+            formatGroundedTravelPlan(plannerState.latestPlan.plan),
+          days: plannerState.days,
+          destination: plannerState.destination || plannerState.latestPlan.destination,
+          profile,
+          recentMessages: [...plannerState.messages, ...(plannerState.followUpMessages ?? [])].map((message) => ({
+            role: message.role,
+            text: message.text,
+          })),
+          timing: plannerState.timing,
+          transportPreference: plannerState.transportPreference,
+          travelers: plannerState.travelers,
+          userRequest: value,
+        });
+        const assistantMessage = createHomeChatMessage("assistant", followUpText);
+
+        await replaceCurrentChat((chat) => ({
+          ...chat,
+          updatedAtMs: Date.now(),
+          state: {
+            ...chat.state,
+            followUpMessages: [...followUpMessagesAfterUser, assistantMessage],
+            step: "done",
+          },
+        }));
+        scrollMessagesToBottom(true);
+      } catch (nextError) {
+        const message = getHomePlannerErrorMessage(nextError);
+        const errorMessage = createHomeChatMessage("assistant", message);
+        setError(message);
+
+        await replaceCurrentChat((chat) => ({
+          ...chat,
+          updatedAtMs: Date.now(),
+          state: {
+            ...chat.state,
+            followUpMessages: [...followUpMessagesAfterUser, errorMessage],
+            step: "done",
+          },
+        }));
+        scrollMessagesToBottom(true);
+      } finally {
+        setPlanning(false);
+      }
+
+      return;
+    }
 
     if (plannerState.step === "budget") {
       const normalizedBudget = normalizeBudgetToEuro(value);
@@ -813,6 +890,7 @@ export default function HomeTabScreen() {
           budget: normalizedBudget,
           days: "",
           destination: "",
+          followUpMessages: [],
           timing: "",
           transportPreference: "",
           travelers: "",
@@ -839,6 +917,7 @@ export default function HomeTabScreen() {
           ...chat.state,
           days: normalizedDays,
           travelers: "",
+          followUpMessages: [],
           latestPlan: null,
           messages: [...messagesAfterUser, assistantMessage],
           step: "travelers",
@@ -862,6 +941,7 @@ export default function HomeTabScreen() {
           ...chat.state,
           travelers: normalizedTravelers,
           transportPreference: "",
+          followUpMessages: [],
           latestPlan: null,
           messages: [...messagesAfterUser, assistantMessage],
           step: "transport",
@@ -883,6 +963,7 @@ export default function HomeTabScreen() {
         state: {
           ...chat.state,
           transportPreference: value,
+          followUpMessages: [],
           timing: "",
           latestPlan: null,
           messages: [...messagesAfterUser, assistantMessage],
@@ -904,6 +985,7 @@ export default function HomeTabScreen() {
         updatedAtMs: Date.now(),
         state: {
           ...chat.state,
+          followUpMessages: [],
           timing: value,
           latestPlan: null,
           messages: [...messagesAfterUser, assistantMessage],
@@ -930,6 +1012,7 @@ export default function HomeTabScreen() {
         state: {
           ...chat.state,
           destination: nextDestination,
+          followUpMessages: [],
           latestPlan: null,
           messages: messagesWhilePlanning,
           step: "done",
@@ -975,6 +1058,7 @@ export default function HomeTabScreen() {
           state: {
             ...chat.state,
             destination: nextDestination,
+            followUpMessages: [],
             latestPlan: nextLatestPlan,
             messages: [...messagesWhilePlanning, readyMessage],
             step: "done",
@@ -991,6 +1075,7 @@ export default function HomeTabScreen() {
           state: {
             ...chat.state,
             destination: nextDestination,
+            followUpMessages: [],
             latestPlan: null,
             messages: [...messagesWhilePlanning, errorMessage],
             step: "done",
@@ -1009,7 +1094,7 @@ export default function HomeTabScreen() {
 
     if (savedSourceKeys.includes(latestPlan.sourceKey)) {
       setSaveError("");
-      setSaveSuccess("Този маршрут вече е запазен в Saved.");
+      setSaveSuccess("Този маршрут вече е запазен в Trips.");
       return;
     }
 
@@ -1029,7 +1114,7 @@ export default function HomeTabScreen() {
       );
 
       setSavedSourceKeys(nextSavedTrips.map((trip) => trip.sourceKey));
-      setSaveSuccess("Маршрутът е запазен в Saved.");
+      setSaveSuccess("Маршрутът е запазен в Trips.");
     } catch (nextError) {
       setSaveSuccess("");
       setSaveError(getFirestoreUserMessage(nextError, "write"));
@@ -1038,290 +1123,117 @@ export default function HomeTabScreen() {
     }
   };
 
-  const openBookingModal = () => {
-    if (!latestPlan) {
-      return;
-    }
-
-    setSelectedTransportIndex(latestPlan.plan.transportOptions.length > 0 ? 0 : null);
-    setSelectedStayIndex(latestPlan.plan.stayOptions.length > 0 ? 0 : null);
-    resetBookingUi();
-    setBookingSuccess("");
-    setBookingForm({
-      contactEmail: user?.email ?? "",
-      contactName: profile?.personalProfile.fullName || profileName,
-      note: "",
-      paymentMethod: PAYMENT_METHODS[0] ?? "Банкова карта",
-    });
-    setBookingModalVisible(true);
-  };
-
-  const openBookingModalForTransport = (transportIndex: number) => {
-    if (!latestPlan) {
-      return;
-    }
-
-    setSelectedTransportIndex(transportIndex);
-    setSelectedStayIndex(null);
-    resetBookingUi();
-    setBookingSuccess("");
-    setBookingForm({
-      contactEmail: user?.email ?? "",
-      contactName: profile?.personalProfile.fullName || profileName,
-      note: "",
-      paymentMethod: PAYMENT_METHODS[0] ?? "Банкова карта",
-    });
-    setBookingModalVisible(true);
-  };
-
-  const openBookingModalForStay = (stayIndex: number) => {
-    if (!latestPlan) {
-      return;
-    }
-
-    setSelectedTransportIndex(null);
-    setSelectedStayIndex(stayIndex);
-    resetBookingUi();
-    setBookingSuccess("");
-    setBookingForm({
-      contactEmail: user?.email ?? "",
-      contactName: profile?.personalProfile.fullName || profileName,
-      note: "",
-      paymentMethod: PAYMENT_METHODS[0] ?? "Банкова карта",
-    });
-    setBookingModalVisible(true);
-  };
-
-  const handleConfirmBooking = async () => {
-    if (!user || !latestPlan || bookingProcessing) {
-      return;
-    }
-
-    const trimmedName = bookingForm.contactName.trim();
-    const trimmedEmail = bookingForm.contactEmail.trim();
-
-    if (!trimmedName) {
-      setBookingError("Добави име за резервацията.");
-      return;
-    }
-
-    if (!trimmedEmail || !trimmedEmail.includes("@")) {
-      setBookingError("Добави валиден email за потвърждение.");
-      return;
-    }
-
-    if (!selectedTransport && !selectedStay) {
-      setBookingError("Избери поне транспорт или настаняване.");
-      return;
-    }
-
-    try {
-      setBookingProcessing(true);
-      setBookingError("");
-      setBookingStage("processing");
-      setBookingProgress(0.14);
-      setBookingProgressLabel("Подготвяме Stripe test checkout...");
-
-      await wait(300);
-
-      const amountCents =
-        bookingEstimate.totalEstimate !== null
-          ? Math.max(bookingEstimate.totalEstimate, 1) * 100
-          : 100;
-      const checkoutReturnBaseUrl = Linking.createURL("/payment-return");
-      const checkoutSession = await createTestCheckoutSession({
-        amountCents,
-        cancelUrl: `${checkoutReturnBaseUrl}?checkout=cancel`,
-        contactEmail: trimmedEmail,
-        contactName: trimmedName,
-        currency: "eur",
-        description: `${latestPlan.plan.title} • ${latestPlan.destination}`,
-        destination: latestPlan.destination,
-        paymentMethod: bookingForm.paymentMethod,
-        successUrl: `${checkoutReturnBaseUrl}?checkout=success`,
-        userId: user.uid,
-      });
-
-      setBookingProgress(0.36);
-      setBookingProgressLabel("Отваряме Stripe Checkout...");
-
-      if (Platform.OS === "web" && typeof window !== "undefined") {
-        savePendingStripeCheckout({
-          budget: latestPlan.budget,
-          contactEmail: trimmedEmail,
-          contactName: trimmedName,
-          createdAtMs: Date.now(),
-          days: latestPlan.days,
-          destination: latestPlan.destination,
-          note: bookingForm.note,
-          paymentMethod: bookingForm.paymentMethod,
-          stay: selectedStay,
-          timing: latestPlan.timing,
-          title: latestPlan.plan.title,
-          totalLabel: bookingEstimate.totalLabel,
-          transport: selectedTransport,
-          travelers: latestPlan.travelers,
-        });
-
-        setBookingProgress(0.52);
-        setBookingProgressLabel("Пренасочваме към Stripe Checkout...");
-        window.location.assign(checkoutSession.checkoutUrl);
-        return;
-      }
-
-      const checkoutResult = await WebBrowser.openAuthSessionAsync(
-        checkoutSession.checkoutUrl,
-        checkoutReturnBaseUrl
+  const renderChatList = (isPhoneMenu = false) => {
+    if (filteredChats.length === 0) {
+      return (
+        <View style={styles.emptyChatSearchState}>
+          <Text style={styles.emptyChatSearchText}>No chats found.</Text>
+        </View>
       );
-
-      if (checkoutResult.type !== "success" || !checkoutResult.url) {
-        throw new Error("stripe-checkout-cancelled");
-      }
-
-      const checkoutState = parseCheckoutReturnState(checkoutResult.url);
-
-      if (checkoutState.checkout !== "success" || !checkoutState.sessionId) {
-        throw new Error("stripe-checkout-incomplete");
-      }
-
-      setBookingProgress(0.68);
-      setBookingProgressLabel("Потвърждаваме Stripe checkout...");
-
-      const checkoutVerification = await verifyTestCheckoutSession({
-        sessionId: checkoutState.sessionId,
-      });
-
-      if (!checkoutVerification.paid || !checkoutVerification.paymentIntentId) {
-        throw new Error("stripe-session-not-paid");
-      }
-
-      setBookingProgress(0.86);
-      setBookingProgressLabel("Записваме потвърдената резервация...");
-
-      await saveBookingForUser(
-        user.uid,
-        buildBookingOrder({
-          budget: latestPlan.budget,
-          contactEmail: trimmedEmail,
-          contactName: trimmedName,
-          days: latestPlan.days,
-          destination: latestPlan.destination,
-          note: bookingForm.note,
-          paymentIntentId: checkoutVerification.paymentIntentId,
-          paymentMethod: bookingForm.paymentMethod,
-          paymentMode: checkoutVerification.mode,
-          stay: selectedStay,
-          timing: latestPlan.timing,
-          title: latestPlan.plan.title,
-          transport: selectedTransport,
-          travelers: latestPlan.travelers,
-        })
-      );
-
-      await wait(350);
-
-      setBookingProgress(1);
-      setBookingProgressLabel("Stripe test плащането е потвърдено.");
-      setBookingReceipt({
-        authorizationCode: createAuthorizationCode(checkoutVerification.paymentIntentId),
-        destination: latestPlan.destination,
-        paymentIntentId: checkoutVerification.paymentIntentId,
-        paymentMethod: bookingForm.paymentMethod,
-        paymentMode: checkoutVerification.mode,
-        processedAtLabel: formatProcessedAt(Date.now()),
-        selectedStayLabel: selectedStay
-          ? `${selectedStay.name} • ${selectedStay.pricePerNight}`
-          : null,
-        selectedTransportLabel: selectedTransport
-          ? `${selectedTransport.mode} • ${selectedTransport.price}`
-          : null,
-        totalLabel: bookingEstimate.totalLabel,
-      });
-      setBookingStage("success");
-      setBookingSuccess(
-        "Stripe test плащането е потвърдено и резервацията е добавена в Saved."
-      );
-    } catch (nextError) {
-      const message = nextError instanceof Error ? nextError.message : "";
-      const errorCode =
-        nextError &&
-        typeof nextError === "object" &&
-        "code" in nextError &&
-        typeof nextError.code === "string"
-          ? nextError.code
-          : "";
-      const errorDetails =
-        nextError &&
-        typeof nextError === "object" &&
-        "details" in nextError &&
-        typeof nextError.details === "string"
-          ? nextError.details
-          : "";
-      console.error("Booking checkout/save failed", nextError);
-
-      setBookingStage("form");
-      setBookingProgress(0);
-      setBookingProgressLabel("");
-
-      if (message.includes("functions/not-found") || errorCode === "functions/not-found") {
-        setBookingError(
-          "Липсват Stripe checkout Firebase функциите. Deploy-ни backend-а и опитай пак."
-        );
-      } else if (message.includes("stripe-test-mode-disabled")) {
-        setBookingError(
-          "Stripe test mode е изключен. Задай EXPO_PUBLIC_TEST_PAYMENTS_MODE=functions и рестартирай app-а."
-        );
-      } else if (
-        message.includes("Failed to fetch") ||
-        message.includes("functions/unavailable") ||
-        errorCode === "functions/unavailable"
-      ) {
-        setBookingError(
-          "Stripe Functions emulator не е стартиран. Пусни `npm run payments:emulator` и опитай пак."
-        );
-      } else if (message.includes("stripe-checkout-cancelled")) {
-        setBookingError("Плащането беше прекъснато преди потвърждение.");
-      } else if (
-        message.includes("stripe-checkout-incomplete") ||
-        message.includes("stripe-session-not-paid")
-      ) {
-        setBookingError(
-          "Stripe Checkout не върна потвърдено test плащане. Опитай отново."
-        );
-      } else if (
-        message.includes("functions/failed-precondition") ||
-        errorCode === "functions/failed-precondition" ||
-        message.includes("STRIPE_SECRET_KEY") ||
-        errorDetails.includes("STRIPE_SECRET_KEY")
-      ) {
-        setBookingError(
-          "Липсва Stripe test secret key във Firebase Functions. Добави STRIPE_SECRET_KEY и deploy-ни функциите."
-        );
-      } else if (
-        message.includes("functions/internal") ||
-        errorCode === "functions/internal" ||
-        message === "internal"
-      ) {
-        setBookingError(
-          errorDetails ||
-            "Stripe backend върна internal грешка. Ако си локално, пусни `npm run payments:emulator`. Ако си на production, трябва deploy на Firebase Functions."
-        );
-      } else {
-        const fallbackMessage = getFirestoreUserMessage(nextError, "write");
-
-        if (fallbackMessage === "Не успяхме да запазим профила. Опитай отново.") {
-          setBookingError(
-            message
-              ? `Не успяхме да запазим резервацията. ${message}`
-              : "Не успяхме да запазим резервацията. Опитай отново."
-          );
-        } else {
-          setBookingError(fallbackMessage.replace("профила", "резервацията"));
-        }
-      }
-    } finally {
-      setBookingProcessing(false);
     }
+
+    return filteredChats.map((chat) => {
+      const isActive = currentChat?.id === chat.id;
+      const isRenaming = renamingChatId === chat.id;
+
+      return (
+        <View
+          key={chat.id}
+          style={[
+            styles.chatListItem,
+            isActive && styles.chatListItemActive,
+            !isWideLayout && !isPhoneMenu && styles.chatListItemStacked,
+            isPhoneLayout && !isPhoneMenu && styles.chatListItemPhone,
+            isPhoneMenu && styles.chatListItemPhoneMenu,
+          ]}
+        >
+          {isRenaming ? (
+            <View style={styles.renameWrap}>
+              <TextInput
+                style={styles.renameInput}
+                value={renameValue}
+                onChangeText={setRenameValue}
+                placeholder="Chat name"
+                placeholderTextColor="#78876C"
+              />
+              <View style={styles.renameActions}>
+                <TouchableOpacity
+                  style={styles.iconButton}
+                  onPress={() => {
+                    void handleSaveRename();
+                  }}
+                  activeOpacity={0.9}
+                >
+                  <MaterialIcons name="check" size={18} color="#3B6D11" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.iconButton}
+                  onPress={() => {
+                    setRenamingChatId(null);
+                    setRenameValue("");
+                  }}
+                  activeOpacity={0.9}
+                >
+                  <MaterialIcons name="close" size={18} color="#8A3D35" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <>
+              <TouchableOpacity
+                onPress={() => {
+                  void handleSelectChat(chat.id);
+                }}
+                activeOpacity={0.9}
+              >
+                <View style={styles.chatTitleRow}>
+                  <Text style={styles.chatItemTitle} numberOfLines={2}>
+                    {chat.title}
+                  </Text>
+                  {chat.pinned ? (
+                    <MaterialIcons name="push-pin" size={16} color="#8B5611" />
+                  ) : null}
+                </View>
+                <Text style={styles.chatItemMeta}>{formatUpdatedDate(chat.updatedAtMs)}</Text>
+              </TouchableOpacity>
+
+              <View style={styles.chatItemActions}>
+                <TouchableOpacity
+                  style={styles.iconButton}
+                  onPress={() => {
+                    setRenamingChatId(chat.id);
+                    setRenameValue(chat.title);
+                  }}
+                  activeOpacity={0.9}
+                >
+                  <MaterialIcons name="edit" size={16} color="#5A6E41" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.iconButton}
+                  onPress={() => {
+                    void handleTogglePin(chat.id);
+                  }}
+                  activeOpacity={0.9}
+                >
+                  <MaterialIcons
+                    name={chat.pinned ? "push-pin" : "outlined-flag"}
+                    size={16}
+                    color="#5A6E41"
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.iconButton}
+                  onPress={() => setPendingDeleteChat(chat)}
+                  activeOpacity={0.9}
+                >
+                  <MaterialIcons name="delete-outline" size={16} color="#8A3D35" />
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+        </View>
+      );
+    });
   };
 
   if (loading) {
@@ -1332,8 +1244,13 @@ export default function HomeTabScreen() {
     );
   }
 
-  return (
-    <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
+    return (
+      <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
+      <KeyboardAvoidingView
+        style={styles.keyboardWrap}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 12 : 78}
+      >
       <View style={styles.shell}>
         <View
           style={[
@@ -1341,114 +1258,196 @@ export default function HomeTabScreen() {
             !isWideLayout && styles.layoutStacked,
           ]}
         >
-          <View style={styles.main}>
-            <View style={[styles.plannerTopBar, isPhoneLayout && styles.plannerTopBarPhone]}>
+          <View
+            style={[
+              styles.sidebar,
+              !isWideLayout && styles.sidebarStacked,
+              isPhoneLayout && styles.sidebarPhone,
+            ]}
+          >
+            <View
+              style={[
+                styles.sidebarHeader,
+                isPhoneLayout && styles.sidebarHeaderPhone,
+              ]}
+            >
+              {isPhoneLayout ? (
+                <View style={styles.phoneHeaderBrandWrap}>
+                  <TouchableOpacity
+                    style={styles.phoneHamburgerButton}
+                    onPress={() => setIsPhoneChatMenuOpen(true)}
+                    activeOpacity={0.9}
+                  >
+                    <MaterialIcons name="menu" size={20} color="#29440F" />
+                  </TouchableOpacity>
+                  <Text style={[styles.sidebarTitle, styles.sidebarTitlePhone]}>CareTrip</Text>
+                </View>
+              ) : (
+                <Text style={styles.sidebarTitle}>CareTrip</Text>
+              )}
               <TouchableOpacity
+                style={[styles.newChatButton, isPhoneLayout && styles.newChatButtonPhone]}
+                onPress={() => {
+                  void handleCreateChat();
+                }}
                 activeOpacity={0.9}
-                onPress={() => setChatMenuVisible(true)}
-                style={styles.plannerMenuButton}
               >
-                <MaterialIcons color="#29440F" name="menu" size={26} />
-              </TouchableOpacity>
-              <View style={styles.plannerTopBarTextWrap}>
-                <Text style={styles.plannerTopBarTitle}>AI Planner</Text>
-                <Text numberOfLines={1} style={styles.plannerTopBarMeta}>
-                  {currentChat?.title ?? "Последен чат"}
+                <MaterialIcons
+                  name="add"
+                  size={isPhoneLayout ? 16 : 18}
+                  color="#FFFFFF"
+                />
+                <Text
+                  style={[
+                    styles.newChatButtonText,
+                    isPhoneLayout && styles.newChatButtonTextPhone,
+                  ]}
+                >
+                  Нов чат
                 </Text>
-              </View>
+              </TouchableOpacity>
             </View>
 
-            <View style={[styles.chatCard, isPhoneLayout && styles.chatCardPhone]}>
-              {[currentPlannerState.budget,
-                currentPlannerState.days,
-                currentPlannerState.travelers,
-                currentPlannerState.transportPreference,
-                currentPlannerState.timing,
-                currentPlannerState.destination,
-              ].filter(Boolean).length > 0 ? (
-                <View style={[styles.contextStrip, isPhoneLayout && styles.contextStripPhone]}>
-                  <Text style={styles.contextStripTitle}>Current plan</Text>
-                  <View style={[styles.profileMetaRow, isPhoneLayout && styles.profileMetaRowPhone]}>
-                    {currentPlannerState.budget ? (
-                      <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
-                        <Text
-                          style={[
-                            styles.profileMetaChipText,
-                            isPhoneLayout && styles.profileMetaChipTextPhone,
-                          ]}
-                        >
-                          {currentPlannerState.budget}
-                        </Text>
-                      </View>
-                    ) : null}
-                    {currentPlannerState.days ? (
-                      <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
-                        <Text
-                          style={[
-                            styles.profileMetaChipText,
-                            isPhoneLayout && styles.profileMetaChipTextPhone,
-                          ]}
-                        >
-                          {currentPlannerState.days}
-                        </Text>
-                      </View>
-                    ) : null}
-                    {currentPlannerState.travelers ? (
-                      <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
-                        <Text
-                          style={[
-                            styles.profileMetaChipText,
-                            isPhoneLayout && styles.profileMetaChipTextPhone,
-                          ]}
-                        >
-                          {currentPlannerState.travelers}
-                        </Text>
-                      </View>
-                    ) : null}
-                    {currentPlannerState.transportPreference ? (
-                      <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
-                        <Text
-                          style={[
-                            styles.profileMetaChipText,
-                            isPhoneLayout && styles.profileMetaChipTextPhone,
-                          ]}
-                        >
-                          {currentPlannerState.transportPreference}
-                        </Text>
-                      </View>
-                    ) : null}
-                    {currentPlannerState.timing ? (
-                      <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
-                        <Text
-                          style={[
-                            styles.profileMetaChipText,
-                            isPhoneLayout && styles.profileMetaChipTextPhone,
-                          ]}
-                        >
-                          {currentPlannerState.timing}
-                        </Text>
-                      </View>
-                    ) : null}
-                    {currentPlannerState.destination ? (
-                      <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
-                        <Text
-                          style={[
-                            styles.profileMetaChipText,
-                            isPhoneLayout && styles.profileMetaChipTextPhone,
-                          ]}
-                        >
-                          {currentPlannerState.destination}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </View>
-                </View>
-              ) : null}
+            {!isPhoneLayout ? (
+              <View style={styles.sidebarSearchWrap}>
+                <MaterialIcons name="search" size={18} color="#7B8870" />
+                <TextInput
+                  style={styles.sidebarSearchInput}
+                  value={chatSearch}
+                  onChangeText={setChatSearch}
+                  placeholder="Search chats"
+                  placeholderTextColor="#7B8870"
+                />
+              </View>
+            ) : null}
 
+            <ScrollView
+              style={[
+                styles.sidebarList,
+                isWideLayout ? styles.sidebarListWide : styles.sidebarListStacked,
+                isPhoneLayout && styles.sidebarListHiddenPhone,
+              ]}
+              contentContainerStyle={styles.sidebarListContent}
+              showsVerticalScrollIndicator={false}
+              horizontal={!isWideLayout}
+            >
+              {filteredChats.map((chat) => {
+                const isActive = currentChat?.id === chat.id;
+                const isRenaming = renamingChatId === chat.id;
+
+                return (
+                  <View
+                    key={chat.id}
+                    style={[
+                      styles.chatListItem,
+                      isActive && styles.chatListItemActive,
+                      !isWideLayout && styles.chatListItemStacked,
+                      isPhoneLayout && styles.chatListItemPhone,
+                    ]}
+                  >
+                    {isRenaming ? (
+                      <View style={styles.renameWrap}>
+                        <TextInput
+                          style={styles.renameInput}
+                          value={renameValue}
+                          onChangeText={setRenameValue}
+                          placeholder="Име на чат"
+                          placeholderTextColor="#78876C"
+                        />
+                        <View style={styles.renameActions}>
+                          <TouchableOpacity
+                            style={styles.iconButton}
+                            onPress={() => {
+                              void handleSaveRename();
+                            }}
+                            activeOpacity={0.9}
+                          >
+                            <MaterialIcons name="check" size={18} color="#3B6D11" />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.iconButton}
+                            onPress={() => {
+                              setRenamingChatId(null);
+                              setRenameValue("");
+                            }}
+                            activeOpacity={0.9}
+                          >
+                            <MaterialIcons name="close" size={18} color="#8A3D35" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : (
+                      <>
+                        <TouchableOpacity
+                          onPress={() => {
+                            void handleSelectChat(chat.id);
+                          }}
+                          activeOpacity={0.9}
+                        >
+                          <View style={styles.chatTitleRow}>
+                            <Text style={styles.chatItemTitle} numberOfLines={2}>
+                              {chat.title}
+                            </Text>
+                            {chat.pinned ? (
+                              <MaterialIcons name="push-pin" size={16} color="#8B5611" />
+                            ) : null}
+                          </View>
+                          <Text style={styles.chatItemMeta}>
+                            {formatUpdatedDate(chat.updatedAtMs)}
+                          </Text>
+                        </TouchableOpacity>
+
+                        <View style={styles.chatItemActions}>
+                          <TouchableOpacity
+                            style={styles.iconButton}
+                            onPress={() => {
+                              setRenamingChatId(chat.id);
+                              setRenameValue(chat.title);
+                            }}
+                            activeOpacity={0.9}
+                          >
+                            <MaterialIcons name="edit" size={16} color="#5A6E41" />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.iconButton}
+                            onPress={() => {
+                              void handleTogglePin(chat.id);
+                            }}
+                            activeOpacity={0.9}
+                          >
+                            <MaterialIcons
+                              name={chat.pinned ? "push-pin" : "outlined-flag"}
+                              size={16}
+                              color="#5A6E41"
+                            />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.iconButton}
+                            onPress={() => setPendingDeleteChat(chat)}
+                            activeOpacity={0.9}
+                          >
+                            <MaterialIcons name="delete-outline" size={16} color="#8A3D35" />
+                          </TouchableOpacity>
+                        </View>
+                      </>
+                    )}
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </View>
+
+          <View style={styles.main}>
+
+            <View style={[styles.chatCard, isPhoneLayout && styles.chatCardPhone]}>
               <ScrollView
+                ref={messagesScrollRef}
                 style={[styles.messagesContainer, isPhoneLayout && styles.messagesContainerPhone]}
                 contentContainerStyle={styles.messagesContent}
                 showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                onScroll={handleMessagesScroll}
+                scrollEventThrottle={16}
               >
                 {currentPlannerState.messages.map((message) => (
                   <View
@@ -1464,20 +1463,19 @@ export default function HomeTabScreen() {
                     <Text style={styles.messageRoleLabel}>
                       {message.role === "assistant" ? "AI Planner" : "You"}
                     </Text>
-                    <Text
-                      style={[
+                    <FormattedMessageText
+                      text={message.text}
+                      textStyle={[
                         styles.messageText,
                         message.role === "assistant"
                           ? styles.assistantMessageText
                           : styles.userMessageText,
                       ]}
-                    >
-                      {message.text}
-                    </Text>
+                    />
                   </View>
                 ))}
 
-                {planning ? (
+                {!latestPlan && planning ? (
                   <View style={[styles.messageBubble, styles.assistantBubble]}>
                     <Text style={styles.messageRoleLabel}>AI Planner</Text>
                     <Text style={styles.assistantMessageText}>
@@ -1530,52 +1528,32 @@ export default function HomeTabScreen() {
                       <Text style={styles.sectionTitle}>Транспорт</Text>
                       {latestPlan.plan.transportOptions.map((option, index) => (
                         <View key={`${option.provider}-${index}`} style={styles.optionCard}>
-                          <View style={styles.optionTopRow}>
-                            <View style={styles.optionModeWrap}>
-                              <MaterialIcons
-                                name={getTransportIconName(option)}
-                                size={18}
-                                color="#3B6D11"
-                              />
-                              <Text style={styles.optionModeText}>{option.mode}</Text>
+                          <View
+                            style={[
+                              styles.optionTopRow,
+                              isPhoneLayout && styles.optionTopRowStacked,
+                            ]}
+                          >
+                            <View style={styles.optionHeadingWrap}>
+                              <View style={styles.optionModeWrap}>
+                                <MaterialIcons
+                                  name={getTransportIconName(option)}
+                                  size={18}
+                                  color="#3B6D11"
+                                />
+                                <Text style={styles.optionModeText}>{option.mode}</Text>
+                              </View>
+                              <Text style={styles.optionProvider}>{option.provider}</Text>
                             </View>
-                            <Text style={styles.optionPrice}>{option.price}</Text>
+                            <Text
+                              style={[styles.optionPrice, isPhoneLayout && styles.optionPricePhone]}
+                            >
+                              {option.price}
+                            </Text>
                           </View>
-
-                          <Text style={styles.optionProvider}>{option.provider}</Text>
                           <Text style={styles.optionRoute}>{option.route}</Text>
                           <Text style={styles.optionMeta}>{option.duration}</Text>
-                          {option.sourceLabel ? (
-                            <Text style={styles.offerSourceText}>Source: {option.sourceLabel}</Text>
-                          ) : null}
                           <Text style={styles.optionNote}>{option.note}</Text>
-
-                          <View style={styles.optionActionsRow}>
-                            {option.bookingUrl ? (
-                              <TouchableOpacity
-                                style={[styles.optionLinkButton, styles.optionHalfButton]}
-                                onPress={() => {
-                                  void Linking.openURL(option.bookingUrl);
-                                }}
-                                activeOpacity={0.9}
-                              >
-                                <MaterialIcons name="open-in-new" size={16} color="#365A14" />
-                                <Text style={styles.optionLinkButtonText}>Офертата</Text>
-                              </TouchableOpacity>
-                            ) : null}
-
-                            <TouchableOpacity
-                              style={[
-                                styles.optionActionButton,
-                                option.bookingUrl ? styles.optionHalfButton : null,
-                              ]}
-                              onPress={() => openBookingModalForTransport(index)}
-                              activeOpacity={0.9}
-                            >
-                              <MaterialIcons name="confirmation-number" size={16} color="#FFFFFF" />
-                              <Text style={styles.optionActionButtonText}>Купи билет</Text>
-                            </TouchableOpacity>
-                          </View>
                         </View>
                       ))}
                     </View>
@@ -1584,44 +1562,23 @@ export default function HomeTabScreen() {
                       <Text style={styles.sectionTitle}>Настаняване</Text>
                       {latestPlan.plan.stayOptions.map((stay, index) => (
                         <View key={`${stay.name}-${index}`} style={styles.optionCard}>
-                          <View style={styles.optionTopRow}>
+                          <View
+                            style={[
+                              styles.optionTopRow,
+                              isPhoneLayout && styles.optionTopRowStacked,
+                            ]}
+                          >
                             <Text style={styles.optionProvider}>{stay.name}</Text>
-                            <Text style={styles.optionPrice}>{stay.pricePerNight}</Text>
+                            <Text
+                              style={[styles.optionPrice, isPhoneLayout && styles.optionPricePhone]}
+                            >
+                              {stay.pricePerNight}
+                            </Text>
                           </View>
                           <Text style={styles.optionRoute}>
                             {stay.type} • {stay.area}
                           </Text>
-                          {stay.sourceLabel ? (
-                            <Text style={styles.offerSourceText}>Source: {stay.sourceLabel}</Text>
-                          ) : null}
                           <Text style={styles.optionNote}>{stay.note}</Text>
-
-                          <View style={styles.optionActionsRow}>
-                            {stay.bookingUrl ? (
-                              <TouchableOpacity
-                                style={[styles.optionLinkButton, styles.optionHalfButton]}
-                                onPress={() => {
-                                  void Linking.openURL(stay.bookingUrl);
-                                }}
-                                activeOpacity={0.9}
-                              >
-                                <MaterialIcons name="open-in-new" size={16} color="#365A14" />
-                                <Text style={styles.optionLinkButtonText}>Офертата</Text>
-                              </TouchableOpacity>
-                            ) : null}
-
-                            <TouchableOpacity
-                              style={[
-                                styles.optionActionButton,
-                                stay.bookingUrl ? styles.optionHalfButton : null,
-                              ]}
-                              onPress={() => openBookingModalForStay(index)}
-                              activeOpacity={0.9}
-                            >
-                              <MaterialIcons name="hotel" size={16} color="#FFFFFF" />
-                              <Text style={styles.optionActionButtonText}>Резервирай</Text>
-                            </TouchableOpacity>
-                          </View>
                         </View>
                       ))}
                     </View>
@@ -1648,12 +1605,6 @@ export default function HomeTabScreen() {
                       </View>
                     ) : null}
 
-                    {bookingSuccess ? (
-                      <Text style={styles.bookingSuccessText}>{bookingSuccess}</Text>
-                    ) : null}
-                    {bookingError ? (
-                      <Text style={styles.bookingErrorText}>{bookingError}</Text>
-                    ) : null}
                     {saveSuccess ? <Text style={styles.saveSuccessText}>{saveSuccess}</Text> : null}
                     {saveError ? <Text style={styles.saveErrorText}>{saveError}</Text> : null}
 
@@ -1681,22 +1632,63 @@ export default function HomeTabScreen() {
                         {savingPlan
                           ? "Saving..."
                           : savedSourceKeys.includes(latestPlan.sourceKey)
-                            ? "Saved in tab"
-                            : "Save to Saved"}
+                            ? "Saved in Trips"
+                            : "Save to Trips"}
                       </Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={styles.bookNowButton}
-                      onPress={openBookingModal}
-                      activeOpacity={0.9}
-                    >
-                      <MaterialIcons name="credit-card" size={18} color="#FFFFFF" />
-                      <Text style={styles.bookNowButtonText}>Pay & reserve in app</Text>
                     </TouchableOpacity>
                   </View>
                 ) : null}
+
+                {followUpMessages.map((message) => (
+                  <View
+                    key={message.id}
+                    style={[
+                      styles.messageBubble,
+                      isPhoneLayout && styles.messageBubblePhone,
+                      message.role === "assistant"
+                        ? styles.assistantBubble
+                        : styles.userBubble,
+                    ]}
+                  >
+                    <Text style={styles.messageRoleLabel}>
+                      {message.role === "assistant" ? "AI Planner" : "You"}
+                    </Text>
+                    <FormattedMessageText
+                      text={message.text}
+                      textStyle={[
+                        styles.messageText,
+                        message.role === "assistant"
+                          ? styles.assistantMessageText
+                          : styles.userMessageText,
+                      ]}
+                    />
+                  </View>
+                ))}
+
+                {latestPlan && planning ? (
+                  <View style={[styles.messageBubble, styles.assistantBubble]}>
+                    <Text style={styles.messageRoleLabel}>AI Planner</Text>
+                    <Text style={styles.assistantMessageText}>
+                      Търся най-добрите цени за transport и stay...
+                    </Text>
+                  </View>
+                ) : null}
               </ScrollView>
+
+              {showScrollToBottom ? (
+                <TouchableOpacity
+                  style={[
+                    styles.scrollToBottomButton,
+                    isPhoneLayout && styles.scrollToBottomButtonPhone,
+                  ]}
+                  onPress={() => {
+                    scrollMessagesToBottom(true);
+                  }}
+                  activeOpacity={0.9}
+                >
+                  <MaterialIcons name="keyboard-double-arrow-down" size={20} color="#FFFFFF" />
+                </TouchableOpacity>
+              ) : null}
 
               {quickReplies.length > 0 ? (
                 <View style={styles.quickRepliesSection}>
@@ -1738,57 +1730,70 @@ export default function HomeTabScreen() {
                   )}
                 </View>
               ) : null}
+              <View
+                style={[
+                  styles.composer,
+                  isPhoneLayout && styles.composerPhone,
+                  isPhoneLayout && { marginBottom: insets.bottom + 6 },
+                ]}
+              >
+                <View style={styles.composerInner}>
+                  <TextInput
+                    style={[styles.input, isPhoneLayout && styles.inputPhone]}
+                    placeholder={
+                      currentPlannerState.step === "budget"
+                        ? "Напиши бюджета в евро..."
+                        : currentPlannerState.step === "days"
+                          ? "Напиши броя дни..."
+                          : currentPlannerState.step === "travelers"
+                            ? "Напиши колко човека ще пътуват..."
+                            : currentPlannerState.step === "transport"
+                              ? "Напиши предпочитан транспорт..."
+                              : currentPlannerState.step === "timing"
+                                ? "Напиши кога искате да пътувате..."
+                        : currentPlannerState.step === "destination"
+                                  ? "Напиши дестинацията..."
+                                  : "Попитай за промяна или уточнение по плана..."
+                    }
+                    placeholderTextColor="#7B8870"
+                    value={chatInput}
+                    onChangeText={setChatInput}
+                    onFocus={() => scrollMessagesToBottom(true)}
+                    editable={!planning}
+                    onKeyPress={(event) => {
+                      if (Platform.OS !== "web") {
+                        return;
+                      }
 
-              <View style={[styles.composer, isPhoneLayout && styles.composerPhone]}>
-                <TextInput
-                  style={[styles.input, isPhoneLayout && styles.inputPhone]}
-                  placeholder={
-                    currentPlannerState.step === "budget"
-                      ? "Напиши бюджета в евро..."
-                      : currentPlannerState.step === "days"
-                        ? "Напиши броя дни..."
-                        : currentPlannerState.step === "travelers"
-                          ? "Напиши колко човека ще пътуват..."
-                          : currentPlannerState.step === "transport"
-                            ? "Напиши предпочитан транспорт..."
-                            : currentPlannerState.step === "timing"
-                              ? "Напиши кога искате да пътувате..."
-                              : currentPlannerState.step === "destination"
-                                ? "Напиши дестинацията..."
-                                : "Натисни „Нов чат“ или „Нов план“"
-                  }
-                  placeholderTextColor="#7B8870"
-                  value={chatInput}
-                  onChangeText={setChatInput}
-                  editable={currentPlannerState.step !== "done" && !planning}
-                  multiline
-                />
+                      const webEvent = event as typeof event & {
+                        nativeEvent: typeof event.nativeEvent & { shiftKey?: boolean };
+                        preventDefault?: () => void;
+                      };
 
-                <View
-                  style={[
-                    styles.actionsRow,
-                    isCompactPhone && styles.actionsRowStacked,
-                  ]}
-                >
-                  <TouchableOpacity
-                    style={[
-                      styles.secondaryButton,
-                      isCompactPhone && styles.secondaryButtonStacked,
-                      planning && styles.disabledButton,
-                    ]}
-                    onPress={() => {
-                      void resetConversation();
+                      if (
+                        webEvent.nativeEvent.key === "Enter" &&
+                        !webEvent.nativeEvent.shiftKey
+                      ) {
+                        webEvent.preventDefault?.();
+
+                        if (canSend) {
+                          void sendPlannerMessage(chatInput);
+                        }
+                      }
                     }}
-                    disabled={planning}
-                    activeOpacity={0.9}
-                  >
-                    <Text style={styles.secondaryButtonText}>Нов план</Text>
-                  </TouchableOpacity>
+                    submitBehavior={Platform.OS === "web" ? "submit" : "newline"}
+                    onSubmitEditing={() => {
+                      if (Platform.OS !== "web" && canSend) {
+                        void sendPlannerMessage(chatInput);
+                      }
+                    }}
+                    multiline={Platform.OS !== "web"}
+                  />
 
                   <TouchableOpacity
                     style={[
-                      styles.primaryButton,
-                      isCompactPhone && styles.primaryButtonStacked,
+                      styles.sendButton,
+                      isPhoneLayout && styles.sendButtonPhone,
                       !canSend && styles.disabledButton,
                     ]}
                     onPress={() => {
@@ -1797,535 +1802,79 @@ export default function HomeTabScreen() {
                     disabled={!canSend}
                     activeOpacity={0.9}
                   >
-                    <MaterialIcons name="send" size={18} color="#FFFFFF" />
-                    <Text style={styles.primaryButtonText}>Изпрати</Text>
+                    <MaterialIcons name="arrow-upward" size={18} color="#FFFFFF" />
                   </TouchableOpacity>
                 </View>
               </View>
             </View>
           </View>
-          </View>
         </View>
-
-        <Modal
-          visible={chatMenuVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setChatMenuVisible(false)}
-        >
-          <SafeAreaView style={styles.historyMenuBackdrop} edges={["top", "bottom", "left"]}>
-            <View style={styles.historyMenuCard}>
-              <View style={styles.historyMenuHeader}>
-                <View>
-                  <Text style={styles.historyMenuTitle}>AI Chats</Text>
-                  <Text style={styles.historyMenuSubtitle}>
-                    {homeStore.chats.length} запазени chat-а
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.historyMenuClose}
-                  onPress={() => setChatMenuVisible(false)}
-                  activeOpacity={0.9}
-                >
-                  <MaterialIcons name="close" size={22} color="#3E5B21" />
-                </TouchableOpacity>
-              </View>
-
+      </View>
+      </KeyboardAvoidingView>
+      {isPhoneLayout && isPhoneChatDrawerMounted ? (
+        <View style={styles.phoneDrawerOverlay}>
+          <Pressable
+            style={styles.phoneDrawerBackdrop}
+            onPress={() => setIsPhoneChatMenuOpen(false)}
+          />
+          <Animated.View
+            style={[
+              styles.phoneDrawerPanel,
+              {
+                paddingBottom: insets.bottom + 16,
+                paddingTop: insets.top + 14,
+                transform: [{ translateX: phoneDrawerTranslateX }],
+                width: phoneDrawerWidth,
+              },
+            ]}
+          >
+            <View style={styles.phoneDrawerTopRow}>
+              <Text style={styles.phoneDrawerBrand}>CareTrip</Text>
               <TouchableOpacity
-                style={[styles.newChatButton, styles.historyMenuNewChatButton]}
-                onPress={() => {
-                  void handleCreateChat();
-                }}
+                style={styles.phoneDrawerCloseButton}
+                onPress={() => setIsPhoneChatMenuOpen(false)}
                 activeOpacity={0.9}
               >
-                <MaterialIcons name="add" size={18} color="#FFFFFF" />
-                <Text style={styles.newChatButtonText}>Нов чат</Text>
+                <MaterialIcons name="close" size={20} color="#29440F" />
               </TouchableOpacity>
-
-              <ScrollView
-                style={styles.sidebarList}
-                contentContainerStyle={styles.sidebarListContent}
-                showsVerticalScrollIndicator={false}
-              >
-                {sortHomePlannerChats(homeStore.chats).map((chat) => {
-                  const isActive = currentChat?.id === chat.id;
-                  const isRenaming = renamingChatId === chat.id;
-
-                  return (
-                    <View
-                      key={chat.id}
-                      style={[
-                        styles.chatListItem,
-                        isActive && styles.chatListItemActive,
-                      ]}
-                    >
-                      {isRenaming ? (
-                        <View style={styles.renameWrap}>
-                          <TextInput
-                            style={styles.renameInput}
-                            value={renameValue}
-                            onChangeText={setRenameValue}
-                            placeholder="Име на чат"
-                            placeholderTextColor="#78876C"
-                          />
-                          <View style={styles.renameActions}>
-                            <TouchableOpacity
-                              style={styles.iconButton}
-                              onPress={() => {
-                                void handleSaveRename();
-                              }}
-                              activeOpacity={0.9}
-                            >
-                              <MaterialIcons name="check" size={18} color="#3B6D11" />
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={styles.iconButton}
-                              onPress={() => {
-                                setRenamingChatId(null);
-                                setRenameValue("");
-                              }}
-                              activeOpacity={0.9}
-                            >
-                              <MaterialIcons name="close" size={18} color="#8A3D35" />
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                      ) : (
-                        <>
-                          <TouchableOpacity
-                            onPress={() => {
-                              void handleSelectChat(chat.id);
-                            }}
-                            activeOpacity={0.9}
-                          >
-                            <View style={styles.chatTitleRow}>
-                              <Text style={styles.chatItemTitle} numberOfLines={2}>
-                                {chat.title}
-                              </Text>
-                              {chat.pinned ? (
-                                <MaterialIcons name="push-pin" size={16} color="#8B5611" />
-                              ) : null}
-                            </View>
-                            <Text style={styles.chatItemMeta}>
-                              {formatUpdatedDate(chat.updatedAtMs)}
-                            </Text>
-                          </TouchableOpacity>
-
-                          <View style={styles.chatItemActions}>
-                            <TouchableOpacity
-                              style={styles.iconButton}
-                              onPress={() => {
-                                setRenamingChatId(chat.id);
-                                setRenameValue(chat.title);
-                              }}
-                              activeOpacity={0.9}
-                            >
-                              <MaterialIcons name="edit" size={16} color="#5A6E41" />
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={styles.iconButton}
-                              onPress={() => {
-                                void handleTogglePin(chat.id);
-                              }}
-                              activeOpacity={0.9}
-                            >
-                              <MaterialIcons
-                                name={chat.pinned ? "push-pin" : "outlined-flag"}
-                                size={16}
-                                color="#5A6E41"
-                              />
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={styles.iconButton}
-                              onPress={() => {
-                                void handleDeleteChat(chat.id);
-                              }}
-                              activeOpacity={0.9}
-                            >
-                              <MaterialIcons name="delete-outline" size={16} color="#8A3D35" />
-                            </TouchableOpacity>
-                          </View>
-                        </>
-                      )}
-                    </View>
-                  );
-                })}
-              </ScrollView>
             </View>
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={() => setChatMenuVisible(false)}
-              style={styles.historyMenuDismissArea}
-            />
-          </SafeAreaView>
-        </Modal>
 
-        <Modal
-          visible={bookingModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={closeBookingModal}
-      >
-        <View style={styles.bookingModalOverlay}>
-          <View style={styles.bookingModalCard}>
+            <View style={styles.phoneDrawerSearchWrap}>
+              <MaterialIcons name="search" size={18} color="#7B8870" />
+              <TextInput
+                style={styles.phoneDrawerSearchInput}
+                value={chatSearch}
+                onChangeText={setChatSearch}
+                placeholder="Search chats"
+                placeholderTextColor="#7B8870"
+              />
+            </View>
+
             <ScrollView
-              contentContainerStyle={styles.bookingModalContent}
+              style={styles.phoneDrawerList}
+              contentContainerStyle={styles.phoneDrawerListContent}
               showsVerticalScrollIndicator={false}
             >
-                <View style={styles.bookingModalHeader}>
-                  <View style={styles.bookingModalHeaderText}>
-                  <Text style={styles.bookingModalKicker}>Secure checkout</Text>
-                  <Text style={styles.bookingModalTitle}>
-                    {bookingStage === "success"
-                      ? "Потвърдено плащане"
-                      : latestPlan?.plan.title || "Потвърди резервацията"}
-                  </Text>
-                  <Text style={styles.bookingModalSubtitle}>
-                    {bookingStage === "processing"
-                      ? "Подготвяме плащането и потвърждението на резервацията."
-                      : bookingStage === "success"
-                        ? "Сумата е обработена успешно и резервацията е потвърдена."
-                        : "Избери транспорт, място за престой и потвърди плащането директно от приложението."}
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.bookingCloseButton}
-                  onPress={closeBookingModal}
-                  disabled={bookingProcessing}
-                  activeOpacity={0.9}
-                >
-                  <MaterialIcons name="close" size={18} color="#29440F" />
-                </TouchableOpacity>
-              </View>
-
-              {bookingStage === "processing" ? (
-                <View style={styles.checkoutProcessingCard}>
-                  <View style={styles.checkoutProcessingIcon}>
-                    <MaterialIcons
-                      name={getPaymentMethodIcon(bookingForm.paymentMethod)}
-                      size={34}
-                      color="#29440F"
-                    />
-                  </View>
-                  <Text style={styles.checkoutProcessingTitle}>
-                    Обработваме плащането
-                  </Text>
-                  <Text style={styles.checkoutProcessingSubtitle}>
-                    {bookingProgressLabel || "Подготвяме плащането..."}
-                  </Text>
-
-                  <View style={styles.checkoutProgressTrack}>
-                    <View
-                      style={[
-                        styles.checkoutProgressFill,
-                        { width: `${Math.max(8, bookingProgress * 100)}%` },
-                      ]}
-                    />
-                  </View>
-
-                  <View style={styles.checkoutProcessingSteps}>
-                    <Text style={styles.checkoutProcessingStep}>
-                      1. Авторизация на плащането
-                    </Text>
-                    <Text style={styles.checkoutProcessingStep}>
-                      2. Потвърждение на wallet / карта
-                    </Text>
-                    <Text style={styles.checkoutProcessingStep}>
-                      3. Финализиране на резервацията
-                    </Text>
-                  </View>
-
-                  <View style={styles.bookingSummaryCard}>
-                    <Text style={styles.bookingSummaryTitle}>Обобщение</Text>
-                    <Text style={styles.bookingSummaryLine}>
-                      {latestPlan?.destination || "Дестинация"}
-                    </Text>
-                    <Text style={styles.bookingSummaryLine}>{bookingEstimate.totalLabel}</Text>
-                    <Text style={styles.bookingSummaryHint}>
-                      Сумата е изчислена според избрания транспорт и мястото за престой.
-                    </Text>
-                  </View>
-                </View>
-              ) : bookingStage === "success" ? (
-                <View style={styles.checkoutSuccessCard}>
-                  <View style={styles.checkoutSuccessBadge}>
-                    <MaterialIcons name="check" size={34} color="#FFFFFF" />
-                  </View>
-                  <Text style={styles.checkoutSuccessTitle}>Плащането мина успешно</Text>
-                  <Text style={styles.checkoutSuccessSubtitle}>
-                    Резервацията е потвърдена и детайлите са готови за преглед.
-                  </Text>
-
-                  <View style={styles.checkoutReceiptCard}>
-                    <Text style={styles.checkoutReceiptKicker}>Потвърждение</Text>
-                    <Text style={styles.checkoutReceiptLine}>
-                      Дестинация: {bookingReceipt?.destination || latestPlan?.destination || "-"}
-                    </Text>
-                    <Text style={styles.checkoutReceiptLine}>
-                      Метод: {getPaymentMethodDisplayLabel(
-                        bookingReceipt?.paymentMethod || bookingForm.paymentMethod
-                      )}
-                    </Text>
-                    <Text style={styles.checkoutReceiptLine}>
-                      Статус: Потвърдено
-                    </Text>
-                    <Text style={styles.checkoutReceiptLine}>
-                      Обработено на: {bookingReceipt?.processedAtLabel || formatProcessedAt(Date.now())}
-                    </Text>
-                    <Text style={styles.checkoutReceiptLine}>
-                      Код за оторизация: {bookingReceipt?.authorizationCode || "A47K92"}
-                    </Text>
-                    {bookingReceipt?.selectedTransportLabel ? (
-                      <Text style={styles.checkoutReceiptLine}>
-                        Транспорт: {bookingReceipt.selectedTransportLabel}
-                      </Text>
-                    ) : null}
-                    {bookingReceipt?.selectedStayLabel ? (
-                      <Text style={styles.checkoutReceiptLine}>
-                        Престой: {bookingReceipt.selectedStayLabel}
-                      </Text>
-                    ) : null}
-                    <Text style={styles.checkoutReceiptTotal}>
-                      Обща сума: {bookingReceipt?.totalLabel || bookingEstimate.totalLabel}
-                    </Text>
-                    <Text style={styles.checkoutReceiptRef}>
-                      Референция: {formatCheckoutReference(
-                        bookingReceipt?.paymentIntentId || "test-payment"
-                      )}
-                    </Text>
-                  </View>
-
-                  <TouchableOpacity
-                    style={styles.bookingPayButton}
-                    onPress={closeBookingModal}
-                    activeOpacity={0.9}
-                  >
-                    <MaterialIcons name="done-all" size={18} color="#FFFFFF" />
-                    <Text style={styles.bookingPayButtonText}>Затвори</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <>
-              <View style={styles.bookingSection}>
-                <View style={styles.bookingSectionHeader}>
-                  <Text style={styles.bookingSectionTitle}>Транспорт</Text>
-                  <TouchableOpacity
-                    style={[
-                      styles.bookingSkipChip,
-                      selectedTransportIndex === null && styles.bookingSkipChipSelected,
-                    ]}
-                    onPress={() => setSelectedTransportIndex(null)}
-                    activeOpacity={0.9}
-                  >
-                    <Text
-                      style={[
-                        styles.bookingSkipChipText,
-                        selectedTransportIndex === null &&
-                          styles.bookingSkipChipTextSelected,
-                      ]}
-                    >
-                      Без билет
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-                {latestPlan?.plan.transportOptions.map((option, index) => {
-                  const isSelected = selectedTransportIndex === index;
-
-                  return (
-                    <TouchableOpacity
-                      key={`${option.provider}-${index}`}
-                      style={[
-                        styles.bookingOptionCard,
-                        isSelected && styles.bookingOptionCardSelected,
-                      ]}
-                      onPress={() => setSelectedTransportIndex(index)}
-                      activeOpacity={0.9}
-                    >
-                      <View style={styles.bookingOptionTopRow}>
-                        <Text style={styles.bookingOptionTitle}>{option.mode}</Text>
-                        <Text style={styles.bookingOptionPrice}>{option.price}</Text>
-                      </View>
-                      <Text style={styles.bookingOptionMeta}>{option.provider}</Text>
-                      <Text style={styles.bookingOptionMeta}>{option.route}</Text>
-                      <Text style={styles.bookingOptionNote}>{option.note}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              <View style={styles.bookingSection}>
-                <View style={styles.bookingSectionHeader}>
-                  <Text style={styles.bookingSectionTitle}>Място за престой</Text>
-                  <TouchableOpacity
-                    style={[
-                      styles.bookingSkipChip,
-                      selectedStayIndex === null && styles.bookingSkipChipSelected,
-                    ]}
-                    onPress={() => setSelectedStayIndex(null)}
-                    activeOpacity={0.9}
-                  >
-                    <Text
-                      style={[
-                        styles.bookingSkipChipText,
-                        selectedStayIndex === null && styles.bookingSkipChipTextSelected,
-                      ]}
-                    >
-                      Без хотел
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-                {latestPlan?.plan.stayOptions.map((stay, index) => {
-                  const isSelected = selectedStayIndex === index;
-
-                  return (
-                    <TouchableOpacity
-                      key={`${stay.name}-${index}`}
-                      style={[
-                        styles.bookingOptionCard,
-                        isSelected && styles.bookingOptionCardSelected,
-                      ]}
-                      onPress={() => setSelectedStayIndex(index)}
-                      activeOpacity={0.9}
-                    >
-                      <View style={styles.bookingOptionTopRow}>
-                        <Text style={styles.bookingOptionTitle}>{stay.name}</Text>
-                        <Text style={styles.bookingOptionPrice}>{stay.pricePerNight}</Text>
-                      </View>
-                      <Text style={styles.bookingOptionMeta}>
-                        {stay.type} • {stay.area}
-                      </Text>
-                      <Text style={styles.bookingOptionNote}>{stay.note}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              <View style={styles.bookingSection}>
-                <Text style={styles.bookingSectionTitle}>Данни за резервацията</Text>
-                <TextInput
-                  style={styles.bookingInput}
-                  placeholder="Име за резервацията"
-                  placeholderTextColor="#7B8870"
-                  value={bookingForm.contactName}
-                  onChangeText={(value) =>
-                    setBookingForm((current) => ({
-                      ...current,
-                      contactName: value,
-                    }))
-                  }
-                />
-                <TextInput
-                  style={styles.bookingInput}
-                  placeholder="Email за потвърждение"
-                  placeholderTextColor="#7B8870"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  value={bookingForm.contactEmail}
-                  onChangeText={(value) =>
-                    setBookingForm((current) => ({
-                      ...current,
-                      contactEmail: value,
-                    }))
-                  }
-                />
-                <TextInput
-                  style={[styles.bookingInput, styles.bookingNoteInput]}
-                  placeholder="Бележка по желание"
-                  placeholderTextColor="#7B8870"
-                  value={bookingForm.note}
-                  onChangeText={(value) =>
-                    setBookingForm((current) => ({
-                      ...current,
-                      note: value,
-                    }))
-                  }
-                  multiline
-                />
-              </View>
-
-              <View style={styles.bookingSection}>
-                <Text style={styles.bookingSectionTitle}>Метод на плащане</Text>
-                <View style={styles.paymentMethodsRow}>
-                  {PAYMENT_METHODS.map((method) => {
-                    const isSelected = bookingForm.paymentMethod === method;
-
-                    return (
-                      <TouchableOpacity
-                        key={method}
-                        style={[
-                          styles.paymentMethodChip,
-                          isSelected && styles.paymentMethodChipSelected,
-                        ]}
-                        onPress={() =>
-                          setBookingForm((current) => ({
-                            ...current,
-                            paymentMethod: method,
-                          }))
-                        }
-                        activeOpacity={0.9}
-                      >
-                        <Text
-                          style={[
-                            styles.paymentMethodChipText,
-                            isSelected && styles.paymentMethodChipTextSelected,
-                          ]}
-                        >
-                          {method}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-
-              <View style={styles.bookingSummaryCard}>
-                <Text style={styles.bookingSummaryTitle}>Обобщение</Text>
-                <Text style={styles.bookingSummaryLine}>
-                  {latestPlan?.destination || "Дестинация"} • {latestPlan?.days || "Пътуване"}
-                </Text>
-                <Text style={styles.bookingSummaryLine}>
-                  {latestPlan?.travelers || "Пътници"} • {latestPlan?.timing || "Период"}
-                </Text>
-                {selectedTransport ? (
-                  <Text style={styles.bookingSummaryLine}>
-                    Транспорт: {selectedTransport.mode} • {selectedTransport.price}
-                  </Text>
-                ) : null}
-                {selectedStay ? (
-                  <Text style={styles.bookingSummaryLine}>
-                    Престой: {selectedStay.name} • {selectedStay.pricePerNight}
-                  </Text>
-                ) : null}
-                <Text style={styles.bookingSummaryTotal}>{bookingEstimate.totalLabel}</Text>
-                <Text style={styles.bookingSummaryHint}>
-                  Сумата е изчислена спрямо избрания транспорт и мястото за престой.
-                </Text>
-              </View>
-
-              {bookingError ? <Text style={styles.bookingErrorText}>{bookingError}</Text> : null}
-
-              <TouchableOpacity
-                style={[
-                  styles.bookingPayButton,
-                  bookingProcessing && styles.disabledButton,
-                ]}
-                onPress={() => {
-                  void handleConfirmBooking();
-                }}
-                disabled={bookingProcessing}
-                activeOpacity={0.9}
-              >
-                <MaterialIcons name="lock" size={18} color="#FFFFFF" />
-                <Text style={styles.bookingPayButtonText}>
-                  {bookingProcessing ? "Обработваме..." : "Плати и потвърди"}
-                </Text>
-              </TouchableOpacity>
-                </>
-              )}
+              {renderChatList(true)}
             </ScrollView>
-          </View>
+          </Animated.View>
         </View>
-      </Modal>
+      ) : null}
+      <ConfirmDialog
+        visible={!!pendingDeleteChat}
+        title="Delete chat?"
+        message={
+          pendingDeleteChat
+            ? `This will permanently remove "${pendingDeleteChat.title}".`
+            : ""
+        }
+        confirmLabel="Delete"
+        destructive
+        onCancel={() => setPendingDeleteChat(null)}
+        onConfirm={() => {
+          void confirmDeleteChat();
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -2337,6 +1886,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingTop: 14,
     paddingBottom: 12,
+  },
+  keyboardWrap: {
+    flex: 1,
   },
   shell: {
     flex: 1,
@@ -2386,6 +1938,49 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 8,
   },
+  phoneHeaderBrandWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  phoneHamburgerButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F3F8E8",
+    borderWidth: 1,
+    borderColor: "#DDE8C7",
+    marginRight: 10,
+  },
+  phoneChatMenuSection: {
+    marginBottom: 10,
+  },
+  phoneChatMenuButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: "#F3F8E8",
+    borderWidth: 1,
+    borderColor: "#DDE8C7",
+  },
+  phoneChatMenuButtonText: {
+    color: "#29440F",
+    fontSize: 14,
+    fontWeight: "800",
+    marginLeft: 6,
+  },
+  phoneChatMenuPanel: {
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 20,
+    backgroundColor: "#FAFCF5",
+    borderWidth: 1,
+    borderColor: "#DDE8C7",
+  },
   sidebarTitle: {
     color: "#29440F",
     fontSize: 20,
@@ -2418,8 +2013,36 @@ const styles = StyleSheet.create({
   newChatButtonTextPhone: {
     fontSize: 14,
   },
+  sidebarSearchWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#DDE8C7",
+    paddingHorizontal: 12,
+    marginBottom: 10,
+  },
+  sidebarSearchInput: {
+    flex: 1,
+    minHeight: 46,
+    marginLeft: 8,
+    color: "#29440F",
+  },
   sidebarList: {
     flex: 1,
+  },
+  sidebarListWide: {
+    flex: 1,
+  },
+  sidebarListStacked: {
+    flexGrow: 0,
+  },
+  sidebarListPhonePanel: {
+    maxHeight: 280,
+  },
+  sidebarListHiddenPhone: {
+    display: "none",
   },
   sidebarListContent: {
     paddingBottom: 12,
@@ -2439,6 +2062,78 @@ const styles = StyleSheet.create({
   chatListItemPhone: {
     width: 210,
     padding: 10,
+  },
+  chatListItemPhoneMenu: {
+    width: "100%",
+    padding: 10,
+  },
+  phoneDrawerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 40,
+    elevation: 20,
+  },
+  phoneDrawerBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(18, 27, 10, 0.34)",
+  },
+  phoneDrawerPanel: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: "#FAFCF5",
+    borderTopRightRadius: 24,
+    borderBottomRightRadius: 24,
+    borderRightWidth: 1,
+    borderColor: "#DDE8C7",
+    paddingHorizontal: 14,
+    shadowColor: "#121B0A",
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    shadowOffset: { width: 8, height: 0 },
+  },
+  phoneDrawerTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  phoneDrawerBrand: {
+    color: "#29440F",
+    fontSize: 22,
+    fontWeight: "900",
+  },
+  phoneDrawerCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F3F8E8",
+    borderWidth: 1,
+    borderColor: "#DDE8C7",
+  },
+  phoneDrawerSearchWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F5F7EF",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#DDE8C7",
+    paddingHorizontal: 12,
+    marginBottom: 14,
+  },
+  phoneDrawerSearchInput: {
+    flex: 1,
+    minHeight: 48,
+    marginLeft: 8,
+    color: "#29440F",
+  },
+  phoneDrawerList: {
+    flex: 1,
+  },
+  phoneDrawerListContent: {
+    paddingBottom: 10,
   },
   chatListItemActive: {
     backgroundColor: "#E6F1D4",
@@ -2478,6 +2173,19 @@ const styles = StyleSheet.create({
   renameWrap: {
     width: "100%",
   },
+  emptyChatSearchState: {
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    borderRadius: 18,
+    backgroundColor: "#F3F8E8",
+    borderWidth: 1,
+    borderColor: "#DDE8C7",
+  },
+  emptyChatSearchText: {
+    color: "#6F7D63",
+    fontSize: 14,
+    textAlign: "center",
+  },
   renameInput: {
     backgroundColor: "#FFFFFF",
     borderRadius: 12,
@@ -2493,205 +2201,6 @@ const styles = StyleSheet.create({
   },
   main: {
     flex: 1,
-  },
-  plannerTopBar: {
-    alignItems: "center",
-    flexDirection: "row",
-    marginBottom: 12,
-    minHeight: 54,
-  },
-  plannerTopBarPhone: {
-    marginBottom: 10,
-  },
-  plannerTopBarTextWrap: {
-    flex: 1,
-    paddingLeft: 12,
-  },
-  plannerTopBarTitle: {
-    color: "#29440F",
-    fontSize: 24,
-    fontWeight: "800",
-  },
-  plannerTopBarMeta: {
-    color: "#5F6E53",
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 4,
-  },
-  plannerMenuButton: {
-    alignItems: "center",
-    backgroundColor: "#FAFCF5",
-    borderColor: "#DDE8C7",
-    borderRadius: 22,
-    borderWidth: 1,
-    height: 44,
-    justifyContent: "center",
-    width: 44,
-  },
-  historyMenuBackdrop: {
-    backgroundColor: "rgba(34,56,20,0.18)",
-    flex: 1,
-    flexDirection: "row",
-    paddingBottom: 16,
-    paddingRight: 16,
-  },
-  historyMenuDismissArea: {
-    flex: 1,
-  },
-  historyMenuCard: {
-    backgroundColor: "#FAFCF5",
-    borderColor: "#DDE8C7",
-    borderBottomRightRadius: 28,
-    borderTopRightRadius: 28,
-    borderWidth: 1,
-    height: "100%",
-    maxWidth: 380,
-    padding: 16,
-    shadowColor: "#1E2A12",
-    shadowOffset: { width: 10, height: 0 },
-    shadowOpacity: 0.14,
-    shadowRadius: 24,
-    width: "82%",
-  },
-  historyMenuHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 14,
-  },
-  historyMenuTitle: {
-    color: "#29440F",
-    fontSize: 22,
-    fontWeight: "800",
-  },
-  historyMenuSubtitle: {
-    color: "#5F6E53",
-    fontSize: 13,
-    marginTop: 4,
-  },
-  historyMenuClose: {
-    alignItems: "center",
-    backgroundColor: "#EEF4E5",
-    borderRadius: 999,
-    height: 38,
-    justifyContent: "center",
-    width: 38,
-  },
-  historyMenuNewChatButton: {
-    marginBottom: 14,
-  },
-  contextStrip: {
-    backgroundColor: "#F3F8E8",
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "#DDE8C7",
-    padding: 14,
-    marginBottom: 12,
-  },
-  contextStripPhone: {
-    padding: 12,
-    borderRadius: 16,
-  },
-  contextStripTitle: {
-    color: "#47642A",
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    marginBottom: 8,
-    letterSpacing: 0.8,
-  },
-  hero: {
-    backgroundColor: "#223814",
-    borderRadius: 28,
-    padding: 22,
-    marginBottom: 14,
-    shadowColor: "#18240F",
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 6,
-  },
-  heroTopRowPhone: {
-    marginBottom: 8,
-  },
-  heroTopRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 12,
-  },
-  heroTextWrap: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  heroTextWrapPhone: {
-    paddingRight: 0,
-  },
-  heroIconBadge: {
-    width: 52,
-    height: 52,
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  kicker: {
-    color: "#C8E08E",
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 1,
-    marginBottom: 8,
-  },
-  title: {
-    color: "#FFFFFF",
-    fontSize: 28,
-    lineHeight: 34,
-    fontWeight: "800",
-    marginBottom: 8,
-  },
-  titlePhone: {
-    fontSize: 18,
-    lineHeight: 24,
-    marginBottom: 6,
-  },
-  subtitle: {
-    color: "#E6F0CF",
-    fontSize: 14,
-    lineHeight: 21,
-  },
-  subtitlePhone: {
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  profileMetaRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-  },
-  profileMetaRowPhone: {
-    marginTop: 2,
-  },
-  profileMetaChip: {
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginRight: 8,
-    marginBottom: 8,
-  },
-  profileMetaChipPhone: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginRight: 6,
-    marginBottom: 6,
-  },
-  profileMetaChipText: {
-    color: "#F4F8E8",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  profileMetaChipTextPhone: {
-    fontSize: 11,
   },
   chatCard: {
     flex: 1,
@@ -2710,6 +2219,26 @@ const styles = StyleSheet.create({
   },
   messagesContainerPhone: {
     minHeight: 180,
+  },
+  scrollToBottomButton: {
+    position: "absolute",
+    right: 18,
+    bottom: 148,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#5C8C1F",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#121B0A",
+    shadowOpacity: 0.16,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  scrollToBottomButtonPhone: {
+    right: 14,
+    bottom: 144,
   },
   messagesContent: {
     paddingBottom: 18,
@@ -2748,6 +2277,27 @@ const styles = StyleSheet.create({
   messageText: {
     fontSize: 15,
     lineHeight: 22,
+  },
+  messageTextBold: {
+    fontWeight: "800",
+  },
+  messageParagraph: {
+    marginBottom: 6,
+  },
+  messageBulletRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: 6,
+  },
+  messageBulletMark: {
+    width: 16,
+    fontWeight: "800",
+  },
+  messageBulletText: {
+    flex: 1,
+  },
+  messageSpacer: {
+    height: 8,
   },
   assistantMessageText: {
     color: "#2C3E1A",
@@ -2858,31 +2408,49 @@ const styles = StyleSheet.create({
   optionTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
     marginBottom: 8,
+  },
+  optionTopRowStacked: {
+    flexDirection: "column",
+  },
+  optionHeadingWrap: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 10,
   },
   optionModeWrap: {
     flexDirection: "row",
     alignItems: "center",
-    flex: 1,
-    paddingRight: 10,
+    minWidth: 0,
+    marginBottom: 4,
   },
   optionModeText: {
     color: "#3B6D11",
     fontSize: 13,
     fontWeight: "800",
     marginLeft: 8,
+    flexShrink: 1,
   },
   optionPrice: {
     color: "#8B5611",
     fontSize: 13,
     fontWeight: "800",
+    flexShrink: 1,
+    textAlign: "right",
+    maxWidth: "42%",
+  },
+  optionPricePhone: {
+    maxWidth: "100%",
+    textAlign: "left",
+    marginTop: 2,
   },
   optionProvider: {
     color: "#273C17",
     fontSize: 15,
     fontWeight: "800",
     marginBottom: 4,
+    flexShrink: 1,
   },
   optionRoute: {
     color: "#4E5F40",
@@ -2900,51 +2468,6 @@ const styles = StyleSheet.create({
     color: "#5C694C",
     fontSize: 13,
     lineHeight: 19,
-  },
-  offerSourceText: {
-    color: "#7A6842",
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: "700",
-    marginBottom: 6,
-  },
-  optionActionsRow: {
-    flexDirection: "row",
-    marginTop: 12,
-  },
-  optionHalfButton: {
-    flex: 1,
-  },
-  optionLinkButton: {
-    backgroundColor: "#EEF4E5",
-    borderRadius: 12,
-    paddingVertical: 11,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    marginRight: 8,
-    borderWidth: 1,
-    borderColor: "#D8E3C2",
-  },
-  optionLinkButtonText: {
-    color: "#365A14",
-    fontSize: 13,
-    fontWeight: "800",
-    marginLeft: 8,
-  },
-  optionActionButton: {
-    backgroundColor: "#365A14",
-    borderRadius: 12,
-    paddingVertical: 11,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-  },
-  optionActionButtonText: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "800",
-    marginLeft: 8,
   },
   dayCard: {
     backgroundColor: "#FFFFFF",
@@ -3005,20 +2528,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginBottom: 10,
   },
-  bookingSuccessText: {
-    color: "#1D6C4D",
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: "700",
-    marginBottom: 10,
-  },
-  bookingErrorText: {
-    color: "#A63228",
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: "700",
-    marginBottom: 10,
-  },
   savePlanButton: {
     backgroundColor: "#5C8C1F",
     borderRadius: 14,
@@ -3036,20 +2545,6 @@ const styles = StyleSheet.create({
   },
   savedPlanButtonText: {
     color: "#3B6D11",
-  },
-  bookNowButton: {
-    marginTop: 10,
-    backgroundColor: "#223814",
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-  },
-  bookNowButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "800",
-    marginLeft: 8,
   },
   quickRepliesSection: {
     marginTop: 8,
@@ -3091,412 +2586,45 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 1,
     borderColor: "#DDE8C7",
+    marginTop: 6,
   },
   composerPhone: {
     borderRadius: 20,
     padding: 12,
   },
+  composerInner: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+  },
   input: {
-    minHeight: 74,
+    flex: 1,
+    minHeight: 52,
     maxHeight: 120,
     color: "#29440F",
     fontSize: 15,
     lineHeight: 22,
     textAlignVertical: "top",
-    marginBottom: 12,
-  },
-  inputPhone: {
-    minHeight: 54,
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 10,
-  },
-  actionsRow: {
-    flexDirection: "row",
-  },
-  actionsRowStacked: {
-    flexDirection: "column",
-  },
-  secondaryButton: {
-    flex: 1,
-    backgroundColor: "#FFF2DA",
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: "center",
-    marginRight: 8,
-  },
-  secondaryButtonStacked: {
-    marginRight: 0,
-    marginBottom: 8,
-  },
-  secondaryButtonText: {
-    color: "#8B5611",
-    fontWeight: "800",
-  },
-  primaryButton: {
-    flex: 1,
-    backgroundColor: "#5C8C1F",
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    marginLeft: 8,
-  },
-  primaryButtonStacked: {
-    marginLeft: 0,
-  },
-  primaryButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "800",
-    marginLeft: 8,
-  },
-  bookingModalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(18, 27, 10, 0.54)",
-    justifyContent: "center",
-    padding: 18,
-  },
-  bookingModalCard: {
-    width: "100%",
-    maxWidth: 760,
-    alignSelf: "center",
-    maxHeight: "92%",
-    backgroundColor: "#FAFCF5",
-    borderRadius: 28,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: "#DDE8C7",
-  },
-  bookingModalContent: {
-    paddingBottom: 6,
-  },
-  bookingModalHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    marginBottom: 16,
-  },
-  bookingModalHeaderText: {
-    flex: 1,
+    paddingTop: 4,
     paddingRight: 12,
   },
-  bookingModalKicker: {
-    color: "#6A8F2A",
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 1,
-    marginBottom: 8,
-  },
-  bookingModalTitle: {
-    color: "#29440F",
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: "800",
-    marginBottom: 8,
-  },
-  bookingModalSubtitle: {
-    color: "#5C694C",
+  inputPhone: {
+    minHeight: 46,
     fontSize: 14,
     lineHeight: 20,
   },
-  bookingCloseButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: "#EEF4E5",
+  sendButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#5C8C1F",
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
   },
-  bookingSection: {
-    marginBottom: 16,
-  },
-  bookingSectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  bookingSectionTitle: {
-    color: "#365A14",
-    fontSize: 15,
-    fontWeight: "800",
-  },
-  bookingSkipChip: {
-    backgroundColor: "#EEF4E5",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: "#D8E3C2",
-  },
-  bookingSkipChipSelected: {
-    backgroundColor: "#365A14",
-    borderColor: "#365A14",
-  },
-  bookingSkipChipText: {
-    color: "#365A14",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  bookingSkipChipTextSelected: {
-    color: "#FFFFFF",
-  },
-  bookingOptionCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "#DDE8C7",
-    padding: 14,
-    marginBottom: 10,
-  },
-  bookingOptionCardSelected: {
-    borderColor: "#5C8C1F",
-    backgroundColor: "#F0F7E3",
-  },
-  bookingOptionTopRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 6,
-  },
-  bookingOptionTitle: {
-    color: "#29440F",
-    fontSize: 15,
-    fontWeight: "800",
-    flex: 1,
-    paddingRight: 10,
-  },
-  bookingOptionPrice: {
-    color: "#8B5611",
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  bookingOptionMeta: {
-    color: "#516244",
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 4,
-  },
-  bookingOptionNote: {
-    color: "#627254",
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  bookingInput: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#DDE8C7",
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    color: "#29440F",
-    fontSize: 14,
-    marginBottom: 10,
-  },
-  bookingNoteInput: {
-    minHeight: 86,
-    textAlignVertical: "top",
-  },
-  paymentMethodsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-  },
-  paymentMethodChip: {
-    backgroundColor: "#EEF4E5",
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginRight: 8,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: "#D8E3C2",
-  },
-  paymentMethodChipSelected: {
-    backgroundColor: "#5C8C1F",
-    borderColor: "#5C8C1F",
-  },
-  paymentMethodChipText: {
-    color: "#365A14",
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  paymentMethodChipTextSelected: {
-    color: "#FFFFFF",
-  },
-  bookingSummaryCard: {
-    backgroundColor: "#FFF8E7",
+  sendButtonPhone: {
+    width: 40,
+    height: 40,
     borderRadius: 20,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#F1D7A5",
-    marginBottom: 16,
-  },
-  bookingSummaryTitle: {
-    color: "#8B5611",
-    fontSize: 15,
-    fontWeight: "800",
-    marginBottom: 8,
-  },
-  bookingSummaryLine: {
-    color: "#6A5731",
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 4,
-  },
-  bookingSummaryTotal: {
-    color: "#4E3A19",
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: "800",
-    marginTop: 8,
-    marginBottom: 6,
-  },
-  bookingSummaryHint: {
-    color: "#7A6842",
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  checkoutProcessingCard: {
-    backgroundColor: "#F7FBEF",
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: "#DDE8C7",
-    padding: 20,
-  },
-  checkoutProcessingIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: 24,
-    backgroundColor: "#E7F0D7",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 16,
-    alignSelf: "center",
-  },
-  checkoutProcessingTitle: {
-    color: "#223814",
-    fontSize: 22,
-    lineHeight: 28,
-    fontWeight: "800",
-    textAlign: "center",
-    marginBottom: 8,
-  },
-  checkoutProcessingSubtitle: {
-    color: "#5D6D50",
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: "center",
-    marginBottom: 18,
-  },
-  checkoutProgressTrack: {
-    height: 12,
-    borderRadius: 999,
-    backgroundColor: "#E8F0DB",
-    overflow: "hidden",
-    marginBottom: 16,
-  },
-  checkoutProgressFill: {
-    height: "100%",
-    borderRadius: 999,
-    backgroundColor: "#5C8C1F",
-  },
-  checkoutProcessingSteps: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "#DDE8C7",
-    padding: 14,
-    marginBottom: 16,
-  },
-  checkoutProcessingStep: {
-    color: "#43563A",
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 6,
-  },
-  checkoutSuccessCard: {
-    backgroundColor: "#F7FBEF",
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: "#DDE8C7",
-    padding: 20,
-    alignItems: "center",
-  },
-  checkoutSuccessBadge: {
-    width: 74,
-    height: 74,
-    borderRadius: 24,
-    backgroundColor: "#5C8C1F",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 16,
-  },
-  checkoutSuccessTitle: {
-    color: "#223814",
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: "800",
-    textAlign: "center",
-    marginBottom: 8,
-  },
-  checkoutSuccessSubtitle: {
-    color: "#5D6D50",
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: "center",
-    marginBottom: 18,
-  },
-  checkoutReceiptCard: {
-    width: "100%",
-    backgroundColor: "#FFF8E7",
-    borderRadius: 20,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#F1D7A5",
-    marginBottom: 16,
-  },
-  checkoutReceiptKicker: {
-    color: "#8B5611",
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 1,
-    marginBottom: 10,
-  },
-  checkoutReceiptLine: {
-    color: "#654F29",
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 6,
-  },
-  checkoutReceiptTotal: {
-    color: "#3D2E15",
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: "800",
-    marginTop: 6,
-    marginBottom: 8,
-  },
-  checkoutReceiptRef: {
-    color: "#7B6844",
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  bookingPayButton: {
-    backgroundColor: "#223814",
-    borderRadius: 16,
-    paddingVertical: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-  },
-  bookingPayButtonText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "800",
-    marginLeft: 8,
   },
   disabledButton: {
     opacity: 0.55,

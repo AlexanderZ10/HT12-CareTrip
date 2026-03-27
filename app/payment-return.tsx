@@ -154,7 +154,7 @@ export default function PaymentReturnScreen() {
           totalLabel: pendingCheckout.totalLabel,
         });
         setStage("success");
-        setMessage("Stripe test плащането е потвърдено и резервацията е записана в Saved.");
+        setMessage("Stripe test payment was confirmed and the booking was added to Trips.");
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message.trim() : "";
         setStage("error");

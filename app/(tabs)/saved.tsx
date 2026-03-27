@@ -1,7 +1,8 @@
+import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, type User } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   ScrollView,
@@ -12,21 +13,15 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { ConfirmDialog } from "../../components/confirm-dialog";
 import { auth, db } from "../../firebase";
-import { parseBookingOrders, type BookingOrder } from "../../utils/bookings";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
 import { getProfileDisplayName } from "../../utils/profile-info";
-import { parseSavedTrips, type SavedTrip } from "../../utils/saved-trips";
-import React from "react";
-
-const FILTER_OPTIONS = [
-  { id: "all", label: "All" },
-  { id: "paid", label: "Paid" },
-  { id: "home", label: "Home Planner" },
-  { id: "discover", label: "Discover" },
-] as const;
-
-type SavedFilter = (typeof FILTER_OPTIONS)[number]["id"];
+import {
+  parseSavedTrips,
+  removeSavedTripForUser,
+  type SavedTrip,
+} from "../../utils/saved-trips";
 
 function formatSavedDate(value: number) {
   return new Intl.DateTimeFormat("bg-BG", {
@@ -40,12 +35,12 @@ function formatSavedDate(value: number) {
 export default function SavedTabScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(null);
   const [profileName, setProfileName] = useState("Traveler");
-  const [bookingOrders, setBookingOrders] = useState<BookingOrder[]>([]);
   const [savedTrips, setSavedTrips] = useState<SavedTrip[]>([]);
   const [error, setError] = useState("");
-  const [activeFilter, setActiveFilter] = useState<SavedFilter>("all");
-  const [filterOpen, setFilterOpen] = useState(false);
+  const [pendingDeleteTrip, setPendingDeleteTrip] = useState<SavedTrip | null>(null);
+  const [deletingTripKey, setDeletingTripKey] = useState<string | null>(null);
 
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
@@ -55,13 +50,14 @@ export default function SavedTabScreen() {
       unsubscribeProfile = null;
 
       if (!nextUser) {
-        setBookingOrders([]);
+        setUser(null);
         setSavedTrips([]);
         setLoading(false);
         router.replace("/login");
         return;
       }
 
+      setUser(nextUser);
       setLoading(true);
       setError("");
 
@@ -86,7 +82,6 @@ export default function SavedTabScreen() {
               username: typeof profileData.username === "string" ? profileData.username : null,
             })
           );
-          setBookingOrders(parseBookingOrders(profileData));
           setSavedTrips(parseSavedTrips(profileData));
           setLoading(false);
         },
@@ -103,15 +98,26 @@ export default function SavedTabScreen() {
     };
   }, [router]);
 
-  const selectedFilterLabel =
-    FILTER_OPTIONS.find((option) => option.id === activeFilter)?.label ?? "All";
-  const filteredBookingOrders = activeFilter === "all" || activeFilter === "paid"
-    ? bookingOrders
-    : [];
-  const filteredSavedTrips =
-    activeFilter === "all"
-      ? savedTrips
-      : savedTrips.filter((trip) => trip.source === activeFilter);
+  const handleDeleteTrip = async () => {
+    if (!user || !pendingDeleteTrip || deletingTripKey) {
+      return;
+    }
+
+    const sourceKey = pendingDeleteTrip.sourceKey;
+
+    try {
+      setDeletingTripKey(sourceKey);
+      setError("");
+
+      const nextSavedTrips = await removeSavedTripForUser(user.uid, sourceKey);
+      setSavedTrips(nextSavedTrips);
+      setPendingDeleteTrip(null);
+    } catch (nextError) {
+      setError(getFirestoreUserMessage(nextError, "write"));
+    } finally {
+      setDeletingTripKey(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -128,132 +134,33 @@ export default function SavedTabScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.hero}>
-          <Text style={styles.kicker}>Saved</Text>
-          <Text style={styles.title}>Запазени маршрути за {profileName}</Text>
+          <Text style={styles.kicker}>Trips</Text>
+          <Text style={styles.title}>Trips for {profileName}</Text>
           <Text style={styles.subtitle}>
-            Тук събираме trip идеи от Discover и AI маршрутите от Home на едно място.
+            Places from Discover and plans from Home are collected here in one tab.
           </Text>
-        </View>
-
-        <View style={styles.filterSection}>
-          <Text style={styles.filterLabel}>Filter</Text>
-          <TouchableOpacity
-            style={styles.filterButton}
-            onPress={() => setFilterOpen((current) => !current)}
-            activeOpacity={0.9}
-          >
-            <Text style={styles.filterButtonText}>{selectedFilterLabel}</Text>
-            <Text style={styles.filterButtonArrow}>{filterOpen ? "▲" : "▼"}</Text>
-          </TouchableOpacity>
-
-          {filterOpen ? (
-            <View style={styles.filterMenu}>
-              {FILTER_OPTIONS.map((option) => {
-                const isActive = option.id === activeFilter;
-
-                return (
-                  <TouchableOpacity
-                    key={option.id}
-                    style={[
-                      styles.filterOption,
-                      isActive && styles.filterOptionActive,
-                    ]}
-                    onPress={() => {
-                      setActiveFilter(option.id);
-                      setFilterOpen(false);
-                    }}
-                    activeOpacity={0.9}
-                  >
-                    <Text
-                      style={[
-                        styles.filterOptionText,
-                        isActive && styles.filterOptionTextActive,
-                      ]}
-                    >
-                      {option.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          ) : null}
         </View>
 
       {error ? (
         <View style={styles.errorCard}>
-          <Text style={styles.errorTitle}>Не успяхме да заредим запазените трипове</Text>
+          <Text style={styles.errorTitle}>Could not load Trips</Text>
           <Text style={styles.errorText}>{error}</Text>
         </View>
       ) : null}
 
-      {!error && filteredBookingOrders.length > 0 ? (
-        <View style={styles.bookingsSection}>
-          <Text style={styles.bookingsSectionTitle}>Booked in app</Text>
-          <Text style={styles.bookingsSectionSubtitle}>
-            Потвърдените transport и stay резервации се пазят тук.
-          </Text>
-
-          {filteredBookingOrders.map((booking) => (
-            <View key={booking.id} style={styles.bookingCard}>
-              <View style={styles.bookingTopRow}>
-                <View style={styles.bookingPaidBadge}>
-                  <Text style={styles.bookingPaidBadgeText}>Paid</Text>
-                </View>
-                <Text style={styles.dateText}>{formatSavedDate(booking.createdAtMs)}</Text>
-              </View>
-
-              <Text style={styles.tripTitle}>{booking.title}</Text>
-              <Text style={styles.tripDestination}>{booking.destination}</Text>
-
-              <View style={styles.metaRow}>
-                {booking.days ? <Text style={styles.metaText}>{booking.days}</Text> : null}
-                {booking.travelers ? <Text style={styles.metaText}>{booking.travelers}</Text> : null}
-                {booking.budget ? <Text style={styles.metaText}>{booking.budget}</Text> : null}
-              </View>
-
-              <Text style={styles.bookingTotal}>{booking.totalLabel}</Text>
-              <Text style={styles.bookingPaymentMeta}>{booking.paymentMethod}</Text>
-
-              {booking.transport ? (
-                <View style={styles.bookingDetailBlock}>
-                  <Text style={styles.bookingDetailTitle}>Transport</Text>
-                  <Text style={styles.bookingDetailText}>
-                    {booking.transport.mode} • {booking.transport.provider}
-                  </Text>
-                  <Text style={styles.bookingDetailText}>{booking.transport.route}</Text>
-                </View>
-              ) : null}
-
-              {booking.stay ? (
-                <View style={styles.bookingDetailBlock}>
-                  <Text style={styles.bookingDetailTitle}>Stay</Text>
-                  <Text style={styles.bookingDetailText}>
-                    {booking.stay.name} • {booking.stay.type}
-                  </Text>
-                  <Text style={styles.bookingDetailText}>
-                    {booking.stay.area} • {booking.stay.pricePerNight}
-                  </Text>
-                </View>
-              ) : null}
-
-              <Text style={styles.bookingContactText}>
-                {booking.contactName} • {booking.contactEmail}
-              </Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
-
-      {!error && filteredBookingOrders.length === 0 && filteredSavedTrips.length === 0 ? (
+      {!error && savedTrips.length === 0 ? (
         <View style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>Няма елементи за този филтър</Text>
+          <Text style={styles.emptyTitle}>No trips yet</Text>
           <Text style={styles.emptyText}>
-            Смени dropdown филтъра или запази нов trip / booking, за да се появи тук.
+            Save a place from Discover or a plan from Home and it will appear here.
           </Text>
         </View>
       ) : null}
 
-        {filteredSavedTrips.map((trip) => (
+        {savedTrips.map((trip) => {
+          const isDeleting = deletingTripKey === trip.sourceKey;
+
+          return (
           <View key={trip.id} style={styles.tripCard}>
           <View style={styles.cardTopRow}>
             <View
@@ -273,7 +180,20 @@ export default function SavedTabScreen() {
                 {trip.source === "home" ? "Home Planner" : "Discover"}
               </Text>
             </View>
-            <Text style={styles.dateText}>{formatSavedDate(trip.createdAtMs)}</Text>
+            <View style={styles.cardMetaActions}>
+              <Text style={styles.dateText}>{formatSavedDate(trip.createdAtMs)}</Text>
+              <TouchableOpacity
+                style={[styles.deleteButton, isDeleting && styles.deleteButtonDisabled]}
+                onPress={() => setPendingDeleteTrip(trip)}
+                disabled={isDeleting}
+                activeOpacity={0.9}
+              >
+                <MaterialIcons name="delete-outline" size={16} color="#8A3D35" />
+                <Text style={styles.deleteButtonText}>
+                  {isDeleting ? "Deleting..." : "Delete"}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <Text style={styles.tripTitle}>{trip.title}</Text>
@@ -288,8 +208,29 @@ export default function SavedTabScreen() {
 
           <Text style={styles.detailsText}>{trip.details}</Text>
           </View>
-        ))}
+        );
+        })}
       </ScrollView>
+      <ConfirmDialog
+        visible={!!pendingDeleteTrip}
+        title="Delete trip?"
+        message={
+          pendingDeleteTrip
+            ? `This will remove "${pendingDeleteTrip.title}" from Trips.`
+            : ""
+        }
+        confirmLabel="Delete"
+        destructive
+        loading={!!deletingTripKey}
+        onCancel={() => {
+          if (!deletingTripKey) {
+            setPendingDeleteTrip(null);
+          }
+        }}
+        onConfirm={() => {
+          void handleDeleteTrip();
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -373,135 +314,6 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     textAlign: "center",
   },
-  filterSection: {
-    marginBottom: 16,
-  },
-  filterLabel: {
-    color: "#47642A",
-    fontSize: 13,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    marginBottom: 8,
-  },
-  filterButton: {
-    backgroundColor: "#FAFCF5",
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: "#DDE8C7",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  filterButtonText: {
-    color: "#29440F",
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  filterButtonArrow: {
-    color: "#5A6E41",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  filterMenu: {
-    marginTop: 8,
-    backgroundColor: "#FAFCF5",
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "#DDE8C7",
-    padding: 8,
-  },
-  filterOption: {
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
-  filterOptionActive: {
-    backgroundColor: "#EAF3DE",
-  },
-  filterOptionText: {
-    color: "#365A14",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  filterOptionTextActive: {
-    color: "#29440F",
-  },
-  bookingsSection: {
-    marginBottom: 18,
-  },
-  bookingsSectionTitle: {
-    color: "#29440F",
-    fontSize: 22,
-    fontWeight: "800",
-    marginBottom: 6,
-  },
-  bookingsSectionSubtitle: {
-    color: "#5F6E53",
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 12,
-  },
-  bookingCard: {
-    backgroundColor: "#FFF8E7",
-    borderRadius: 24,
-    padding: 20,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: "#F1D7A5",
-  },
-  bookingTopRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  bookingPaidBadge: {
-    backgroundColor: "#DFF1D0",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  bookingPaidBadgeText: {
-    color: "#1D6C4D",
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-  },
-  bookingTotal: {
-    color: "#4E3A19",
-    fontSize: 22,
-    fontWeight: "800",
-    marginBottom: 6,
-  },
-  bookingPaymentMeta: {
-    color: "#8B5611",
-    fontSize: 13,
-    fontWeight: "700",
-    marginBottom: 10,
-  },
-  bookingDetailBlock: {
-    marginBottom: 10,
-  },
-  bookingDetailTitle: {
-    color: "#47642A",
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    marginBottom: 4,
-  },
-  bookingDetailText: {
-    color: "#5A6E41",
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  bookingContactText: {
-    color: "#627254",
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 4,
-  },
   tripCard: {
     backgroundColor: "#F6F8EE",
     borderRadius: 24,
@@ -516,9 +328,12 @@ const styles = StyleSheet.create({
   cardTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
     marginBottom: 12,
     gap: 10,
+  },
+  cardMetaActions: {
+    alignItems: "flex-end",
   },
   sourceBadge: {
     borderRadius: 999,
@@ -547,6 +362,26 @@ const styles = StyleSheet.create({
     color: "#6B7A5D",
     fontSize: 12,
     fontWeight: "600",
+    marginBottom: 8,
+  },
+  deleteButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "#FFF1EF",
+    borderWidth: 1,
+    borderColor: "#F0C7C1",
+  },
+  deleteButtonDisabled: {
+    opacity: 0.7,
+  },
+  deleteButtonText: {
+    color: "#8A3D35",
+    fontSize: 12,
+    fontWeight: "800",
+    marginLeft: 4,
   },
   tripTitle: {
     color: "#29440F",

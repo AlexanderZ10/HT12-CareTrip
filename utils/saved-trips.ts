@@ -105,7 +105,7 @@ export function buildSavedTripFromHome(params: {
   } satisfies SavedTrip;
 }
 
-export function parseSavedTrips(profileData: Record<string, unknown>): SavedTrip[] {
+export function parseSavedTrips(profileData: Record<string, unknown>) {
   const rawSavedTrips = Array.isArray(profileData.savedTrips) ? profileData.savedTrips : [];
 
   return rawSavedTrips
@@ -113,20 +113,19 @@ export function parseSavedTrips(profileData: Record<string, unknown>): SavedTrip
       (item): item is Record<string, unknown> => !!item && typeof item === "object"
     )
     .map(
-      (item, index) =>
-        ({
-          budget: normalizeBudgetToEuro(sanitizeString(item.budget)) || null,
-          createdAtMs:
-            typeof item.createdAtMs === "number" ? item.createdAtMs : Date.now() - index,
-          destination: sanitizeString(item.destination, "Unknown destination"),
-          details: sanitizeString(item.details),
-          duration: sanitizeString(item.duration) || null,
-          id: sanitizeString(item.id, `saved-${index}`),
-          source: item.source === "home" ? "home" : "discover",
-          sourceKey: sanitizeString(item.sourceKey, `saved-key-${index}`),
-          summary: sanitizeString(item.summary),
-          title: sanitizeString(item.title, "Saved trip"),
-        }) satisfies SavedTrip
+      (item, index): SavedTrip => ({
+        budget: normalizeBudgetToEuro(sanitizeString(item.budget)) || null,
+        createdAtMs:
+          typeof item.createdAtMs === "number" ? item.createdAtMs : Date.now() - index,
+        destination: sanitizeString(item.destination, "Unknown destination"),
+        details: sanitizeString(item.details),
+        duration: sanitizeString(item.duration) || null,
+        id: sanitizeString(item.id, `saved-${index}`),
+        source: item.source === "home" ? "home" : "discover",
+        sourceKey: sanitizeString(item.sourceKey, `saved-key-${index}`),
+        summary: sanitizeString(item.summary),
+        title: sanitizeString(item.title, "Trip"),
+      })
     )
     .sort((left, right) => right.createdAtMs - left.createdAtMs);
 }
@@ -150,6 +149,33 @@ export async function saveTripForUser(userId: string, trip: SavedTrip) {
     }
 
     nextSavedTrips = [trip, ...currentSavedTrips].slice(0, 50);
+
+    transaction.set(
+      profileRef,
+      {
+        savedTrips: nextSavedTrips,
+        savedTripsUpdatedAtMs: Date.now(),
+      },
+      { merge: true }
+    );
+  });
+
+  return nextSavedTrips;
+}
+
+export async function removeSavedTripForUser(userId: string, sourceKey: string) {
+  const profileRef = doc(db, "profiles", userId);
+
+  let nextSavedTrips: SavedTrip[] = [];
+
+  await runTransaction(db, async (transaction) => {
+    const profileSnapshot = await transaction.get(profileRef);
+    const profileData = profileSnapshot.exists()
+      ? (profileSnapshot.data() as Record<string, unknown>)
+      : {};
+
+    const currentSavedTrips = parseSavedTrips(profileData);
+    nextSavedTrips = currentSavedTrips.filter((trip) => trip.sourceKey !== sourceKey);
 
     transaction.set(
       profileRef,

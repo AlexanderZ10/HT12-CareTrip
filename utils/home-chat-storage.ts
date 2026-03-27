@@ -39,6 +39,7 @@ export type StoredHomePlannerState = {
   budget: string;
   days: string;
   destination: string;
+  followUpMessages: HomeChatMessage[];
   timing: string;
   transportPreference: string;
   travelers: string;
@@ -199,6 +200,7 @@ export function createEmptyPlannerState(initialAssistantMessage: string): Stored
     budget: "",
     days: "",
     destination: "",
+    followUpMessages: [],
     timing: "",
     transportPreference: "",
     travelers: "",
@@ -262,11 +264,13 @@ function parsePlannerStateFromRaw(
   initialAssistantMessage: string
 ): StoredHomePlannerState {
   const messages = parsePlannerMessages(rawState.chatMessages ?? rawState.messages);
+  const followUpMessages = parsePlannerMessages(rawState.followUpMessages);
 
   return {
     budget: normalizeBudgetToEuro(sanitizeString(rawState.budget)),
     days: sanitizeString(rawState.days),
     destination: sanitizeString(rawState.destination),
+    followUpMessages,
     timing: sanitizeString(rawState.timing),
     transportPreference: sanitizeString(rawState.transportPreference),
     travelers: sanitizeString(rawState.travelers),
@@ -384,6 +388,15 @@ export async function saveHomePlannerStoreForUser(
             budget: normalizeBudgetToEuro(chat.state.budget),
             days: chat.state.days.trim(),
             destination: chat.state.destination.trim(),
+            followUpMessages: chat.state.followUpMessages
+              .filter((message) => message.text.trim().length > 0)
+              .slice(-30)
+              .map((message) => ({
+                createdAtMs: message.createdAtMs,
+                id: message.id,
+                role: message.role,
+                text: message.text.trim(),
+              })),
             timing: chat.state.timing.trim(),
             transportPreference: chat.state.transportPreference.trim(),
             travelers: chat.state.travelers.trim(),
