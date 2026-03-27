@@ -1,3 +1,14 @@
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  limit,
+  query,
+  type Firestore,
+  writeBatch,
+} from "firebase/firestore";
+
 export type GroupAccessType = "public" | "private";
 
 export type TravelGroup = {
@@ -91,4 +102,32 @@ export function sortGroupsByCreatedAt(groups: TravelGroup[]) {
     const rightValue = right.updatedAtMs ?? right.createdAtMs ?? 0;
     return rightValue - leftValue;
   });
+}
+
+const GROUP_DELETE_BATCH_SIZE = 100;
+
+export async function deleteGroupWithMessages(db: Firestore, groupId: string) {
+  const messagesRef = collection(db, "groups", groupId, "messages");
+
+  while (true) {
+    const messagesSnapshot = await getDocs(query(messagesRef, limit(GROUP_DELETE_BATCH_SIZE)));
+
+    if (messagesSnapshot.empty) {
+      break;
+    }
+
+    const batch = writeBatch(db);
+
+    messagesSnapshot.docs.forEach((messageDocument) => {
+      batch.delete(messageDocument.ref);
+    });
+
+    await batch.commit();
+
+    if (messagesSnapshot.size < GROUP_DELETE_BATCH_SIZE) {
+      break;
+    }
+  }
+
+  await deleteDoc(doc(db, "groups", groupId));
 }

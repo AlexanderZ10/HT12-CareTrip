@@ -1,17 +1,21 @@
 import { MaterialIcons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import {
   doc,
   onSnapshot,
   serverTimestamp,
+  setDoc,
   writeBatch,
 } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -20,6 +24,10 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { auth, db } from "../../firebase";
+import {
+  useAppTheme,
+  type AppThemePreference,
+} from "../../components/app-theme-provider";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
 import {
   extractPersonalProfile,
@@ -34,7 +42,6 @@ import {
   type ProfileVisibility,
 } from "../../utils/public-profiles";
 import { extractDiscoverProfile } from "../../utils/trip-recommendations";
-import React from "react";
 
 type ProfileFormState = PersonalProfileInfo;
 
@@ -45,13 +52,30 @@ type ChoicePillProps = {
 };
 
 function ChoicePill({ label, onPress, selected }: ChoicePillProps) {
+  const { colors } = useAppTheme();
+
   return (
     <TouchableOpacity
-      style={[styles.pill, selected && styles.pillSelected]}
+      style={[
+        styles.pill,
+        {
+          backgroundColor: colors.accentMuted,
+          borderColor: colors.border,
+        },
+        selected && [styles.pillSelected, { backgroundColor: colors.accent, borderColor: colors.accent }],
+      ]}
       onPress={onPress}
       activeOpacity={0.9}
     >
-      <Text style={[styles.pillText, selected && styles.pillTextSelected]}>{label}</Text>
+      <Text
+        style={[
+          styles.pillText,
+          { color: colors.textPrimary },
+          selected && styles.pillTextSelected,
+        ]}
+      >
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 }
@@ -65,19 +89,24 @@ const EMPTY_FORM: ProfileFormState = {
   travelPace: "",
 };
 
+const PROFILE_PHOTO_MAX_LENGTH = 850000;
+
 export default function ProfileTabScreen() {
   const router = useRouter();
+  const { colors, isDark, setThemePreference, themePreference } = useAppTheme();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [profileName, setProfileName] = useState("Traveler");
   const [email, setEmail] = useState("");
+  const [profilePhotoUrl, setProfilePhotoUrl] = useState("");
   const [username, setUsername] = useState("");
   const [profileVisibility, setProfileVisibility] =
     useState<ProfileVisibility>("private");
   const [form, setForm] = useState<ProfileFormState>(EMPTY_FORM);
   const [error, setError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState("");
+  const [updatingPhoto, setUpdatingPhoto] = useState(false);
   const [onboardingSummary, setOnboardingSummary] = useState<{
     assistance: string[];
     interests: string[];
@@ -134,6 +163,9 @@ export default function ProfileTabScreen() {
             })
           );
           setEmail(nextUser.email ?? "");
+          setProfilePhotoUrl(
+            typeof profileData.profilePhotoUrl === "string" ? profileData.profilePhotoUrl : ""
+          );
           setUsername(
             typeof profileData.username === "string" ? profileData.username : ""
           );
@@ -195,8 +227,10 @@ export default function ProfileTabScreen() {
       batch.set(
         profileRef,
         {
+          profilePhotoUrl,
           profileInfo: nextProfileInfo,
           profileVisibility,
+          themePreference,
           updatedAt: serverTimestamp(),
         },
         { merge: true }
@@ -207,6 +241,7 @@ export default function ProfileTabScreen() {
           publicProfileRef,
           buildPublicProfilePayload({
             email: currentUser.email,
+            profilePhotoUrl,
             profileInfo: nextProfileInfo,
             uid: currentUser.uid,
             username,
@@ -230,6 +265,172 @@ export default function ProfileTabScreen() {
     }
   };
 
+  const handleThemePreferenceChange = async (nextThemePreference: AppThemePreference) => {
+    const currentUser = auth.currentUser;
+
+    if (!currentUser || nextThemePreference === themePreference) {
+      return;
+    }
+
+    const previousThemePreference = themePreference;
+
+    try {
+      setThemePreference(nextThemePreference);
+      setError("");
+      setSaveSuccess("");
+
+      await setDoc(
+        doc(db, "profiles", currentUser.uid),
+        {
+          themePreference: nextThemePreference,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      setSaveSuccess(
+        nextThemePreference === "dark"
+          ? "Dark mode е включен."
+          : "Light mode е включен."
+      );
+    } catch (nextError) {
+      setThemePreference(previousThemePreference);
+      setError(getFirestoreUserMessage(nextError, "write"));
+    }
+  };
+
+  const handlePickProfilePhoto = async () => {
+    const currentUser = auth.currentUser;
+
+    if (!currentUser) {
+      return;
+    }
+
+    try {
+      setUpdatingPhoto(true);
+      setError("");
+      setSaveSuccess("");
+
+      const permissionResponse = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permissionResponse.granted) {
+        setError("Разреши достъп до снимките, за да избереш профилна снимка.");
+        return;
+      }
+
+      const pickerResult = await ImagePicker.launchImageLibraryAsync({
+        allowsEditing: true,
+        aspect: [1, 1],
+        base64: true,
+        mediaTypes: ["images"],
+        quality: 0.35,
+      });
+
+      if (pickerResult.canceled || !pickerResult.assets?.length) {
+        return;
+      }
+
+      const asset = pickerResult.assets[0];
+      const encodedImage = asset.base64
+        ? `data:${asset.mimeType || "image/jpeg"};base64,${asset.base64}`
+        : asset.uri;
+
+      if (!encodedImage) {
+        setError("Не успяхме да подготвим снимката. Опитай отново.");
+        return;
+      }
+
+      if (encodedImage.length > PROFILE_PHOTO_MAX_LENGTH) {
+        setError("Снимката е твърде голяма. Избери по-лека или по-силно crop-ната снимка.");
+        return;
+      }
+
+      const profileRef = doc(db, "profiles", currentUser.uid);
+      const publicProfileRef = doc(db, "publicProfiles", currentUser.uid);
+      const batch = writeBatch(db);
+
+      batch.set(
+        profileRef,
+        {
+          profilePhotoUrl: encodedImage,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      if (profileVisibility === "public") {
+        batch.set(
+          publicProfileRef,
+          buildPublicProfilePayload({
+            email: currentUser.email,
+            profilePhotoUrl: encodedImage,
+            profileInfo: form,
+            uid: currentUser.uid,
+            username,
+          })
+        );
+      }
+
+      await batch.commit();
+
+      setProfilePhotoUrl(encodedImage);
+      setSaveSuccess("Профилната снимка е обновена.");
+    } catch (nextError) {
+      setError(getFirestoreUserMessage(nextError, "write"));
+    } finally {
+      setUpdatingPhoto(false);
+    }
+  };
+
+  const handleRemoveProfilePhoto = async () => {
+    const currentUser = auth.currentUser;
+
+    if (!currentUser || !profilePhotoUrl) {
+      return;
+    }
+
+    try {
+      setUpdatingPhoto(true);
+      setError("");
+      setSaveSuccess("");
+
+      const profileRef = doc(db, "profiles", currentUser.uid);
+      const publicProfileRef = doc(db, "publicProfiles", currentUser.uid);
+      const batch = writeBatch(db);
+
+      batch.set(
+        profileRef,
+        {
+          profilePhotoUrl: "",
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      if (profileVisibility === "public") {
+        batch.set(
+          publicProfileRef,
+          buildPublicProfilePayload({
+            email: currentUser.email,
+            profilePhotoUrl: "",
+            profileInfo: form,
+            uid: currentUser.uid,
+            username,
+          })
+        );
+      }
+
+      await batch.commit();
+
+      setProfilePhotoUrl("");
+      setSaveSuccess("Профилната снимка е махната.");
+    } catch (nextError) {
+      setError(getFirestoreUserMessage(nextError, "write"));
+    } finally {
+      setUpdatingPhoto(false);
+    }
+  };
+
   const handleLogout = async () => {
     try {
       await signOut(auth);
@@ -241,26 +442,103 @@ export default function ProfileTabScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loader} edges={["top", "left", "right"]}>
+      <SafeAreaView
+        style={[styles.loader, { backgroundColor: colors.screen }]}
+        edges={["top", "left", "right"]}
+      >
         <ActivityIndicator size="large" color="#5C8C1F" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
+    <SafeAreaView
+      style={[styles.screen, { backgroundColor: colors.screen }]}
+      edges={["top", "left", "right"]}
+    >
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.hero}>
+        <View style={[styles.hero, { backgroundColor: colors.hero }]}>
           <View style={styles.heroTopRow}>
-            <View>
-              <Text style={styles.kicker}>Profile</Text>
+            <View style={styles.heroIdentity}>
+              <Text style={[styles.kicker, { color: isDark ? "#B7E07C" : "#C8E08E" }]}>Profile</Text>
               <Text style={styles.heroTitle}>{profileName}</Text>
             </View>
-            <View style={styles.heroIcon}>
-              <MaterialIcons name="person-outline" size={28} color="#E8F1D4" />
+            <View style={styles.heroActions}>
+              <View
+                style={[
+                  styles.themeSwitchCard,
+                  {
+                    backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.08)",
+                    borderColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.12)",
+                  },
+                ]}
+              >
+                <View style={styles.themeSwitchTextWrap}>
+                  <Text style={styles.themeSwitchTitle}>Dark mode</Text>
+                  <Text style={styles.themeSwitchSubtitle}>
+                    {themePreference === "dark" ? "On" : "Off"}
+                  </Text>
+                </View>
+                <Switch
+                  value={themePreference === "dark"}
+                  onValueChange={(value) => {
+                    void handleThemePreferenceChange(value ? "dark" : "light");
+                  }}
+                  trackColor={{ false: "rgba(220,234,192,0.38)", true: "#A6D65A" }}
+                  thumbColor={themePreference === "dark" ? "#FFFFFF" : "#F6FAEF"}
+                  ios_backgroundColor="rgba(220,234,192,0.24)"
+                />
+              </View>
+
+              <View style={styles.heroPhotoWrap}>
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  disabled={updatingPhoto}
+                  onPress={() => {
+                    void handlePickProfilePhoto();
+                  }}
+                  style={[
+                    styles.heroPhotoButton,
+                    {
+                      backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.08)",
+                      borderColor: isDark ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.12)",
+                    },
+                  ]}
+                >
+                  {profilePhotoUrl ? (
+                    <Image
+                      contentFit="cover"
+                      source={{ uri: profilePhotoUrl }}
+                      style={styles.heroPhotoImage}
+                    />
+                  ) : (
+                    <MaterialIcons name="person-outline" size={28} color="#E8F1D4" />
+                  )}
+                  <View style={styles.heroPhotoBadge}>
+                    <MaterialIcons name="photo-camera" size={14} color="#29440F" />
+                  </View>
+                </TouchableOpacity>
+
+                <View style={styles.heroPhotoActions}>
+                  <Text style={styles.heroPhotoHint}>
+                    {updatingPhoto ? "Updating..." : profilePhotoUrl ? "Change photo" : "Add photo"}
+                  </Text>
+                  {profilePhotoUrl ? (
+                    <TouchableOpacity
+                      activeOpacity={0.9}
+                      disabled={updatingPhoto}
+                      onPress={() => {
+                        void handleRemoveProfilePhoto();
+                      }}
+                    >
+                      <Text style={styles.heroPhotoRemove}>Remove</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              </View>
             </View>
           </View>
 
@@ -277,22 +555,32 @@ export default function ProfileTabScreen() {
       </View>
 
       {error ? (
-        <View style={styles.errorCard}>
-          <Text style={styles.errorText}>{error}</Text>
+        <View
+          style={[
+            styles.errorCard,
+            { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
+          ]}
+        >
+          <Text style={[styles.errorText, { color: colors.errorText }]}>{error}</Text>
         </View>
       ) : null}
 
       {saveSuccess ? (
-        <View style={styles.successCard}>
-          <Text style={styles.successText}>{saveSuccess}</Text>
+        <View
+          style={[
+            styles.successCard,
+            { backgroundColor: colors.successBackground, borderColor: colors.successBorder },
+          ]}
+        >
+          <Text style={[styles.successText, { color: colors.successText }]}>{saveSuccess}</Text>
         </View>
       ) : null}
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Информация за теб</Text>
+      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Информация за теб</Text>
 
-        <Text style={styles.fieldLabel}>Видимост на профила</Text>
-        <Text style={styles.visibilityText}>
+        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Видимост на профила</Text>
+        <Text style={[styles.visibilityText, { color: colors.textSecondary }]}>
           Public профилите могат да бъдат виждани и канени в групи. Private профилите
           остават скрити от discover и invite списъците.
         </Text>
@@ -309,25 +597,39 @@ export default function ProfileTabScreen() {
           />
         </View>
 
-        <Text style={styles.fieldLabel}>Име</Text>
+        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Име</Text>
         <TextInput
-          style={styles.input}
+          style={[
+            styles.input,
+            {
+              backgroundColor: colors.inputBackground,
+              borderColor: colors.inputBorder,
+              color: colors.textPrimary,
+            },
+          ]}
           placeholder="Например Martin"
-          placeholderTextColor="#809071"
+          placeholderTextColor={colors.inputPlaceholder}
           value={form.fullName}
           onChangeText={(value) => updateField("fullName", value)}
         />
 
-        <Text style={styles.fieldLabel}>Откъде си</Text>
+        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Откъде си</Text>
         <TextInput
-          style={styles.input}
+          style={[
+            styles.input,
+            {
+              backgroundColor: colors.inputBackground,
+              borderColor: colors.inputBorder,
+              color: colors.textPrimary,
+            },
+          ]}
           placeholder="Град / държава"
-          placeholderTextColor="#809071"
+          placeholderTextColor={colors.inputPlaceholder}
           value={form.homeBase}
           onChangeText={(value) => updateField("homeBase", value)}
         />
 
-        <Text style={styles.fieldLabel}>Как обичаш да пътуваш</Text>
+        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Как обичаш да пътуваш</Text>
         <View style={styles.pillsRow}>
           {TRAVEL_PACE_OPTIONS.map((option) => (
             <ChoicePill
@@ -339,7 +641,7 @@ export default function ProfileTabScreen() {
           ))}
         </View>
 
-        <Text style={styles.fieldLabel}>Любим тип настаняване</Text>
+        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Любим тип настаняване</Text>
         <View style={styles.pillsRow}>
           {STAY_STYLE_OPTIONS.map((option) => (
             <ChoicePill
@@ -351,11 +653,19 @@ export default function ProfileTabScreen() {
           ))}
         </View>
 
-        <Text style={styles.fieldLabel}>Кратко за теб</Text>
+        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Кратко за теб</Text>
         <TextInput
-          style={[styles.input, styles.multilineInput]}
+          style={[
+            styles.input,
+            styles.multilineInput,
+            {
+              backgroundColor: colors.inputBackground,
+              borderColor: colors.inputBorder,
+              color: colors.textPrimary,
+            },
+          ]}
           placeholder="Какъв човек си, какво търсиш в пътуването, какъв вайб обичаш..."
-          placeholderTextColor="#809071"
+          placeholderTextColor={colors.inputPlaceholder}
           value={form.aboutMe}
           onChangeText={(value) => updateField("aboutMe", value)}
           multiline
@@ -375,56 +685,85 @@ export default function ProfileTabScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Onboarding профил</Text>
-        <Text style={styles.cardSubtitle}>
+      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Onboarding профил</Text>
+        <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
           Това вече е записано във Firebase и също участва в AI препоръките.
         </Text>
 
-        <Text style={styles.summaryLabel}>Интереси</Text>
+        <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Интереси</Text>
         <View style={styles.summaryRow}>
           {onboardingSummary.interests.map((item) => (
-            <View key={item} style={styles.summaryChip}>
-              <Text style={styles.summaryChipText}>{item}</Text>
+            <View
+              key={item}
+              style={[styles.summaryChip, { backgroundColor: colors.accentMuted }]}
+            >
+              <Text style={[styles.summaryChipText, { color: colors.textPrimary }]}>{item}</Text>
             </View>
           ))}
         </View>
 
-        <Text style={styles.summaryLabel}>Нужди и достъпност</Text>
+        <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Нужди и достъпност</Text>
         <View style={styles.summaryRow}>
           {onboardingSummary.assistance.map((item) => (
-            <View key={item} style={styles.summaryChip}>
-              <Text style={styles.summaryChipText}>{item}</Text>
+            <View
+              key={item}
+              style={[styles.summaryChip, { backgroundColor: colors.accentMuted }]}
+            >
+              <Text style={[styles.summaryChipText, { color: colors.textPrimary }]}>{item}</Text>
             </View>
           ))}
         </View>
 
-        <Text style={styles.summaryLabel}>Умения</Text>
+        <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Умения</Text>
         <View style={styles.summaryRow}>
           {onboardingSummary.skills.map((item) => (
-            <View key={item} style={styles.summaryChip}>
-              <Text style={styles.summaryChipText}>{item}</Text>
+            <View
+              key={item}
+              style={[styles.summaryChip, { backgroundColor: colors.accentMuted }]}
+            >
+              <Text style={[styles.summaryChipText, { color: colors.textPrimary }]}>{item}</Text>
             </View>
           ))}
         </View>
 
         <TouchableOpacity
-          style={styles.secondaryButton}
+          style={[
+            styles.secondaryButton,
+            {
+              backgroundColor: isDark ? "#2F2617" : "#FFF2DA",
+            },
+          ]}
           onPress={() => router.push("/onboarding")}
           activeOpacity={0.9}
         >
-          <Text style={styles.secondaryButtonText}>Редактирай onboarding</Text>
+          <Text
+            style={[
+              styles.secondaryButtonText,
+              { color: isDark ? colors.warningText : "#8B5611" },
+            ]}
+          >
+            Редактирай onboarding
+          </Text>
         </TouchableOpacity>
       </View>
 
         <TouchableOpacity
-          style={styles.logoutButton}
+          style={[
+            styles.logoutButton,
+            {
+              backgroundColor: colors.card,
+              borderColor: isDark ? "#5A2922" : "#E4D4CF",
+            },
+          ]}
           onPress={() => {
             void handleLogout();
           }}
           activeOpacity={0.9}
         >
-          <Text style={styles.logoutButtonText}>Logout</Text>
+          <Text style={[styles.logoutButtonText, { color: isDark ? "#FFB8AE" : "#A34A38" }]}>
+            Logout
+          </Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -461,13 +800,81 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     marginBottom: 12,
   },
-  heroIcon: {
-    width: 54,
-    height: 54,
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.08)",
+  heroIdentity: {
+    flex: 1,
+    paddingRight: 14,
+  },
+  heroActions: {
+    alignItems: "flex-end",
+    gap: 12,
+  },
+  heroPhotoWrap: {
     alignItems: "center",
+  },
+  heroPhotoButton: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(255,255,255,0.12)",
+    borderRadius: 30,
+    borderWidth: 1,
+    height: 72,
     justifyContent: "center",
+    overflow: "hidden",
+    position: "relative",
+    width: 72,
+  },
+  heroPhotoImage: {
+    height: "100%",
+    width: "100%",
+  },
+  heroPhotoBadge: {
+    alignItems: "center",
+    backgroundColor: "#D6E8AE",
+    borderRadius: 999,
+    bottom: 4,
+    height: 24,
+    justifyContent: "center",
+    position: "absolute",
+    right: 4,
+    width: 24,
+  },
+  heroPhotoActions: {
+    alignItems: "center",
+    marginTop: 8,
+  },
+  heroPhotoHint: {
+    color: "#E8F1D4",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  heroPhotoRemove: {
+    color: "#D6E8AE",
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 4,
+  },
+  themeSwitchCard: {
+    alignItems: "center",
+    borderRadius: 18,
+    borderWidth: 1,
+    flexDirection: "row",
+    minWidth: 172,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  themeSwitchTextWrap: {
+    flex: 1,
+    marginRight: 12,
+  },
+  themeSwitchTitle: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  themeSwitchSubtitle: {
+    color: "#DCEAC0",
+    fontSize: 12,
+    marginTop: 4,
   },
   kicker: {
     color: "#C8E08E",

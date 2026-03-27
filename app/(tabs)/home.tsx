@@ -4,7 +4,7 @@ import * as WebBrowser from "expo-web-browser";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -19,6 +19,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { useAppTheme } from "../../components/app-theme-provider";
 import { auth, db } from "../../firebase";
 import { normalizeBudgetToEuro } from "../../utils/currency";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
@@ -41,16 +42,10 @@ import {
   type PlannerTransportOption,
 } from "../../utils/home-travel-planner";
 import { getProfileDisplayName } from "../../utils/profile-info";
-import {
-  createTestCheckoutSession,
-  verifyTestCheckoutSession,
-} from "../../utils/travel-offers";
-import {
-  buildBookingOrder,
-  getBookingEstimate,
-  saveBookingForUser,
-} from "../../utils/bookings";
+import { createTestCheckoutSession } from "../../utils/travel-offers";
+import { getBookingEstimate } from "../../utils/bookings";
 import { savePendingStripeCheckout } from "../../utils/pending-stripe-checkout";
+import { buildStripeCheckoutReturnUrls } from "../../utils/stripe-checkout-return";
 import {
   buildSavedTripFromHome,
   getHomeSavedSourceKey,
@@ -325,20 +320,6 @@ function formatProcessedAt(value: number) {
   }).format(new Date(value));
 }
 
-function createAuthorizationCode(value: string) {
-  const compactValue = value
-    .replace(/^pi_/, "")
-    .replace(/^local_/, "")
-    .replace(/^fallback_/, "")
-    .replace(/^mock_/, "")
-    .replace(/_secret.*$/, "")
-    .replace(/[^a-zA-Z0-9]/g, "")
-    .slice(-6)
-    .toUpperCase();
-
-  return compactValue || "A47K92";
-}
-
 function parseCheckoutReturnState(url: string) {
   const parsedUrl = Linking.parse(url);
   const rawCheckoutValue = parsedUrl.queryParams?.checkout;
@@ -406,6 +387,7 @@ function getAutoChatTitle(currentTitle: string, destination: string, planTitle: 
 }
 
 export default function HomeTabScreen() {
+  const { colors } = useAppTheme();
   const router = useRouter();
   const { width } = useWindowDimensions();
   const isWideLayout = width >= 980;
@@ -1122,47 +1104,48 @@ export default function HomeTabScreen() {
       setBookingProgress(0.14);
       setBookingProgressLabel("Подготвяме Stripe test checkout...");
 
+      await user.getIdToken(true);
       await wait(300);
 
       const amountCents =
         bookingEstimate.totalEstimate !== null
           ? Math.max(bookingEstimate.totalEstimate, 1) * 100
           : 100;
-      const checkoutReturnBaseUrl = Linking.createURL("/payment-return");
+      const stripeReturnUrls = buildStripeCheckoutReturnUrls("booking");
       const checkoutSession = await createTestCheckoutSession({
         amountCents,
-        cancelUrl: `${checkoutReturnBaseUrl}?checkout=cancel`,
+        cancelUrl: stripeReturnUrls.cancelUrl,
         contactEmail: trimmedEmail,
         contactName: trimmedName,
         currency: "eur",
         description: `${latestPlan.plan.title} • ${latestPlan.destination}`,
         destination: latestPlan.destination,
         paymentMethod: bookingForm.paymentMethod,
-        successUrl: `${checkoutReturnBaseUrl}?checkout=success`,
+        successUrl: stripeReturnUrls.successUrl,
         userId: user.uid,
+      });
+
+      savePendingStripeCheckout({
+        budget: latestPlan.budget,
+        contactEmail: trimmedEmail,
+        contactName: trimmedName,
+        createdAtMs: Date.now(),
+        days: latestPlan.days,
+        destination: latestPlan.destination,
+        note: bookingForm.note,
+        paymentMethod: bookingForm.paymentMethod,
+        stay: selectedStay,
+        timing: latestPlan.timing,
+        title: latestPlan.plan.title,
+        totalLabel: bookingEstimate.totalLabel,
+        transport: selectedTransport,
+        travelers: latestPlan.travelers,
       });
 
       setBookingProgress(0.36);
       setBookingProgressLabel("Отваряме Stripe Checkout...");
 
       if (Platform.OS === "web" && typeof window !== "undefined") {
-        savePendingStripeCheckout({
-          budget: latestPlan.budget,
-          contactEmail: trimmedEmail,
-          contactName: trimmedName,
-          createdAtMs: Date.now(),
-          days: latestPlan.days,
-          destination: latestPlan.destination,
-          note: bookingForm.note,
-          paymentMethod: bookingForm.paymentMethod,
-          stay: selectedStay,
-          timing: latestPlan.timing,
-          title: latestPlan.plan.title,
-          totalLabel: bookingEstimate.totalLabel,
-          transport: selectedTransport,
-          travelers: latestPlan.travelers,
-        });
-
         setBookingProgress(0.52);
         setBookingProgressLabel("Пренасочваме към Stripe Checkout...");
         window.location.assign(checkoutSession.checkoutUrl);
@@ -1171,7 +1154,7 @@ export default function HomeTabScreen() {
 
       const checkoutResult = await WebBrowser.openAuthSessionAsync(
         checkoutSession.checkoutUrl,
-        checkoutReturnBaseUrl
+        stripeReturnUrls.returnTargetUrl
       );
 
       if (checkoutResult.type !== "success" || !checkoutResult.url) {
@@ -1184,63 +1167,15 @@ export default function HomeTabScreen() {
         throw new Error("stripe-checkout-incomplete");
       }
 
-      setBookingProgress(0.68);
-      setBookingProgressLabel("Потвърждаваме Stripe checkout...");
-
-      const checkoutVerification = await verifyTestCheckoutSession({
-        sessionId: checkoutState.sessionId,
+      router.replace({
+        pathname: "/payment-return",
+        params: {
+          checkout: checkoutState.checkout,
+          kind: "booking",
+          session_id: checkoutState.sessionId,
+        },
       });
-
-      if (!checkoutVerification.paid || !checkoutVerification.paymentIntentId) {
-        throw new Error("stripe-session-not-paid");
-      }
-
-      setBookingProgress(0.86);
-      setBookingProgressLabel("Записваме потвърдената резервация...");
-
-      await saveBookingForUser(
-        user.uid,
-        buildBookingOrder({
-          budget: latestPlan.budget,
-          contactEmail: trimmedEmail,
-          contactName: trimmedName,
-          days: latestPlan.days,
-          destination: latestPlan.destination,
-          note: bookingForm.note,
-          paymentIntentId: checkoutVerification.paymentIntentId,
-          paymentMethod: bookingForm.paymentMethod,
-          paymentMode: checkoutVerification.mode,
-          stay: selectedStay,
-          timing: latestPlan.timing,
-          title: latestPlan.plan.title,
-          transport: selectedTransport,
-          travelers: latestPlan.travelers,
-        })
-      );
-
-      await wait(350);
-
-      setBookingProgress(1);
-      setBookingProgressLabel("Stripe test плащането е потвърдено.");
-      setBookingReceipt({
-        authorizationCode: createAuthorizationCode(checkoutVerification.paymentIntentId),
-        destination: latestPlan.destination,
-        paymentIntentId: checkoutVerification.paymentIntentId,
-        paymentMethod: bookingForm.paymentMethod,
-        paymentMode: checkoutVerification.mode,
-        processedAtLabel: formatProcessedAt(Date.now()),
-        selectedStayLabel: selectedStay
-          ? `${selectedStay.name} • ${selectedStay.pricePerNight}`
-          : null,
-        selectedTransportLabel: selectedTransport
-          ? `${selectedTransport.mode} • ${selectedTransport.price}`
-          : null,
-        totalLabel: bookingEstimate.totalLabel,
-      });
-      setBookingStage("success");
-      setBookingSuccess(
-        "Stripe test плащането е потвърдено и резервацията е добавена в Saved."
-      );
+      return;
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : "";
       const errorCode =
@@ -1257,7 +1192,7 @@ export default function HomeTabScreen() {
         typeof nextError.details === "string"
           ? nextError.details
           : "";
-      console.error("Booking checkout/save failed", nextError);
+      console.warn("Booking checkout/save failed", nextError);
 
       setBookingStage("form");
       setBookingProgress(0);
@@ -1326,15 +1261,21 @@ export default function HomeTabScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loader} edges={["top", "left", "right"]}>
+      <SafeAreaView
+        style={[styles.loader, { backgroundColor: colors.screen }]}
+        edges={["top", "left", "right"]}
+      >
         <ActivityIndicator size="large" color="#5C8C1F" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
-      <View style={styles.shell}>
+    <SafeAreaView
+      style={[styles.screen, { backgroundColor: colors.screen }]}
+      edges={["top", "left", "right"]}
+    >
+      <View style={[styles.shell, { backgroundColor: colors.screen }]}>
         <View
           style={[
             styles.layout,
@@ -1342,23 +1283,43 @@ export default function HomeTabScreen() {
           ]}
         >
           <View style={styles.main}>
-            <View style={[styles.plannerTopBar, isPhoneLayout && styles.plannerTopBarPhone]}>
+            <View
+              style={[
+                styles.plannerTopBar,
+                isPhoneLayout && styles.plannerTopBarPhone,
+                { backgroundColor: colors.card, borderColor: colors.border },
+              ]}
+            >
               <TouchableOpacity
                 activeOpacity={0.9}
                 onPress={() => setChatMenuVisible(true)}
-                style={styles.plannerMenuButton}
+                style={[
+                  styles.plannerMenuButton,
+                  { backgroundColor: colors.cardAlt, borderColor: colors.border },
+                ]}
               >
-                <MaterialIcons color="#29440F" name="menu" size={26} />
+                <MaterialIcons color={colors.textPrimary} name="menu" size={26} />
               </TouchableOpacity>
               <View style={styles.plannerTopBarTextWrap}>
-                <Text style={styles.plannerTopBarTitle}>AI Planner</Text>
-                <Text numberOfLines={1} style={styles.plannerTopBarMeta}>
+                <Text style={[styles.plannerTopBarTitle, { color: colors.textPrimary }]}>
+                  AI Planner
+                </Text>
+                <Text
+                  numberOfLines={1}
+                  style={[styles.plannerTopBarMeta, { color: colors.textSecondary }]}
+                >
                   {currentChat?.title ?? "Последен чат"}
                 </Text>
               </View>
             </View>
 
-            <View style={[styles.chatCard, isPhoneLayout && styles.chatCardPhone]}>
+            <View
+              style={[
+                styles.chatCard,
+                isPhoneLayout && styles.chatCardPhone,
+                { backgroundColor: colors.card, borderColor: colors.border },
+              ]}
+            >
               {[currentPlannerState.budget,
                 currentPlannerState.days,
                 currentPlannerState.travelers,
@@ -1739,9 +1700,23 @@ export default function HomeTabScreen() {
                 </View>
               ) : null}
 
-              <View style={[styles.composer, isPhoneLayout && styles.composerPhone]}>
+              <View
+                style={[
+                  styles.composer,
+                  isPhoneLayout && styles.composerPhone,
+                  { backgroundColor: colors.card, borderColor: colors.border },
+                ]}
+              >
                 <TextInput
-                  style={[styles.input, isPhoneLayout && styles.inputPhone]}
+                  style={[
+                    styles.input,
+                    isPhoneLayout && styles.inputPhone,
+                    {
+                      backgroundColor: colors.inputBackground,
+                      borderColor: colors.inputBorder,
+                      color: colors.textPrimary,
+                    },
+                  ]}
                   placeholder={
                     currentPlannerState.step === "budget"
                       ? "Напиши бюджета в евро..."
@@ -1757,7 +1732,7 @@ export default function HomeTabScreen() {
                                 ? "Напиши дестинацията..."
                                 : "Натисни „Нов чат“ или „Нов план“"
                   }
-                  placeholderTextColor="#7B8870"
+                  placeholderTextColor={colors.inputPlaceholder}
                   value={chatInput}
                   onChangeText={setChatInput}
                   editable={currentPlannerState.step !== "done" && !planning}
@@ -1813,21 +1788,29 @@ export default function HomeTabScreen() {
           animationType="fade"
           onRequestClose={() => setChatMenuVisible(false)}
         >
-          <SafeAreaView style={styles.historyMenuBackdrop} edges={["top", "bottom", "left"]}>
-            <View style={styles.historyMenuCard}>
+          <SafeAreaView
+            style={[styles.historyMenuBackdrop, { backgroundColor: colors.modalOverlay }]}
+            edges={["top", "bottom", "left"]}
+          >
+            <View
+              style={[
+                styles.historyMenuCard,
+                { backgroundColor: colors.card, borderColor: colors.border },
+              ]}
+            >
               <View style={styles.historyMenuHeader}>
                 <View>
-                  <Text style={styles.historyMenuTitle}>AI Chats</Text>
-                  <Text style={styles.historyMenuSubtitle}>
+                  <Text style={[styles.historyMenuTitle, { color: colors.textPrimary }]}>AI Chats</Text>
+                  <Text style={[styles.historyMenuSubtitle, { color: colors.textSecondary }]}>
                     {homeStore.chats.length} запазени chat-а
                   </Text>
                 </View>
                 <TouchableOpacity
-                  style={styles.historyMenuClose}
+                  style={[styles.historyMenuClose, { backgroundColor: colors.cardAlt }]}
                   onPress={() => setChatMenuVisible(false)}
                   activeOpacity={0.9}
                 >
-                  <MaterialIcons name="close" size={22} color="#3E5B21" />
+                  <MaterialIcons name="close" size={22} color={colors.textPrimary} />
                 </TouchableOpacity>
               </View>
 
@@ -1966,8 +1949,13 @@ export default function HomeTabScreen() {
         animationType="slide"
         onRequestClose={closeBookingModal}
       >
-        <View style={styles.bookingModalOverlay}>
-          <View style={styles.bookingModalCard}>
+        <View style={[styles.bookingModalOverlay, { backgroundColor: colors.modalOverlay }]}>
+          <View
+            style={[
+              styles.bookingModalCard,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
             <ScrollView
               contentContainerStyle={styles.bookingModalContent}
               showsVerticalScrollIndicator={false}

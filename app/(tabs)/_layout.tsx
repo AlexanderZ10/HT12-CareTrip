@@ -4,10 +4,19 @@ import { Tabs } from "expo-router";
 import React from "react";
 import { StyleSheet, TouchableOpacity, View } from "react-native";
 
+import { useAppTheme } from "../../components/app-theme-provider";
+
 function CenterActionButton({
   accessibilityState,
+  activeColor,
+  borderColor,
+  iconColor,
   onPress,
-}: BottomTabBarButtonProps) {
+}: BottomTabBarButtonProps & {
+  activeColor: string;
+  borderColor: string;
+  iconColor: string;
+}) {
   const focused = Boolean(accessibilityState?.selected);
 
   return (
@@ -17,34 +26,42 @@ function CenterActionButton({
       onPress={onPress}
       style={styles.centerButtonWrapper}
     >
-      <View style={[styles.centerButton, focused && styles.centerButtonActive]}>
-        <MaterialIcons name="add" size={34} color="#FAFCF5" />
+      <View
+        style={[
+          styles.centerButton,
+          { backgroundColor: activeColor, borderColor },
+          focused && styles.centerButtonActive,
+        ]}
+      >
+        <MaterialIcons name="add" size={34} color={iconColor} />
       </View>
     </TouchableOpacity>
   );
 }
 
 export default function TabsLayout() {
+  const { colors, isDark } = useAppTheme();
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         sceneStyle: {
-          backgroundColor: "#EEF4E5",
+          backgroundColor: colors.screen,
         },
-        tabBarActiveTintColor: "#5C8C1F",
-        tabBarInactiveTintColor: "#748066",
+        tabBarActiveTintColor: colors.accent,
+        tabBarInactiveTintColor: colors.tabInactive,
         tabBarStyle: {
-          height: 88,
-          paddingTop: 12,
-          paddingBottom: 14,
-          backgroundColor: "#FAFCF5",
+          backgroundColor: colors.tabBar,
           borderTopWidth: 0,
+          elevation: isDark ? 0 : 10,
+          height: 88,
+          paddingBottom: 14,
+          paddingTop: 12,
           shadowColor: "#18240F",
-          shadowOpacity: 0.08,
-          shadowRadius: 14,
           shadowOffset: { width: 0, height: -6 },
-          elevation: 10,
+          shadowOpacity: isDark ? 0.28 : 0.08,
+          shadowRadius: 14,
         },
         tabBarLabelStyle: {
           fontSize: 12,
@@ -78,7 +95,14 @@ export default function TabsLayout() {
         options={{
           title: "Home",
           tabBarAccessibilityLabel: "Open home planner",
-          tabBarButton: (props) => <CenterActionButton {...props} />,
+          tabBarButton: (props) => (
+            <CenterActionButton
+              {...props}
+              activeColor={colors.accent}
+              borderColor={colors.centerButtonBorder}
+              iconColor={colors.card}
+            />
+          ),
         }}
       />
       <Tabs.Screen
@@ -111,8 +135,6 @@ const styles = StyleSheet.create({
   },
   centerButton: {
     alignItems: "center",
-    backgroundColor: "#5C8C1F",
-    borderColor: "#EEF4E5",
     borderRadius: 34,
     borderWidth: 6,
     height: 68,
@@ -124,6 +146,6 @@ const styles = StyleSheet.create({
     width: 68,
   },
   centerButtonActive: {
-    backgroundColor: "#4E7A19",
+    transform: [{ scale: 0.98 }],
   },
 });

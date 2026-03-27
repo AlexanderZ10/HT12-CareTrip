@@ -1,3 +1,4 @@
+import React from "react";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, type User } from "firebase/auth";
@@ -15,6 +16,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { useAppTheme } from "../../components/app-theme-provider";
 import DiscoverTripMap from "../../components/discover-trip-map";
 import { auth, db } from "../../firebase";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
@@ -37,10 +39,10 @@ import {
   type StoredDiscoverData,
   type TripRecommendation,
 } from "../../utils/trip-recommendations";
-import React from "react";
 
 export default function DiscoverTabScreen() {
   const router = useRouter();
+  const { colors, isDark } = useAppTheme();
   const { width } = useWindowDimensions();
   const isWideLayout = width >= 980;
   const isPhoneLayout = width < 768;
@@ -213,7 +215,7 @@ export default function DiscoverTabScreen() {
                     },
                     { merge: true }
                   );
-                } finally {
+                } catch {
                   metadataRepairKeyRef.current = null;
                 }
               })();
@@ -304,7 +306,10 @@ export default function DiscoverTabScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loader} edges={["top", "left", "right"]}>
+      <SafeAreaView
+        style={[styles.loader, { backgroundColor: colors.screen }]}
+        edges={["top", "left", "right"]}
+      >
         <ActivityIndicator size="large" color="#639922" />
       </SafeAreaView>
     );
@@ -312,22 +317,43 @@ export default function DiscoverTabScreen() {
 
   return (
     <>
-      <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
+      <SafeAreaView
+        style={[styles.screen, { backgroundColor: colors.screen }]}
+        edges={["top", "left", "right"]}
+      >
         <ScrollView
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.headerBlock}>
-            <Text style={styles.kicker}>Discover</Text>
-            <Text style={[styles.pageTitle, isPhoneLayout && styles.pageTitlePhone]}>
+            <Text style={[styles.kicker, { color: colors.accent }]}>Discover</Text>
+            <Text
+              style={[
+                styles.pageTitle,
+                isPhoneLayout && styles.pageTitlePhone,
+                { color: colors.textPrimary },
+              ]}
+            >
               {heroTitle}
             </Text>
-            <Text style={[styles.pageSubtitle, isPhoneLayout && styles.pageSubtitlePhone]}>
+            <Text
+              style={[
+                styles.pageSubtitle,
+                isPhoneLayout && styles.pageSubtitlePhone,
+                { color: colors.textSecondary },
+              ]}
+            >
               {heroSubtitle}
             </Text>
           </View>
 
-          <View style={[styles.discoverControlsCard, isPhoneLayout && styles.discoverControlsCardPhone]}>
+          <View
+            style={[
+              styles.discoverControlsCard,
+              isPhoneLayout && styles.discoverControlsCardPhone,
+              { backgroundColor: colors.cardAlt, borderColor: colors.border },
+            ]}
+          >
             <TouchableOpacity
               style={[
                 styles.primaryButton,
@@ -347,7 +373,7 @@ export default function DiscoverTabScreen() {
               </Text>
             </TouchableOpacity>
 
-            <Text style={styles.refreshNote}>
+            <Text style={[styles.refreshNote, { color: colors.textSecondary }]}>
               {refreshUsedToday
                 ? "Днес вече беше използван refresh. Утре можеш да заредиш нови селища."
                 : "Можеш да поискаш нов set settlements веднъж на ден."}
@@ -355,36 +381,70 @@ export default function DiscoverTabScreen() {
           </View>
 
         {error ? (
-          <View style={styles.errorCard}>
+          <View
+            style={[
+              styles.errorCard,
+              { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
+            ]}
+          >
             <Text style={styles.errorTitle}>Discover is blocked</Text>
-            <Text style={styles.errorText}>{error}</Text>
+            <Text style={[styles.errorText, { color: colors.errorText }]}>{error}</Text>
           </View>
         ) : null}
 
         {saveSuccess ? (
-          <View style={styles.saveSuccessCard}>
-            <Text style={styles.saveSuccessText}>{saveSuccess}</Text>
+          <View
+            style={[
+              styles.saveSuccessCard,
+              { backgroundColor: colors.successBackground, borderColor: colors.successBorder },
+            ]}
+          >
+            <Text style={[styles.saveSuccessText, { color: colors.successText }]}>{saveSuccess}</Text>
           </View>
         ) : null}
 
         {saveError ? (
-          <View style={styles.saveErrorCard}>
-            <Text style={styles.saveErrorText}>{saveError}</Text>
+          <View
+            style={[
+              styles.saveErrorCard,
+              { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
+            ]}
+          >
+            <Text style={[styles.saveErrorText, { color: colors.errorText }]}>{saveError}</Text>
           </View>
         ) : null}
 
         {discoverData?.summary ? (
-          <View style={[styles.summaryCard, isPhoneLayout && styles.summaryCardPhone]}>
-            <Text style={styles.summaryTitle}>Защо тези места са точни за теб</Text>
-            <Text style={styles.summaryText}>{discoverData.summary}</Text>
+          <View
+            style={[
+              styles.summaryCard,
+              isPhoneLayout && styles.summaryCardPhone,
+              {
+                backgroundColor: colors.warningBackground,
+                borderColor: colors.warningBorder,
+              },
+            ]}
+          >
+            <Text style={[styles.summaryTitle, { color: colors.warningText }]}>Защо тези места са точни за теб</Text>
+            <Text style={[styles.summaryText, { color: isDark ? "#DCC59A" : "#6A5731" }]}>
+              {discoverData.summary}
+            </Text>
           </View>
         ) : null}
 
         {generating && !discoverData?.trips.length ? (
-          <View style={[styles.loadingCard, isPhoneLayout && styles.loadingCardPhone]}>
+          <View
+            style={[
+              styles.loadingCard,
+              isPhoneLayout && styles.loadingCardPhone,
+              { backgroundColor: colors.cardAlt },
+            ]}
+          >
             <ActivityIndicator size="large" color="#639922" />
-            <Text style={styles.loadingTitle}>Gemini is building your settlements feed</Text>
-            <Text style={styles.loadingText}>
+            <Text style={[styles.loadingTitle, { color: colors.textPrimary }]}>
+              Gemini is building your settlements feed
+            </Text>
+            <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
               Комбинираме профила ти с internet research, за да върнем реални селища с
               какво да се прави в тях.
             </Text>
@@ -397,7 +457,14 @@ export default function DiscoverTabScreen() {
           const isSaving = savingTripKey === sourceKey;
 
           return (
-            <View key={trip.id} style={[styles.tripCard, isPhoneLayout && styles.tripCardPhone]}>
+            <View
+              key={trip.id}
+              style={[
+                styles.tripCard,
+                isPhoneLayout && styles.tripCardPhone,
+                { backgroundColor: colors.cardAlt },
+              ]}
+            >
               <View style={[styles.topRow, !isWideLayout && styles.topRowStacked]}>
                 <View style={[styles.imagePanel, !isWideLayout && styles.imagePanelStacked]}>
                   {trip.imageUrl ? (
@@ -519,8 +586,15 @@ export default function DiscoverTabScreen() {
         onRequestClose={() => setExpandedMapTrip(null)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{expandedMapTrip?.title}</Text>
+          <View
+            style={[
+              styles.modalCard,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+              {expandedMapTrip?.title}
+            </Text>
             {expandedMapTrip ? (
               <DiscoverTripMap
                 attractions={expandedMapTrip.attractions}

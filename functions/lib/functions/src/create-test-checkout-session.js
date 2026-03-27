@@ -17,13 +17,18 @@ function sanitizeReturnUrl(value, fieldName) {
     if (!url) {
         throw new https_1.HttpsError("invalid-argument", `${fieldName} is required.`);
     }
+    const isPrivateHttpDevelopmentUrl = /^http:\/\/192\.168\.\d{1,3}\.\d{1,3}(?::\d+)?(\/.*)?$/i.test(url) ||
+        /^http:\/\/10\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d+)?(\/.*)?$/i.test(url) ||
+        /^http:\/\/172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}(?::\d+)?(\/.*)?$/i.test(url);
     if (url.startsWith("travelapp://") ||
+        url.startsWith("exp://") ||
         url.startsWith("https://") ||
         url.startsWith("http://localhost") ||
-        url.startsWith("http://127.0.0.1")) {
+        url.startsWith("http://127.0.0.1") ||
+        isPrivateHttpDevelopmentUrl) {
         return url;
     }
-    throw new https_1.HttpsError("invalid-argument", `${fieldName} must be a valid app or https URL.`);
+    throw new https_1.HttpsError("invalid-argument", `${fieldName} must be a valid app, https or local development URL.`);
 }
 function appendQueryParam(url, key, value) {
     return `${url}${url.includes("?") ? "&" : "?"}${key}=${value}`;
@@ -61,7 +66,7 @@ function getStripeClient() {
     }
     return stripeClient;
 }
-exports.createTestCheckoutSession = (0, https_1.onCall)({ region: "us-central1" }, async (request) => {
+exports.createTestCheckoutSession = (0, https_1.onCall)({ invoker: "public", region: "us-central1", secrets: ["STRIPE_SECRET_KEY"] }, async (request) => {
     const data = (request.data ?? {});
     const amountCents = sanitizeNumber(data.amountCents);
     const currency = sanitizeString(data.currency, "eur").toLowerCase();

@@ -52,7 +52,7 @@ function getStripeClient() {
 }
 
 export const createTestPaymentIntent = onCall(
-  { region: "us-central1" },
+  { invoker: "public", region: "us-central1", secrets: ["STRIPE_SECRET_KEY"] },
   async (request) => {
     const data = (request.data ?? {}) as PaymentIntentPayload;
     const amountCents = sanitizeNumber(data.amountCents);
