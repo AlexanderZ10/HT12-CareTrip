@@ -70,7 +70,7 @@ function getStripeClient() {
 }
 
 export const verifyTestCheckoutSession = onCall(
-  { region: "us-central1" },
+  { invoker: "public", region: "us-central1", secrets: ["STRIPE_SECRET_KEY"] },
   async (request) => {
     const data = (request.data ?? {}) as VerifyCheckoutSessionPayload;
     const sessionId = sanitizeString(data.sessionId);

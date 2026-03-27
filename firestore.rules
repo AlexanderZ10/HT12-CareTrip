@@ -26,6 +26,10 @@ service cloud.firestore {
       return signedIn() && groupData(groupId).accessType == "public";
     }
 
+    function canManageGroup(groupId) {
+      return signedIn() && groupData(groupId).creatorId == request.auth.uid;
+    }
+
     function validAccessType(data) {
       return data.accessType == "public" || data.accessType == "private";
     }
@@ -99,6 +103,155 @@ service cloud.firestore {
         && resource.data.memberIds.hasAll(request.resource.data.memberIds);
     }
 
+    function validTripRequestStatus(data) {
+      return data.status == "open" || data.status == "closed";
+    }
+
+    function validTripRequestShape(data) {
+      return data.creatorId is string
+        && data.creatorLabel is string
+        && data.creatorLabel.size() >= 1
+        && data.creatorLabel.size() <= 80
+        && data.destination is string
+        && data.destination.size() >= 2
+        && data.destination.size() <= 80
+        && data.budgetLabel is string
+        && data.budgetLabel.size() >= 1
+        && data.budgetLabel.size() <= 40
+        && data.timingLabel is string
+        && data.timingLabel.size() >= 1
+        && data.timingLabel.size() <= 40
+        && data.travelersLabel is string
+        && data.travelersLabel.size() >= 1
+        && data.travelersLabel.size() <= 40
+        && data.note is string
+        && data.note.size() <= 240
+        && data.interestedUserIds is list
+        && data.interestedUserIds.size() >= 1
+        && validTripRequestStatus(data)
+        && (data.groupId == null || data.groupId is string);
+    }
+
+    function validTripRequestInterestToggle() {
+      return validTripRequestShape(request.resource.data)
+        && request.resource.data.creatorId == resource.data.creatorId
+        && request.resource.data.creatorLabel == resource.data.creatorLabel
+        && request.resource.data.destination == resource.data.destination
+        && request.resource.data.budgetLabel == resource.data.budgetLabel
+        && request.resource.data.timingLabel == resource.data.timingLabel
+        && request.resource.data.travelersLabel == resource.data.travelersLabel
+        && request.resource.data.note == resource.data.note
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.groupId == resource.data.groupId;
+    }
+
+    function validExpenseRepaymentShape(data) {
+      return data.amountLabel is string
+        && data.amountLabel.size() >= 1
+        && data.amountLabel.size() <= 40
+        && data.amountValue is number
+        && data.amountValue > 0
+        && data.expenseMessageId is string
+        && data.expenseMessageId.size() >= 1
+        && data.expenseMessageId.size() <= 120
+        && data.expenseTitle is string
+        && data.expenseTitle.size() >= 1
+        && data.expenseTitle.size() <= 120
+        && data.paidById is string
+        && data.paidByLabel is string
+        && data.paidByLabel.size() >= 1
+        && data.paidByLabel.size() <= 80
+        && data.paidToId is string
+        && data.paidToLabel is string
+        && data.paidToLabel.size() >= 1
+        && data.paidToLabel.size() <= 80
+        && data.paymentIntentId is string
+        && data.paymentIntentId.size() >= 1
+        && data.paymentIntentId.size() <= 120
+        && data.paymentMethod is string
+        && data.paymentMethod.size() >= 1
+        && data.paymentMethod.size() <= 40
+        && data.provider == "stripe"
+        && data.sessionId is string
+        && data.sessionId.size() >= 1
+        && data.sessionId.size() <= 120
+        && data.status == "paid";
+    }
+
+    function validGroupMessageType(data) {
+      return data.messageType == null
+        || data.messageType == "text"
+        || data.messageType == "shared-trip"
+        || data.messageType == "expense";
+    }
+
+    function validGroupSharedTripShape(data) {
+      return data.sharedTrip is map
+        && data.sharedTrip.title is string
+        && data.sharedTrip.title.size() >= 1
+        && data.sharedTrip.title.size() <= 120
+        && data.sharedTrip.destination is string
+        && data.sharedTrip.destination.size() >= 1
+        && data.sharedTrip.destination.size() <= 120
+        && data.sharedTrip.details is string
+        && data.sharedTrip.details.size() >= 1
+        && data.sharedTrip.details.size() <= 1000
+        && (data.sharedTrip.summary == null || data.sharedTrip.summary is string)
+        && (data.sharedTrip.budget == null || data.sharedTrip.budget is string)
+        && (data.sharedTrip.duration == null || data.sharedTrip.duration is string)
+        && (data.sharedTrip.source == "home" || data.sharedTrip.source == "discover")
+        && data.sharedTrip.sourceKey is string
+        && data.sharedTrip.sourceKey.size() >= 1
+        && data.sharedTrip.sourceKey.size() <= 160
+        && data.sharedTrip.linkedTransports is list;
+    }
+
+    function validGroupExpenseShape(data) {
+      return data.expense is map
+        && data.expense.title is string
+        && data.expense.title.size() >= 1
+        && data.expense.title.size() <= 160
+        && data.expense.amountLabel is string
+        && data.expense.amountLabel.size() >= 1
+        && data.expense.amountLabel.size() <= 40
+        && data.expense.amountValue is number
+        && data.expense.amountValue > 0
+        && (data.expense.collectionMode == "reimbursement" || data.expense.collectionMode == "group-payment")
+        && data.expense.paidById is string
+        && data.expense.paidById.size() >= 1
+        && data.expense.paidById.size() <= 128
+        && data.expense.paidByLabel is string
+        && data.expense.paidByLabel.size() >= 1
+        && data.expense.paidByLabel.size() <= 80
+        && data.expense.participantIds is list
+        && data.expense.participantIds.size() >= 1
+        && data.expense.participantCount is number
+        && data.expense.participantCount >= data.expense.participantIds.size()
+        && (data.expense.linkedBookingUrl == null || data.expense.linkedBookingUrl is string)
+        && (data.expense.linkedItemKey == null || data.expense.linkedItemKey is string)
+        && (data.expense.linkedSourceKey == null || data.expense.linkedSourceKey is string);
+    }
+
+    function validGroupMessageShape(data) {
+      return data.senderId is string
+        && data.senderId.size() >= 1
+        && data.senderId.size() <= 128
+        && data.senderLabel is string
+        && data.senderLabel.size() >= 1
+        && data.senderLabel.size() <= 80
+        && data.text is string
+        && data.text.size() >= 1
+        && data.text.size() <= 1000
+        && validGroupMessageType(data)
+        && (
+          data.messageType == "shared-trip"
+            ? validGroupSharedTripShape(data)
+            : data.messageType == "expense"
+              ? validGroupExpenseShape(data)
+              : true
+        );
+    }
+
     match /profiles/{userId} {
       allow read, create, update: if isOwner(userId);
       allow delete: if false;
@@ -121,25 +274,55 @@ service cloud.firestore {
       allow delete: if signedIn() && resource.data.uid == request.auth.uid;
     }
 
+    match /tripRequests/{requestId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && validTripRequestShape(request.resource.data)
+        && request.resource.data.creatorId == request.auth.uid
+        && request.resource.data.status == "open"
+        && request.resource.data.groupId == null
+        && request.resource.data.interestedUserIds.hasAny([request.auth.uid]);
+
+      allow update: if signedIn()
+        && (
+          (
+            resource.data.creatorId == request.auth.uid
+            && validTripRequestShape(request.resource.data)
+            && request.resource.data.creatorId == resource.data.creatorId
+          )
+          || validTripRequestInterestToggle()
+        );
+
+      allow delete: if signedIn() && resource.data.creatorId == request.auth.uid;
+    }
+
     match /groups/{groupId} {
       allow read: if signedIn();
       allow create: if validCreatedGroup();
       allow update: if validCreatorGroupEdit() || validSelfJoin() || validSelfLeave();
-      allow delete: if false;
+      allow delete: if resource.data.creatorId == request.auth.uid;
 
       match /messages/{messageId} {
         allow read: if isGroupMember(groupId) || isPublicGroup(groupId);
 
         allow create: if isGroupMember(groupId)
           && request.resource.data.senderId == request.auth.uid
-          && request.resource.data.senderLabel is string
-          && request.resource.data.senderLabel.size() >= 1
-          && request.resource.data.senderLabel.size() <= 80
-          && request.resource.data.text is string
-          && request.resource.data.text.size() >= 1
-          && request.resource.data.text.size() <= 1000;
+          && validGroupMessageShape(request.resource.data);
 
-        allow update, delete: if false;
+        allow update: if false;
+        allow delete: if canManageGroup(groupId);
+      }
+
+      match /expenseRepayments/{repaymentId} {
+        allow read: if isGroupMember(groupId) || isPublicGroup(groupId);
+
+        allow create: if isGroupMember(groupId)
+          && request.resource.data.paidById == request.auth.uid
+          && validExpenseRepaymentShape(request.resource.data);
+
+        allow update: if false;
+        allow delete: if canManageGroup(groupId);
       }
     }
 

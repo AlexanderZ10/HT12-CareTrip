@@ -129,6 +129,42 @@ function sanitizeStringArray(value: unknown) {
     .slice(0, 4);
 }
 
+function dedupeByKey<T>(items: T[], getKey: (item: T) => string) {
+  const seen = new Set<string>();
+
+  return items.filter((item) => {
+    const key = getKey(item).trim().toLowerCase();
+
+    if (!key || seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function dedupeTextLines(lines: string[]) {
+  const seen = new Set<string>();
+
+  return lines.filter((line, index, array) => {
+    const trimmedLine = line.trim();
+
+    if (!trimmedLine) {
+      return Boolean(array[index - 1]?.trim()) && Boolean(array[index + 1]?.trim());
+    }
+
+    const normalized = trimmedLine.toLowerCase();
+
+    if (seen.has(normalized)) {
+      return false;
+    }
+
+    seen.add(normalized);
+    return true;
+  });
+}
+
 function getResponseText(responsePayload: any) {
   const parts = responsePayload?.candidates?.[0]?.content?.parts;
 
@@ -244,31 +280,48 @@ function normalizePlan(
   rawPlan: RawGroundedTravelPlan,
   params: { budget: string; days: string; destination: string }
 ) {
-  const transportOptions = Array.isArray(rawPlan.transportOptions)
-    ? rawPlan.transportOptions.map((item, index) =>
-        normalizeTransportOption(item, index)
-      )
-    : [];
-  const stayOptions = Array.isArray(rawPlan.stayOptions)
-    ? rawPlan.stayOptions.map((item, index) => normalizeStayOption(item, index))
-    : [];
-  const tripDays = Array.isArray(rawPlan.tripDays)
-    ? rawPlan.tripDays.map((item, index) => normalizeDayPlan(item, index))
-    : [];
+  const transportOptions = dedupeByKey(
+    Array.isArray(rawPlan.transportOptions)
+      ? rawPlan.transportOptions.map((item, index) =>
+          normalizeTransportOption(item, index)
+        )
+      : [],
+    (item) => `${item.mode}|${item.provider}|${item.route}|${item.price}|${item.duration}`
+  );
+  const stayOptions = dedupeByKey(
+    Array.isArray(rawPlan.stayOptions)
+      ? rawPlan.stayOptions.map((item, index) => normalizeStayOption(item, index))
+      : [],
+    (item) => `${item.name}|${item.type}|${item.area}|${item.pricePerNight}`
+  );
+  const tripDays = dedupeByKey(
+    Array.isArray(rawPlan.tripDays)
+      ? rawPlan.tripDays.map((item, index) => {
+          const normalizedDay = normalizeDayPlan(item, index);
+
+          return {
+            ...normalizedDay,
+            items: dedupeByKey(normalizedDay.items, (value) => value),
+          };
+        })
+      : [],
+    (item) => `${item.dayLabel}|${item.title}|${item.items.join("|")}`
+  );
+  const fallbackPlan = buildFallbackPlan(params);
 
   return {
-    ...buildFallbackPlan(params),
+    ...fallbackPlan,
     budgetNote: sanitizeString(
       rawPlan.budgetNote,
-      buildFallbackPlan(params).budgetNote
+      fallbackPlan.budgetNote
     ),
     profileTip: sanitizeString(
       rawPlan.profileTip,
-      buildFallbackPlan(params).profileTip
+      fallbackPlan.profileTip
     ),
     stayOptions,
-    summary: sanitizeString(rawPlan.summary, buildFallbackPlan(params).summary),
-    title: sanitizeString(rawPlan.title, buildFallbackPlan(params).title),
+    summary: sanitizeString(rawPlan.summary, fallbackPlan.summary),
+    title: sanitizeString(rawPlan.title, fallbackPlan.title),
     transportOptions,
     tripDays,
   } satisfies GroundedTravelPlan;
@@ -312,6 +365,7 @@ function buildPlannerPrompt(params: {
     "Mention operator, airport, station, route, or platform names when grounding gives enough evidence.",
     "Prefer guesthouses and boutique stays first, then hotels if needed.",
     "Keep notes compact and highly concrete.",
+    "Do not repeat the same recommendation, route, or sentence in different sections.",
     "Structure the notes with these headings exactly:",
     "TRANSPORT",
     "STAY",
@@ -326,6 +380,8 @@ function buildPlannerPrompt(params: {
     `Preferred transport: ${transportPreference}`,
     `Timing / period: ${timing}`,
     `Destination: ${destination}`,
+    `Username: ${profile.username || "Not provided"}`,
+    `Email: ${profile.email || "Not provided"}`,
     `Full name: ${profile.personalProfile.fullName || "Not provided"}`,
     `About me: ${profile.personalProfile.aboutMe || "Not provided"}`,
     `Dream destinations: ${profile.personalProfile.dreamDestinations || "Not provided"}`,
@@ -374,6 +430,7 @@ function buildStructuredPlanPrompt(params: {
     "The itinerary must match the requested number of days.",
     "If the budget is too low, say so briefly in budgetNote, but still provide the best realistic fit.",
     "Prefer guesthouses first when they fit.",
+    "Avoid duplicated points or near-identical wording across sections.",
     "",
     `Budget: ${normalizeBudgetToEuro(budget)}`,
     `Days: ${days}`,
@@ -389,7 +446,7 @@ function buildStructuredPlanPrompt(params: {
 }
 
 export function formatGroundedTravelPlan(plan: GroundedTravelPlan) {
-  return [
+  return dedupeTextLines([
     plan.title,
     "",
     plan.summary,
@@ -413,7 +470,7 @@ export function formatGroundedTravelPlan(plan: GroundedTravelPlan) {
     ),
     "",
     `Profile tip: ${plan.profileTip}`,
-  ]
+  ])
     .filter(Boolean)
     .join("\n");
 }
@@ -500,6 +557,7 @@ function buildPlannerFollowUpPrompt(params: {
     "If the user wants changes, propose the revised direction clearly and concretely.",
     "If exact live prices are unclear, say they are approximate instead of inventing certainty.",
     "Do not repeat the full old plan unless it is necessary.",
+    "Avoid repeated bullets, repeated recommendations, and near-identical phrasing.",
     "Keep the answer concise, practical, and easy to scan on mobile.",
     "You may use short paragraphs or a few short bullet points.",
     "",
@@ -509,10 +567,13 @@ function buildPlannerFollowUpPrompt(params: {
     `Travelers: ${travelers}`,
     `Preferred transport: ${transportPreference}`,
     `Timing: ${timing}`,
+    `Username: ${profile.username || "Not provided"}`,
+    `Email: ${profile.email || "Not provided"}`,
     `Home base: ${profile.personalProfile.homeBase || "Unknown"}`,
     `Travel pace: ${profile.personalProfile.travelPace || "Not provided"}`,
     `Stay style: ${profile.personalProfile.stayStyle || "Not provided"}`,
     `About me: ${profile.personalProfile.aboutMe || "Not provided"}`,
+    `Dream destinations: ${profile.personalProfile.dreamDestinations || "Not provided"}`,
     `Interests: ${profile.interests.selectedOptions.join(", ") || "None provided"}`,
     `Accessibility / assistance needs: ${
       profile.assistance.selectedOptions.join(", ") || "None provided"

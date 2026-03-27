@@ -14,10 +14,10 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 
+import { useAppTheme } from "../../components/app-theme-provider";
 import { auth, db } from "../../firebase";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
 import { getProfileDisplayName } from "../../utils/profile-info";
@@ -28,7 +28,6 @@ import {
   saveTripForUser,
 } from "../../utils/saved-trips";
 import {
-  buildSettlementMapEmbedUrl,
   DEFAULT_SETTLEMENT_MAP_ZOOM,
   enrichDiscoverTrips,
   GEMINI_MODEL,
@@ -83,6 +82,73 @@ function clampValue(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+function clampLatitude(value: number) {
+  return clampValue(value, -85, 85);
+}
+
+function clampLongitude(value: number) {
+  return clampValue(value, -180, 180);
+}
+
+function buildMapBounds(params: {
+  height: number;
+  latitude: number;
+  longitude: number;
+  width: number;
+  zoom: number;
+}) {
+  const zoom = clampValue(params.zoom, MIN_MAP_LEVEL, MAX_MAP_LEVEL);
+  const latitude = clampLatitude(params.latitude);
+  const longitude = clampLongitude(params.longitude);
+  const latitudeRadians = (latitude * Math.PI) / 180;
+  const metersPerPixel =
+    (156543.03392 * Math.cos(latitudeRadians)) / Math.pow(2, zoom);
+  const latitudeDelta = ((metersPerPixel * params.height) / 111320) * 1.35;
+  const longitudeDivisor = Math.max(0.15, Math.cos(latitudeRadians));
+  const longitudeDelta =
+    ((metersPerPixel * params.width) / (111320 * longitudeDivisor)) * 1.2;
+
+  return {
+    bottom: clampLatitude(latitude - latitudeDelta / 2),
+    left: clampLongitude(longitude - longitudeDelta / 2),
+    right: clampLongitude(longitude + longitudeDelta / 2),
+    top: clampLatitude(latitude + latitudeDelta / 2),
+  };
+}
+
+function buildOpenStreetMapEmbedUrl(params: {
+  height: number;
+  latitude: number;
+  longitude: number;
+  width: number;
+  zoom: number;
+}) {
+  const bounds = buildMapBounds(params);
+
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(
+    `${bounds.left},${bounds.bottom},${bounds.right},${bounds.top}`
+  )}&layer=mapnik&marker=${encodeURIComponent(
+    `${params.latitude},${params.longitude}`
+  )}`;
+}
+
+function buildOpenStreetMapSource(params: {
+  latitude: number;
+  longitude: number;
+  viewportHeight?: number;
+  viewportWidth?: number;
+  zoom: number;
+}) {
+  const roundedZoom = clampValue(Math.round(params.zoom), MIN_MAP_LEVEL, MAX_MAP_LEVEL);
+  return buildOpenStreetMapEmbedUrl({
+    height: params.viewportHeight ?? 620,
+    latitude: params.latitude,
+    longitude: params.longitude,
+    width: params.viewportWidth ?? 820,
+    zoom: roundedZoom,
+  });
+}
+
 function ZoomableMap({
   latitude,
   longitude,
@@ -90,21 +156,6 @@ function ZoomableMap({
   latitude: number | null;
   longitude: number | null;
 }) {
-  const [mapZoomLevel, setMapZoomLevel] = useState(DEFAULT_SETTLEMENT_MAP_ZOOM);
-
-  useEffect(() => {
-    setMapZoomLevel(DEFAULT_SETTLEMENT_MAP_ZOOM);
-  }, [latitude, longitude]);
-
-  const adjustZoom = (delta: number) => {
-    const nextMapZoom = clampValue(
-      mapZoomLevel + delta,
-      MIN_MAP_LEVEL,
-      MAX_MAP_LEVEL
-    );
-    setMapZoomLevel(nextMapZoom);
-  };
-
   if (latitude === null || longitude === null) {
     return (
       <View style={styles.zoomableMapViewport}>
@@ -115,14 +166,20 @@ function ZoomableMap({
     );
   }
 
-  const mapUri = buildSettlementMapEmbedUrl(latitude, longitude, mapZoomLevel);
+  const mapUrl = buildOpenStreetMapSource({
+    latitude,
+    longitude,
+    viewportHeight: 620,
+    viewportWidth: 820,
+    zoom: DEFAULT_SETTLEMENT_MAP_ZOOM,
+  });
 
   return (
-    <GestureHandlerRootView style={styles.zoomableMapRoot}>
+    <View style={styles.zoomableMapRoot}>
       <View style={styles.zoomableMapViewport}>
         <WebView
-          key={mapUri}
-          source={{ uri: mapUri }}
+          key={`map-${latitude}-${longitude}`}
+          source={{ uri: mapUrl }}
           style={styles.modalMapWebView}
           originWhitelist={["*"]}
           startInLoadingState
@@ -134,30 +191,14 @@ function ZoomableMap({
           domStorageEnabled
           bounces={false}
         />
-
-        <View style={styles.mapZoomControls}>
-          <TouchableOpacity
-            style={styles.mapZoomButton}
-            onPress={() => adjustZoom(2)}
-            activeOpacity={0.9}
-          >
-            <MaterialIcons name="add" size={18} color="#29440F" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.mapZoomButton}
-            onPress={() => adjustZoom(-2)}
-            activeOpacity={0.9}
-          >
-            <MaterialIcons name="remove" size={18} color="#29440F" />
-          </TouchableOpacity>
-        </View>
       </View>
-    </GestureHandlerRootView>
+    </View>
   );
 }
 
 export default function DiscoverTabScreen() {
   const router = useRouter();
+  const { colors, isDark } = useAppTheme();
   const { width } = useWindowDimensions();
   const isWideLayout = width >= 980;
   const isPhoneLayout = width < 768;
@@ -199,6 +240,7 @@ export default function DiscoverTabScreen() {
         setError("");
 
         const generatedTrips = await generateTripsWithGemini(profileData, previousTrips);
+        const enrichedTrips = await enrichDiscoverTrips(generatedTrips.trips);
         const generatedAtMs = Date.now();
 
         const nextDiscoverData: StoredDiscoverData = {
@@ -208,7 +250,7 @@ export default function DiscoverTabScreen() {
             : currentDiscoverData?.lastRefreshDateKey ?? null,
           sourceModel: GEMINI_MODEL,
           summary: generatedTrips.summary,
-          trips: generatedTrips.trips,
+          trips: enrichedTrips.trips,
         };
 
         await setDoc(
@@ -334,7 +376,7 @@ export default function DiscoverTabScreen() {
                     },
                     { merge: true }
                   );
-                } finally {
+                } catch {
                   metadataRepairKeyRef.current = null;
                 }
               })();
@@ -425,7 +467,10 @@ export default function DiscoverTabScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loader} edges={["top", "left", "right"]}>
+      <SafeAreaView
+        style={[styles.loader, { backgroundColor: colors.screen }]}
+        edges={["top", "left", "right"]}
+      >
         <ActivityIndicator size="large" color="#639922" />
       </SafeAreaView>
     );
@@ -433,17 +478,38 @@ export default function DiscoverTabScreen() {
 
   return (
     <>
-      <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
+      <SafeAreaView
+        style={[styles.screen, { backgroundColor: colors.screen }]}
+        edges={["top", "left", "right"]}
+      >
         <ScrollView
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
         >
-          <View style={[styles.hero, isPhoneLayout && styles.heroPhone]}>
-            <Text style={styles.kicker}>CareTrip</Text>
-            <Text style={[styles.heroTitle, isPhoneLayout && styles.heroTitlePhone]}>
+          <View
+            style={[
+              styles.hero,
+              isPhoneLayout && styles.heroPhone,
+              { backgroundColor: colors.hero },
+            ]}
+          >
+            <Text style={[styles.kicker, { color: colors.accent }]}>CareTrip</Text>
+            <Text
+              style={[
+                styles.heroTitle,
+                isPhoneLayout && styles.heroTitlePhone,
+                { color: colors.textPrimary },
+              ]}
+            >
               {heroTitle}
             </Text>
-            <Text style={[styles.heroSubtitle, isPhoneLayout && styles.heroSubtitlePhone]}>
+            <Text
+              style={[
+                styles.heroSubtitle,
+                isPhoneLayout && styles.heroSubtitlePhone,
+                { color: colors.textSecondary },
+              ]}
+            >
               {heroSubtitle}
             </Text>
 
@@ -483,36 +549,70 @@ export default function DiscoverTabScreen() {
         </View>
 
         {error ? (
-          <View style={styles.errorCard}>
+          <View
+            style={[
+              styles.errorCard,
+              { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
+            ]}
+          >
             <Text style={styles.errorTitle}>Discover is blocked</Text>
-            <Text style={styles.errorText}>{error}</Text>
+            <Text style={[styles.errorText, { color: colors.errorText }]}>{error}</Text>
           </View>
         ) : null}
 
         {saveSuccess ? (
-          <View style={styles.saveSuccessCard}>
-            <Text style={styles.saveSuccessText}>{saveSuccess}</Text>
+          <View
+            style={[
+              styles.saveSuccessCard,
+              { backgroundColor: colors.successBackground, borderColor: colors.successBorder },
+            ]}
+          >
+            <Text style={[styles.saveSuccessText, { color: colors.successText }]}>{saveSuccess}</Text>
           </View>
         ) : null}
 
         {saveError ? (
-          <View style={styles.saveErrorCard}>
-            <Text style={styles.saveErrorText}>{saveError}</Text>
+          <View
+            style={[
+              styles.saveErrorCard,
+              { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
+            ]}
+          >
+            <Text style={[styles.saveErrorText, { color: colors.errorText }]}>{saveError}</Text>
           </View>
         ) : null}
 
         {discoverData?.summary ? (
-          <View style={[styles.summaryCard, isPhoneLayout && styles.summaryCardPhone]}>
-            <Text style={styles.summaryTitle}>Защо тези места са точни за теб</Text>
-            <Text style={styles.summaryText}>{discoverData.summary}</Text>
+          <View
+            style={[
+              styles.summaryCard,
+              isPhoneLayout && styles.summaryCardPhone,
+              {
+                backgroundColor: colors.warningBackground,
+                borderColor: colors.warningBorder,
+              },
+            ]}
+          >
+            <Text style={[styles.summaryTitle, { color: colors.warningText }]}>Защо тези места са точни за теб</Text>
+            <Text style={[styles.summaryText, { color: isDark ? "#DCC59A" : "#6A5731" }]}>
+              {discoverData.summary}
+            </Text>
           </View>
         ) : null}
 
         {generating && !discoverData?.trips.length ? (
-          <View style={[styles.loadingCard, isPhoneLayout && styles.loadingCardPhone]}>
+          <View
+            style={[
+              styles.loadingCard,
+              isPhoneLayout && styles.loadingCardPhone,
+              { backgroundColor: colors.cardAlt },
+            ]}
+          >
             <ActivityIndicator size="large" color="#639922" />
-            <Text style={styles.loadingTitle}>Preparing your settlements feed</Text>
-            <Text style={styles.loadingText}>
+            <Text style={[styles.loadingTitle, { color: colors.textPrimary }]}>
+              Preparing your settlements feed
+            </Text>
+            <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
               Комбинираме профила ти с internet research, за да върнем реални селища с
               какво да се прави в тях.
             </Text>
@@ -523,13 +623,25 @@ export default function DiscoverTabScreen() {
           const sourceKey = getDiscoverSavedSourceKey(trip);
           const isSaved = savedSourceKeys.includes(sourceKey);
           const isSaving = savingTripKey === sourceKey;
-          const mapUrl = buildSettlementMapEmbedUrl(
-            trip.latitude,
-            trip.longitude,
-            PREVIEW_MAP_ZOOM
-          );
+          const mapUrl =
+            trip.latitude !== null && trip.longitude !== null
+              ? buildOpenStreetMapSource({
+                  latitude: trip.latitude,
+                  longitude: trip.longitude,
+                  viewportHeight: isPhoneLayout ? 360 : 420,
+                  viewportWidth: isPhoneLayout ? 360 : 560,
+                  zoom: PREVIEW_MAP_ZOOM,
+                })
+              : "";
           return (
-            <View key={trip.id} style={[styles.tripCard, isPhoneLayout && styles.tripCardPhone]}>
+            <View
+              key={trip.id}
+              style={[
+                styles.tripCard,
+                isPhoneLayout && styles.tripCardPhone,
+                { backgroundColor: colors.cardAlt },
+              ]}
+            >
               <View style={styles.tripHeader}>
                 <View style={styles.tripHeaderText}>
                   <Text style={[styles.tripTitle, isPhoneLayout && styles.tripTitlePhone]}>
@@ -586,6 +698,7 @@ export default function DiscoverTabScreen() {
                           setSupportMultipleWindows={false}
                           javaScriptEnabled
                           domStorageEnabled
+                          bounces={false}
                         />
                       </View>
                     </TouchableOpacity>
@@ -661,11 +774,13 @@ export default function DiscoverTabScreen() {
         animationType="fade"
         onRequestClose={() => setExpandedPreview(null)}
       >
-        <GestureHandlerRootView style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.modalHeaderRow}>
               <View style={styles.modalHeaderText}>
-                <Text style={styles.modalTitle}>{expandedPreview?.trip.title}</Text>
+                <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+                  {expandedPreview?.trip.title}
+                </Text>
               </View>
               <TouchableOpacity
                 style={styles.modalCloseButton}
@@ -727,7 +842,7 @@ export default function DiscoverTabScreen() {
               )
             ) : null}
           </View>
-        </GestureHandlerRootView>
+        </View>
       </Modal>
     </>
   );

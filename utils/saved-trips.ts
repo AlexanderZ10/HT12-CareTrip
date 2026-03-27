@@ -22,6 +22,32 @@ function sanitizeString(value: unknown, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
 }
 
+function dedupeDetailLines(lines: string[], excludedValues: string[] = []) {
+  const excluded = new Set(
+    excludedValues
+      .map((value) => sanitizeString(value).toLowerCase())
+      .filter(Boolean)
+  );
+  const seen = new Set<string>();
+
+  return lines.filter((line) => {
+    const trimmedLine = line.trim();
+
+    if (!trimmedLine) {
+      return true;
+    }
+
+    const normalized = trimmedLine.toLowerCase();
+
+    if (excluded.has(normalized) || seen.has(normalized)) {
+      return false;
+    }
+
+    seen.add(normalized);
+    return true;
+  });
+}
+
 function hashValue(value: string) {
   let hash = 0;
 
@@ -38,13 +64,8 @@ export function getDiscoverSavedSourceKey(trip: TripRecommendation) {
 }
 
 export function buildSavedTripFromDiscover(trip: TripRecommendation): SavedTrip {
-  return {
-    budget: null,
-    createdAtMs: Date.now(),
-    destination: trip.destination,
-    details: [
-      trip.whyItFits,
-      "",
+  const details = dedupeDetailLines(
+    [
       "Activities:",
       ...trip.highlights.map((highlight) => `- ${highlight}`),
       "",
@@ -53,7 +74,15 @@ export function buildSavedTripFromDiscover(trip: TripRecommendation): SavedTrip 
       "",
       `Popularity: ${trip.popularityNote}`,
       `Accessibility: ${trip.accessibilityNotes}`,
-    ].join("\n"),
+    ],
+    [trip.whyItFits, trip.title, trip.destination]
+  ).join("\n");
+
+  return {
+    budget: null,
+    createdAtMs: Date.now(),
+    destination: trip.destination,
+    details,
     duration: null,
     id: `saved-discover-${trip.id}`,
     source: "discover",

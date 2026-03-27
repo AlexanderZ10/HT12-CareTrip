@@ -1,4 +1,6 @@
 import { httpsCallable, httpsCallableFromURL } from "firebase/functions";
+import Constants from "expo-constants";
+import { Platform } from "react-native";
 
 import { functions } from "../firebase";
 import { GEMINI_MODEL, type DiscoverProfile } from "./trip-recommendations";
@@ -124,24 +126,40 @@ function sanitizeNumber(value: unknown) {
   return null;
 }
 
+function isPrivateDevelopmentHost(hostname: string) {
+  return (
+    /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+    /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname)
+  );
+}
+
 function isLocalWebRuntime() {
   if (typeof window === "undefined") {
     return false;
   }
 
   const hostname = window.location?.hostname ?? "";
-  return hostname === "localhost" || hostname === "127.0.0.1";
+  return hostname === "localhost" || hostname === "127.0.0.1" || isPrivateDevelopmentHost(hostname);
 }
 
 function shouldUseLocalFunctionsEmulator() {
   const forcedMode = process.env.EXPO_PUBLIC_FIREBASE_FUNCTIONS_MODE?.trim().toLowerCase();
+  const explicitEmulatorHost = normalizeEmulatorHost(
+    process.env.EXPO_PUBLIC_FIREBASE_FUNCTIONS_EMULATOR_HOST ?? ""
+  );
+  const isNativeRuntime = Platform.OS !== "web";
 
   if (forcedMode === "production") {
     return false;
   }
 
+  if (isNativeRuntime) {
+    return forcedMode === "emulator" && !!(explicitEmulatorHost || resolveFunctionsEmulatorHost());
+  }
+
   if (forcedMode === "emulator") {
-    return true;
+    return !!(explicitEmulatorHost || resolveFunctionsEmulatorHost());
   }
 
   return isLocalWebRuntime();
@@ -171,15 +189,135 @@ function shouldUseFunctionsForPayments() {
   return true;
 }
 
+function normalizeEmulatorHost(value: string) {
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue) {
+    return "";
+  }
+
+  return trimmedValue
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/.*$/, "")
+    .replace(/:\d+$/, "")
+    .trim();
+}
+
+function resolveExpoHostCandidate(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return normalizeEmulatorHost(value);
+}
+
+function resolveFunctionsEmulatorHost() {
+  const envHost = normalizeEmulatorHost(
+    process.env.EXPO_PUBLIC_FIREBASE_FUNCTIONS_EMULATOR_HOST ?? ""
+  );
+
+  if (envHost) {
+    return envHost;
+  }
+
+  if (typeof window !== "undefined") {
+    const webHost = normalizeEmulatorHost(window.location?.hostname ?? "");
+
+    if (webHost) {
+      return webHost;
+    }
+  }
+
+  const constantsRecord = Constants as unknown as Record<string, unknown>;
+  const expoConfig = constantsRecord.expoConfig as Record<string, unknown> | undefined;
+  const expoGoConfig = constantsRecord.expoGoConfig as Record<string, unknown> | undefined;
+  const manifest = constantsRecord.manifest as Record<string, unknown> | undefined;
+  const manifest2 = constantsRecord.manifest2 as Record<string, unknown> | undefined;
+  const manifest2Extra =
+    manifest2?.extra && typeof manifest2.extra === "object"
+      ? (manifest2.extra as Record<string, unknown>)
+      : undefined;
+  const expoClient =
+    manifest2Extra?.expoClient && typeof manifest2Extra.expoClient === "object"
+      ? (manifest2Extra.expoClient as Record<string, unknown>)
+      : undefined;
+
+  const candidateHosts = [
+    resolveExpoHostCandidate(expoConfig?.hostUri),
+    resolveExpoHostCandidate(expoGoConfig?.debuggerHost),
+    resolveExpoHostCandidate(manifest?.debuggerHost),
+    resolveExpoHostCandidate(expoClient?.hostUri),
+  ];
+
+  const matchedHost = candidateHosts.find(Boolean);
+
+  return matchedHost || "127.0.0.1";
+}
+
+function resolveFunctionsEmulatorOrigin() {
+  const port = sanitizeString(
+    process.env.EXPO_PUBLIC_FIREBASE_FUNCTIONS_EMULATOR_PORT,
+    "5001"
+  );
+
+  return `http://${resolveFunctionsEmulatorHost()}:${port}`;
+}
+
+function createEmulatorCallable<Input, Output>(name: string) {
+  return httpsCallableFromURL<Input, Output>(
+    functions,
+    `${resolveFunctionsEmulatorOrigin()}/travelapp-f7ff4/us-central1/${name}`
+  );
+}
+
 function createCallable<Input, Output>(name: string) {
   if (shouldUseLocalFunctionsEmulator()) {
-    return httpsCallableFromURL<Input, Output>(
-      functions,
-      `http://127.0.0.1:5001/travelapp-f7ff4/us-central1/${name}`
-    );
+    return createEmulatorCallable<Input, Output>(name);
   }
 
   return httpsCallable<Input, Output>(functions, name);
+}
+
+function shouldRetryWithEmulator(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  const errorCode =
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    typeof (error as { code?: unknown }).code === "string"
+      ? ((error as { code: string }).code ?? "")
+      : "";
+
+  return (
+    message.includes("unauthenticated") ||
+    message.includes("functions/unauthenticated") ||
+    message.includes("functions/internal") ||
+    errorCode === "unauthenticated" ||
+    errorCode === "functions/unauthenticated" ||
+    errorCode === "internal" ||
+    errorCode === "functions/internal"
+  );
+}
+
+function parseCheckoutSessionResponse(data: Record<string, unknown>) {
+  return {
+    checkoutUrl: sanitizeString(data.checkoutUrl),
+    mode: "stripe_test",
+    provider: "stripe",
+    sessionId: sanitizeString(data.sessionId),
+    status: sanitizeString(data.status, "open"),
+  } satisfies TestCheckoutSessionResponse;
+}
+
+function parseCheckoutVerificationResponse(data: Record<string, unknown>) {
+  return {
+    mode: "stripe_test",
+    paid: data.paid === true,
+    paymentIntentId: sanitizeString(data.paymentIntentId),
+    provider: "stripe",
+    sessionStatus: sanitizeString(data.sessionStatus, "open"),
+    status: sanitizeString(data.status, "unpaid"),
+  } satisfies TestCheckoutVerificationResponse;
 }
 
 function getResponseText(responsePayload: any) {
@@ -658,20 +796,27 @@ export async function createTestCheckoutSession(
     throw new Error("stripe-test-mode-disabled");
   }
 
-  const callable = createCallable<
-    CreateTestCheckoutSessionInput,
-    TestCheckoutSessionResponse
-  >("createTestCheckoutSession");
-  const response = await callable(input);
-  const data = response.data as unknown as Record<string, unknown>;
+  try {
+    const callable = createCallable<
+      CreateTestCheckoutSessionInput,
+      TestCheckoutSessionResponse
+    >("createTestCheckoutSession");
+    const response = await callable(input);
+    return parseCheckoutSessionResponse(response.data as unknown as Record<string, unknown>);
+  } catch (error) {
+    if (!shouldRetryWithEmulator(error) || shouldUseLocalFunctionsEmulator()) {
+      throw error;
+    }
 
-  return {
-    checkoutUrl: sanitizeString(data.checkoutUrl),
-    mode: "stripe_test",
-    provider: "stripe",
-    sessionId: sanitizeString(data.sessionId),
-    status: sanitizeString(data.status, "open"),
-  } satisfies TestCheckoutSessionResponse;
+    const fallbackCallable = createEmulatorCallable<
+      CreateTestCheckoutSessionInput,
+      TestCheckoutSessionResponse
+    >("createTestCheckoutSession");
+    const fallbackResponse = await fallbackCallable(input);
+    return parseCheckoutSessionResponse(
+      fallbackResponse.data as unknown as Record<string, unknown>
+    );
+  }
 }
 
 export async function verifyTestCheckoutSession(
@@ -681,19 +826,25 @@ export async function verifyTestCheckoutSession(
     throw new Error("stripe-test-mode-disabled");
   }
 
-  const callable = createCallable<
-    VerifyTestCheckoutSessionInput,
-    TestCheckoutVerificationResponse
-  >("verifyTestCheckoutSession");
-  const response = await callable(input);
-  const data = response.data as unknown as Record<string, unknown>;
+  try {
+    const callable = createCallable<
+      VerifyTestCheckoutSessionInput,
+      TestCheckoutVerificationResponse
+    >("verifyTestCheckoutSession");
+    const response = await callable(input);
+    return parseCheckoutVerificationResponse(response.data as unknown as Record<string, unknown>);
+  } catch (error) {
+    if (!shouldRetryWithEmulator(error) || shouldUseLocalFunctionsEmulator()) {
+      throw error;
+    }
 
-  return {
-    mode: "stripe_test",
-    paid: data.paid === true,
-    paymentIntentId: sanitizeString(data.paymentIntentId),
-    provider: "stripe",
-    sessionStatus: sanitizeString(data.sessionStatus, "open"),
-    status: sanitizeString(data.status, "unpaid"),
-  } satisfies TestCheckoutVerificationResponse;
+    const fallbackCallable = createEmulatorCallable<
+      VerifyTestCheckoutSessionInput,
+      TestCheckoutVerificationResponse
+    >("verifyTestCheckoutSession");
+    const fallbackResponse = await fallbackCallable(input);
+    return parseCheckoutVerificationResponse(
+      fallbackResponse.data as unknown as Record<string, unknown>
+    );
+  }
 }

@@ -1,6 +1,7 @@
 import { type PlannerStayOption, type PlannerTransportOption } from "./home-travel-planner";
 
 const PENDING_STRIPE_CHECKOUT_KEY = "travelapp_pending_stripe_checkout";
+let inMemoryPendingStripeCheckout: PendingStripeCheckout | null = null;
 
 export type PendingStripeCheckout = {
   budget: string;
@@ -24,6 +25,8 @@ function canUseSessionStorage() {
 }
 
 export function savePendingStripeCheckout(payload: PendingStripeCheckout) {
+  inMemoryPendingStripeCheckout = payload;
+
   if (!canUseSessionStorage()) {
     return;
   }
@@ -33,7 +36,7 @@ export function savePendingStripeCheckout(payload: PendingStripeCheckout) {
 
 export function readPendingStripeCheckout() {
   if (!canUseSessionStorage()) {
-    return null;
+    return inMemoryPendingStripeCheckout;
   }
 
   const rawValue = window.sessionStorage.getItem(PENDING_STRIPE_CHECKOUT_KEY);
@@ -43,13 +46,17 @@ export function readPendingStripeCheckout() {
   }
 
   try {
-    return JSON.parse(rawValue) as PendingStripeCheckout;
+    const parsedValue = JSON.parse(rawValue) as PendingStripeCheckout;
+    inMemoryPendingStripeCheckout = parsedValue;
+    return parsedValue;
   } catch {
-    return null;
+    return inMemoryPendingStripeCheckout;
   }
 }
 
 export function clearPendingStripeCheckout() {
+  inMemoryPendingStripeCheckout = null;
+
   if (!canUseSessionStorage()) {
     return;
   }

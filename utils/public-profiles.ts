@@ -4,9 +4,11 @@ export type ProfileVisibility = "public" | "private";
 
 export type PublicProfile = {
   aboutMe: string;
+  avatarUrl: string;
   displayName: string;
   homeBase: string;
   id: string;
+  photoUrl: string;
   uid: string;
   updatedAtMs: number | null;
   username: string;
@@ -40,6 +42,7 @@ export function getProfileVisibility(value: unknown): ProfileVisibility {
 
 export function buildPublicProfilePayload(params: {
   email: string | null;
+  profilePhotoUrl?: string | null;
   profileInfo?: Record<string, unknown>;
   uid: string;
   username: string;
@@ -52,8 +55,10 @@ export function buildPublicProfilePayload(params: {
 
   return {
     aboutMe: sanitizeString(params.profileInfo?.aboutMe),
+    avatarUrl: sanitizeString(params.profileInfo?.avatarUrl),
     displayName,
     homeBase: sanitizeString(params.profileInfo?.homeBase),
+    photoUrl: sanitizeString(params.profilePhotoUrl),
     uid: params.uid,
     updatedAt: Date.now(),
     username: sanitizeString(params.username),
@@ -67,9 +72,11 @@ export function parsePublicProfile(
 ): PublicProfile {
   return {
     aboutMe: sanitizeString(data?.aboutMe),
+    avatarUrl: sanitizeString(data?.avatarUrl),
     displayName: sanitizeString(data?.displayName, "Traveler"),
     homeBase: sanitizeString(data?.homeBase),
     id,
+    photoUrl: sanitizeString(data?.photoUrl),
     uid: sanitizeString(data?.uid, id),
     updatedAtMs: toMillis(data?.updatedAt),
     username: sanitizeString(data?.username),

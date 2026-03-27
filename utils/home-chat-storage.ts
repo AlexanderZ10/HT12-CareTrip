@@ -62,6 +62,17 @@ export type HomePlannerStore = {
   currentChatId: string | null;
 };
 
+type ImportedSharedTrip = {
+  budget: string | null;
+  destination: string;
+  details: string;
+  duration: string | null;
+  source: "discover" | "home";
+  sourceKey: string;
+  summary: string;
+  title: string;
+};
+
 function sanitizeString(value: unknown, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
 }
@@ -222,6 +233,76 @@ export function createHomePlannerChat(
     pinned: false,
     state: createEmptyPlannerState(initialAssistantMessage),
     title,
+    updatedAtMs: now,
+  };
+}
+
+export function isHomePlannerChatUntouched(chat: HomePlannerChatThread) {
+  return (
+    chat.state.step === "budget" &&
+    !chat.state.budget &&
+    !chat.state.days &&
+    !chat.state.destination &&
+    !chat.state.timing &&
+    !chat.state.transportPreference &&
+    !chat.state.travelers &&
+    !chat.state.latestPlan &&
+    chat.state.followUpMessages.length === 0 &&
+    chat.state.messages.length === 1 &&
+    chat.state.messages[0]?.role === "assistant"
+  );
+}
+
+export function createHomePlannerChatFromSharedTrip(
+  trip: ImportedSharedTrip
+): HomePlannerChatThread {
+  const now = Date.now();
+  const normalizedBudget = normalizeBudgetToEuro(trip.budget ?? "");
+  const normalizedDays = trip.duration?.trim() ?? "";
+
+  return {
+    createdAtMs: now,
+    id: createId("chat-imported"),
+    pinned: false,
+    state: {
+      budget: normalizedBudget,
+      days: normalizedDays,
+      destination: trip.destination.trim(),
+      followUpMessages: [],
+      latestPlan: {
+        budget: normalizedBudget,
+        days: normalizedDays,
+        destination: trip.destination.trim(),
+        formattedPlanText: trip.details.trim(),
+        timing: "",
+        transportPreference: "",
+        travelers: "",
+        plan: {
+          budgetNote: trip.budget ?? "",
+          profileTip:
+            trip.source === "home"
+              ? "Imported from a shared Home trip."
+              : "Imported from a shared Discover trip.",
+          stayOptions: [],
+          summary: trip.summary.trim(),
+          title: trip.title.trim(),
+          transportOptions: [],
+          tripDays: [],
+        },
+        sourceKey: trip.sourceKey.trim() || createId("imported-source"),
+      },
+      messages: [
+        createHomeChatMessage(
+          "assistant",
+          "Imported from a group. You can continue this trip here without changing the original chat."
+        ),
+      ],
+      step: "done",
+      timing: "",
+      transportPreference: "",
+      travelers: "",
+    },
+    title: trip.title.trim() || `Trip for ${trip.destination.trim()}`,
     updatedAtMs: now,
   };
 }

@@ -4,7 +4,7 @@ import {
 } from "./profile-info";
 
 export const GEMINI_MODEL = "gemini-2.5-flash";
-export const DEFAULT_SETTLEMENT_MAP_ZOOM = 7;
+export const DEFAULT_SETTLEMENT_MAP_ZOOM = 5;
 
 type OnboardingSection = {
   note: string;
@@ -568,7 +568,7 @@ export function getLocalDateKey(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return `${year}-${month}-${day}` + 5;
 }
 
 function buildGroundedSettlementResearchPrompt(

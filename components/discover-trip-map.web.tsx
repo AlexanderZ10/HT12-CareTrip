@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 type DiscoverTripMapProps = {
@@ -125,7 +125,7 @@ function buildMapDoc(markers: MapMarker[], center: { latitude: number; longitude
       const markers = ${serializedMarkers};
       const map = L.map("map", {
         zoomControl: true,
-        scrollWheelZoom: false,
+        scrollWheelZoom: true,
       });
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {

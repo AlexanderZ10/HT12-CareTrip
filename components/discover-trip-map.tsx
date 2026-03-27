@@ -1,4 +1,5 @@
 import { Image } from "expo-image";
+import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 import { buildSettlementMapUrl } from "../utils/trip-recommendations";
