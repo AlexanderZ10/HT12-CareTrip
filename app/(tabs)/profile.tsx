@@ -15,7 +15,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -36,6 +35,8 @@ import Animated, {
 } from "react-native-reanimated";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AvatarSheet } from "../../features/profile/components/AvatarSheet";
+import { ChoicePill, MiniToggle, SectionHeader, SettingsRow } from "../../features/profile/components/ProfileHelpers";
 import { DismissKeyboard } from "../../components/dismiss-keyboard";
 import { auth, db } from "../../firebase";
 import {
@@ -82,161 +83,11 @@ const SPRING_BTN = { damping: 18, stiffness: 220 };
 const SPRING_TOAST = { damping: 16, stiffness: 200 };
 const TIMING_ENTRANCE = { duration: 340, easing: Easing.out(Easing.cubic) };
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-function SectionHeader({
-  title,
-  color,
-}: {
-  title: string;
-  color: string;
-}) {
-  return (
-    <Text
-      style={[
-        staticStyles.sectionHeader,
-        { color },
-      ]}
-    >
-      {title}
-    </Text>
-  );
-}
-
-function SettingsRow({
-  icon,
-  label,
-  onPress,
-  colors,
-  loading: isLoading,
-  destructive,
-  trailing,
-}: {
-  icon: keyof typeof MaterialIcons.glyphMap;
-  label: string;
-  onPress: () => void;
-  colors: { textPrimary: string; border: string; accent: string; textMuted: string; errorText: string };
-  loading?: boolean;
-  destructive?: boolean;
-  trailing?: string;
-}) {
-  const color = destructive ? colors.errorText : colors.textPrimary;
-  return (
-    <Pressable
-      style={[staticStyles.settingsRow, { borderBottomColor: colors.border }]}
-      onPress={onPress}
-      disabled={isLoading}
-    >
-      <MaterialIcons name={icon} size={20} color={color} />
-      <Text style={[staticStyles.settingsRowLabel, { color }]}>{label}</Text>
-      {isLoading ? (
-        <ActivityIndicator size="small" color={colors.accent} />
-      ) : trailing ? (
-        <Text style={[staticStyles.settingsRowTrailing, { color: colors.textMuted }]}>
-          {trailing}
-        </Text>
-      ) : (
-        <MaterialIcons name="chevron-right" size={20} color={colors.textMuted} />
-      )}
-    </Pressable>
-  );
-}
-
-function ChoicePill({
-  label,
-  onPress,
-  selected,
-  accentColor,
-  cardBg,
-  cardBorder,
-  textColor,
-  selectedTextColor,
-}: {
-  label: string;
-  onPress: () => void;
-  selected: boolean;
-  accentColor: string;
-  cardBg: string;
-  cardBorder: string;
-  textColor: string;
-  selectedTextColor: string;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[
-        staticStyles.pill,
-        {
-          backgroundColor: selected ? accentColor : cardBg,
-          borderColor: selected ? accentColor : cardBorder,
-        },
-      ]}
-    >
-      <Text
-        style={[
-          staticStyles.pillText,
-          { color: selected ? selectedTextColor : textColor },
-        ]}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function MiniToggle({
-  icon,
-  label,
-  active,
-  onPress,
-  accentColor,
-  cardBg,
-  cardBorder,
-  textColor,
-  activeTextColor,
-}: {
-  icon: keyof typeof MaterialIcons.glyphMap;
-  label: string;
-  active: boolean;
-  onPress: () => void;
-  accentColor: string;
-  cardBg: string;
-  cardBorder: string;
-  textColor: string;
-  activeTextColor: string;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[
-        staticStyles.miniToggle,
-        {
-          backgroundColor: active ? accentColor : cardBg,
-          borderColor: active ? accentColor : cardBorder,
-        },
-      ]}
-    >
-      <MaterialIcons
-        name={icon}
-        size={18}
-        color={active ? activeTextColor : textColor}
-      />
-      <Text
-        style={[
-          staticStyles.miniToggleLabel,
-          { color: active ? activeTextColor : textColor },
-        ]}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const EMPTY_FORM: ProfileFormState = {
   aboutMe: "",
+  avatarUrl: "",
   dreamDestinations: "",
   fullName: "",
   homeBase: "",
@@ -1132,31 +983,15 @@ export default function ProfileTabScreen() {
       ) : null}
 
       {/* ───────── Avatar sheet ───────── */}
-      <Modal transparent animationType="fade" visible={avatarSheetVisible} onRequestClose={() => setAvatarSheetVisible(false)}>
-        <View style={[staticStyles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
-          <Pressable onPress={() => setAvatarSheetVisible(false)} style={StyleSheet.absoluteFillObject} />
-          <View style={[staticStyles.sheet, { backgroundColor: colors.card }]}>
-            <View style={[staticStyles.sheetHandle, { backgroundColor: colors.border }]} />
-            <Text style={[staticStyles.sheetTitle, { color: colors.textPrimary }]}>Profile photo</Text>
-            <Text style={[staticStyles.sheetSubtitle, { color: colors.textSecondary }]}>Choose from gallery or reset to default.</Text>
-            <Pressable style={[staticStyles.sheetPrimaryBtn, { backgroundColor: colors.accent }]} onPress={() => void handlePickProfilePhoto()}>
-              <MaterialIcons name="photo-library" size={18} color="#FFFFFF" />
-              <Text style={staticStyles.sheetPrimaryBtnText}>
-                {showAvatar ? "Choose new photo" : "Choose photo"}
-              </Text>
-            </Pressable>
-            {showAvatar ? (
-              <Pressable style={[staticStyles.sheetSecondaryBtn, { borderColor: colors.border }]} onPress={() => void handleRemoveProfilePhoto()}>
-                <MaterialIcons name="delete-outline" size={18} color={colors.errorText} />
-                <Text style={[staticStyles.sheetSecondaryBtnText, { color: colors.errorText }]}>Remove photo</Text>
-              </Pressable>
-            ) : null}
-            <Pressable style={staticStyles.sheetCancel} onPress={() => setAvatarSheetVisible(false)}>
-              <Text style={[staticStyles.sheetCancelText, { color: colors.textMuted }]}>Cancel</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+      <AvatarSheet
+        visible={avatarSheetVisible}
+        onClose={() => setAvatarSheetVisible(false)}
+        showAvatar={showAvatar}
+        onPickPhoto={() => void handlePickProfilePhoto()}
+        onRemovePhoto={() => void handleRemoveProfilePhoto()}
+        updatingPhoto={updatingPhoto}
+        colors={colors}
+      />
     </SafeAreaView>
   );
 }
@@ -1217,47 +1052,15 @@ const staticStyles = StyleSheet.create({
   profileEmailText: {
     ...TypeScale.bodyMd,
   },
-  sectionHeader: {
-    ...TypeScale.labelLg,
-    fontWeight: FontWeight.bold,
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-    marginBottom: Spacing.sm,
-    marginLeft: Spacing.xs,
-  },
   toggleRow: {
     flexDirection: "row",
     gap: Spacing.sm,
-  },
-  miniToggle: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.sm,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    paddingVertical: Spacing.md,
-    justifyContent: "center",
-  },
-  miniToggleLabel: {
-    ...TypeScale.titleSm,
-    fontWeight: FontWeight.semibold,
   },
   pillsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: Spacing.sm,
     marginBottom: Spacing.xs,
-  },
-  pill: {
-    borderRadius: Radius.full,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
-    borderWidth: 1,
-  },
-  pillText: {
-    ...TypeScale.labelLg,
-    fontWeight: FontWeight.semibold,
   },
   textArea: {
     minHeight: 100,
@@ -1275,20 +1078,6 @@ const staticStyles = StyleSheet.create({
     gap: Spacing.sm,
     marginTop: Spacing.xs,
   },
-  settingsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.md,
-    paddingVertical: Spacing.lg,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  settingsRowLabel: {
-    ...TypeScale.bodyLg,
-    flex: 1,
-  },
-  settingsRowTrailing: {
-    ...TypeScale.bodySm,
-  },
   toast: {
     position: "absolute",
     top: Spacing.lg,
@@ -1303,11 +1092,6 @@ const staticStyles = StyleSheet.create({
   toastText: {
     ...TypeScale.bodyMd,
     fontWeight: FontWeight.bold,
-  },
-  sheetCancel: {
-    alignItems: "center",
-    paddingVertical: Spacing.md,
-    marginTop: Spacing.xs,
   },
   footer: {
     height: Spacing["4xl"],
@@ -1408,62 +1192,4 @@ const staticStyles = StyleSheet.create({
     fontWeight: FontWeight.semibold,
   },
 
-  // Modal / sheet
-  modalOverlay: {
-    flex: 1,
-    justifyContent: "flex-end",
-  },
-  sheet: {
-    borderTopLeftRadius: Radius["3xl"],
-    borderTopRightRadius: Radius["3xl"],
-    paddingHorizontal: Spacing["2xl"],
-    paddingBottom: Spacing["3xl"],
-    paddingTop: Spacing.md,
-  },
-  sheetHandle: {
-    width: 36,
-    height: 4,
-    borderRadius: Radius.full,
-    alignSelf: "center",
-    marginBottom: Spacing.xl,
-  },
-  sheetTitle: {
-    ...TypeScale.headingSm,
-    marginBottom: Spacing.xs,
-  },
-  sheetSubtitle: {
-    ...TypeScale.bodyMd,
-    marginBottom: Spacing.xl,
-  },
-  sheetPrimaryBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: Spacing.sm,
-    borderRadius: Radius.md,
-    paddingVertical: Spacing.lg,
-  },
-  sheetPrimaryBtnText: {
-    ...TypeScale.titleMd,
-    color: "#FFFFFF",
-    fontWeight: FontWeight.bold,
-  },
-  sheetSecondaryBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: Spacing.sm,
-    borderRadius: Radius.md,
-    paddingVertical: Spacing.lg,
-    marginTop: Spacing.sm,
-    borderWidth: 1,
-  },
-  sheetSecondaryBtnText: {
-    ...TypeScale.titleMd,
-    fontWeight: FontWeight.semibold,
-  },
-  sheetCancelText: {
-    ...TypeScale.bodyMd,
-    fontWeight: FontWeight.semibold,
-  },
 });
