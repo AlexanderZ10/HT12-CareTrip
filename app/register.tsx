@@ -37,22 +37,23 @@ import {
   type AuthField,
 } from "../utils/auth-errors";
 import { createMathCaptcha } from "../utils/math-captcha";
-import { useAppTheme } from "../utils/app-theme";
+import { useAppTheme } from "../components/app-theme-provider";
 import { Radius, Spacing, TypeScale, FontWeight, shadow } from "../constants/design-system";
+import PasswordStrengthBar, {
+  checkPasswordStrength,
+  type PasswordStrength,
+} from "../features/auth/components/PasswordStrengthBar";
+import MathCaptcha from "../features/auth/components/MathCaptcha";
 
 const CARETRIP_ICON = require("../assets/images/CareTrip.png");
 const CARETRIP_BACKGROUND = require("../assets/images/CareTrip-background.png");
 
-type PasswordStrength = "weak" | "medium" | "strong" | "";
-
 const SPRING_CONFIG = { damping: 18, stiffness: 220 };
 const TIMING_FAST = { duration: 220, easing: Easing.out(Easing.quad) };
 
-const STRENGTH_STEPS: PasswordStrength[] = ["weak", "medium", "strong"];
-
 export default function Register() {
   const router = useRouter();
-  const { palette } = useAppTheme();
+  const { colors } = useAppTheme();
 
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -66,7 +67,7 @@ export default function Register() {
   const [errors, setErrors] = useState<AuthErrors>({});
   const [loading, setLoading] = useState(false);
 
-  const styles = useMemo(() => createStyles(palette), [palette]);
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   // ── Entrance animations ──────────────────────────────────────────────────
   const logoScale = useSharedValue(0.6);
@@ -124,25 +125,6 @@ export default function Register() {
     btnScale.value = withSpring(1, SPRING_CONFIG);
   };
 
-  // ── Strength bar segment animations ─────────────────────────────────────
-  const seg0Opacity = useSharedValue(0.25);
-  const seg1Opacity = useSharedValue(0.25);
-  const seg2Opacity = useSharedValue(0.25);
-  const segOpacities = [seg0Opacity, seg1Opacity, seg2Opacity];
-
-  const seg0Style = useAnimatedStyle(() => ({ opacity: seg0Opacity.value }));
-  const seg1Style = useAnimatedStyle(() => ({ opacity: seg1Opacity.value }));
-  const seg2Style = useAnimatedStyle(() => ({ opacity: seg2Opacity.value }));
-  const segStyles = [seg0Style, seg1Style, seg2Style];
-
-  // Animate segments whenever strength changes
-  useEffect(() => {
-    const filledCount = STRENGTH_STEPS.indexOf(strength) + 1; // 0 when strength=""
-    segOpacities.forEach((sv, i) => {
-      sv.value = withTiming(i < filledCount ? 1 : 0.2, { duration: 250 });
-    });
-  }, [strength]);
-
   // ── Match indicator fade ─────────────────────────────────────────────────
   const matchOpacity = useSharedValue(0);
 
@@ -153,20 +135,6 @@ export default function Register() {
   useEffect(() => {
     matchOpacity.value = withTiming(confirmPassword.length > 0 ? 1 : 0, { duration: 200 });
   }, [confirmPassword.length > 0]);
-
-  // ── Password helpers ─────────────────────────────────────────────────────
-  const checkPasswordStrength = (pass: string): PasswordStrength => {
-    if (!pass) return "";
-    let score = 0;
-    if (pass.length >= 6) score++;
-    if (pass.length >= 10) score++;
-    if (/[A-Z]/.test(pass)) score++;
-    if (/[0-9]/.test(pass)) score++;
-    if (/[^A-Za-z0-9]/.test(pass)) score++;
-    if (score <= 1) return "weak";
-    if (score <= 3) return "medium";
-    return "strong";
-  };
 
   const handlePasswordChange = (text: string) => {
     setPassword(text);
@@ -297,21 +265,6 @@ export default function Register() {
     }
   };
 
-  // ── Derived display values ───────────────────────────────────────────────
-  const strengthLabel: Record<PasswordStrength, string> = {
-    "": "",
-    weak: "Weak",
-    medium: "Medium",
-    strong: "Strong",
-  };
-
-  const strengthColor: Record<PasswordStrength, string> = {
-    "": palette.cardBorder,
-    weak: palette.error,
-    medium: palette.warning,
-    strong: palette.success,
-  };
-
   const passwordsMatch = confirmPassword.length > 0 && password === confirmPassword;
 
   return (
@@ -346,7 +299,7 @@ export default function Register() {
                 <Text style={styles.label}>Email</Text>
                 <TextInput
                   placeholder="you@example.com"
-                  placeholderTextColor={palette.inputPlaceholder}
+                  placeholderTextColor={colors.inputPlaceholder}
                   style={[styles.input, errors.email ? styles.inputError : null]}
                   value={email}
                   onChangeText={(text) => { setEmail(text); clearFieldError("email"); }}
@@ -358,7 +311,7 @@ export default function Register() {
                 />
                 {errors.email ? (
                   <View style={styles.errorRow}>
-                    <MaterialIcons name="error-outline" size={14} color={palette.error} />
+                    <MaterialIcons name="error-outline" size={14} color={colors.error} />
                     <Text style={styles.errorText}>{errors.email}</Text>
                   </View>
                 ) : null}
@@ -369,7 +322,7 @@ export default function Register() {
                 <Text style={styles.label}>Username</Text>
                 <TextInput
                   placeholder="your_username"
-                  placeholderTextColor={palette.inputPlaceholder}
+                  placeholderTextColor={colors.inputPlaceholder}
                   style={[styles.input, errors.username ? styles.inputError : null]}
                   value={username}
                   onChangeText={(text) => { setUsername(text); clearFieldError("username"); }}
@@ -380,7 +333,7 @@ export default function Register() {
                 />
                 {errors.username ? (
                   <View style={styles.errorRow}>
-                    <MaterialIcons name="error-outline" size={14} color={palette.error} />
+                    <MaterialIcons name="error-outline" size={14} color={colors.error} />
                     <Text style={styles.errorText}>{errors.username}</Text>
                   </View>
                 ) : null}
@@ -392,7 +345,7 @@ export default function Register() {
                 <View style={[styles.passwordRow, errors.password ? styles.inputError : null]}>
                   <TextInput
                     placeholder="••••••••"
-                    placeholderTextColor={palette.inputPlaceholder}
+                    placeholderTextColor={colors.inputPlaceholder}
                     style={styles.passwordInput}
                     secureTextEntry={!showPassword}
                     value={password}
@@ -410,36 +363,16 @@ export default function Register() {
                     <MaterialIcons
                       name={showPassword ? "visibility-off" : "visibility"}
                       size={20}
-                      color={palette.bodyText}
+                      color={colors.textSecondary}
                     />
                   </Pressable>
                 </View>
 
-                {/* Animated strength bar */}
-                {password.length > 0 ? (
-                  <View style={styles.strengthContainer}>
-                    <View style={styles.strengthBarRow}>
-                      {STRENGTH_STEPS.map((step, i) => (
-                        <Animated.View
-                          key={step}
-                          style={[
-                            styles.strengthSegment,
-                            i > 0 && styles.strengthSegmentGap,
-                            { backgroundColor: strengthColor[strength] },
-                            segStyles[i],
-                          ]}
-                        />
-                      ))}
-                    </View>
-                    <Text style={[styles.strengthLabel, { color: strengthColor[strength] }]}>
-                      {strengthLabel[strength]}
-                    </Text>
-                  </View>
-                ) : null}
+                {password.length > 0 ? <PasswordStrengthBar strength={strength} /> : null}
 
                 {errors.password ? (
                   <View style={styles.errorRow}>
-                    <MaterialIcons name="error-outline" size={14} color={palette.error} />
+                    <MaterialIcons name="error-outline" size={14} color={colors.error} />
                     <Text style={styles.errorText}>{errors.password}</Text>
                   </View>
                 ) : null}
@@ -451,7 +384,7 @@ export default function Register() {
                 <View style={[styles.passwordRow, errors.confirmPassword ? styles.inputError : null]}>
                   <TextInput
                     placeholder="••••••••"
-                    placeholderTextColor={palette.inputPlaceholder}
+                    placeholderTextColor={colors.inputPlaceholder}
                     style={styles.passwordInput}
                     secureTextEntry={!showConfirmPassword}
                     value={confirmPassword}
@@ -472,7 +405,7 @@ export default function Register() {
                     <MaterialIcons
                       name={showConfirmPassword ? "visibility-off" : "visibility"}
                       size={20}
-                      color={palette.bodyText}
+                      color={colors.textSecondary}
                     />
                   </Pressable>
                 </View>
@@ -482,12 +415,12 @@ export default function Register() {
                   <MaterialIcons
                     name={passwordsMatch ? "check-circle" : "cancel"}
                     size={14}
-                    color={passwordsMatch ? palette.success : palette.error}
+                    color={passwordsMatch ? colors.success : colors.error}
                   />
                   <Text
                     style={[
                       styles.matchText,
-                      { color: passwordsMatch ? palette.success : palette.error },
+                      { color: passwordsMatch ? colors.success : colors.error },
                     ]}
                   >
                     {passwordsMatch ? "Passwords match" : "Passwords do not match"}
@@ -496,50 +429,24 @@ export default function Register() {
 
                 {errors.confirmPassword ? (
                   <View style={styles.errorRow}>
-                    <MaterialIcons name="error-outline" size={14} color={palette.error} />
+                    <MaterialIcons name="error-outline" size={14} color={colors.error} />
                     <Text style={styles.errorText}>{errors.confirmPassword}</Text>
                   </View>
                 ) : null}
               </View>
 
               {/* Captcha */}
-              <View style={styles.captchaCard}>
-                <View style={styles.captchaHeader}>
-                  <View style={styles.captchaTitleRow}>
-                    <MaterialIcons name="security" size={16} color={palette.accentText} />
-                    <Text style={styles.captchaTitle}>Quick check</Text>
-                  </View>
-                  <Pressable
-                    style={styles.refreshButton}
-                    onPress={handleRefreshCaptcha}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <MaterialIcons name="refresh" size={16} color={palette.highlight} />
-                    <Text style={styles.refreshText}>New</Text>
-                  </Pressable>
-                </View>
-
-                <Text style={styles.captchaEquation}>{captcha.prompt}</Text>
-
-                <TextInput
-                  placeholder="Your answer"
-                  placeholderTextColor={palette.inputPlaceholder}
-                  style={[styles.input, styles.captchaInput, errors.captcha ? styles.inputError : null]}
-                  value={captchaAnswer}
-                  onChangeText={(text) => {
-                    setCaptchaAnswer(text.replace(/[^0-9-]/g, ""));
-                    clearFieldError("captcha");
-                  }}
-                  keyboardType="number-pad"
-                  editable={!loading}
-                />
-                {errors.captcha ? (
-                  <View style={styles.errorRow}>
-                    <MaterialIcons name="error-outline" size={14} color={palette.error} />
-                    <Text style={styles.errorText}>{errors.captcha}</Text>
-                  </View>
-                ) : null}
-              </View>
+              <MathCaptcha
+                prompt={captcha.prompt}
+                answer={captchaAnswer}
+                onChangeAnswer={(text) => {
+                  setCaptchaAnswer(text);
+                  clearFieldError("captcha");
+                }}
+                onRefresh={handleRefreshCaptcha}
+                error={errors.captcha}
+                disabled={loading}
+              />
 
               {/* Submit */}
               <Animated.View style={btnAnimStyle}>
@@ -551,7 +458,7 @@ export default function Register() {
                   disabled={loading}
                 >
                   {loading ? (
-                    <ActivityIndicator color={palette.buttonTextOnAction} size="small" />
+                    <ActivityIndicator color={colors.buttonTextOnAction} size="small" />
                   ) : (
                     <Text style={styles.primaryButtonText}>Create Account</Text>
                   )}
@@ -573,15 +480,15 @@ export default function Register() {
   );
 }
 
-function createStyles(palette: ReturnType<typeof useAppTheme>["palette"]) {
+function createStyles(colors: ReturnType<typeof useAppTheme>["colors"]) {
   return StyleSheet.create({
     screen: {
       flex: 1,
-      backgroundColor: palette.appBackground,
+      backgroundColor: colors.screen,
     },
     overlay: {
       ...StyleSheet.absoluteFillObject,
-      backgroundColor: palette.overlay,
+      backgroundColor: colors.overlay,
     },
     keyboardView: {
       flex: 1,
@@ -608,10 +515,10 @@ function createStyles(palette: ReturnType<typeof useAppTheme>["palette"]) {
     card: {
       width: "100%",
       maxWidth: 460,
-      backgroundColor: palette.cardBackground,
+      backgroundColor: colors.card,
       borderRadius: Radius["3xl"],
       borderWidth: 1,
-      borderColor: palette.cardBorder,
+      borderColor: colors.border,
       padding: Spacing["2xl"],
       ...shadow("lg"),
     },
@@ -619,13 +526,13 @@ function createStyles(palette: ReturnType<typeof useAppTheme>["palette"]) {
     // Header
     title: {
       ...TypeScale.headingMd,
-      color: palette.textPrimary,
+      color: colors.textPrimary,
       textAlign: "center",
       marginBottom: Spacing.xs,
     },
     subtitle: {
       ...TypeScale.bodyMd,
-      color: palette.bodyText,
+      color: colors.textSecondary,
       textAlign: "center",
       marginBottom: Spacing["2xl"],
     },
@@ -636,30 +543,30 @@ function createStyles(palette: ReturnType<typeof useAppTheme>["palette"]) {
     },
     label: {
       ...TypeScale.labelLg,
-      color: palette.accentText,
+      color: colors.accentText,
       marginBottom: Spacing.xs,
     },
     input: {
-      backgroundColor: palette.inputBackground,
+      backgroundColor: colors.inputBackground,
       borderRadius: Radius.md,
       borderWidth: 1,
-      borderColor: palette.inputBorder,
+      borderColor: colors.inputBorder,
       paddingHorizontal: Spacing.lg,
       paddingVertical: Spacing.md,
       ...TypeScale.bodyMd,
-      color: palette.inputText,
+      color: colors.inputText,
       minHeight: 48,
     },
     inputError: {
-      borderColor: palette.error,
+      borderColor: colors.error,
     },
     passwordRow: {
       flexDirection: "row",
       alignItems: "center",
-      backgroundColor: palette.inputBackground,
+      backgroundColor: colors.inputBackground,
       borderRadius: Radius.md,
       borderWidth: 1,
-      borderColor: palette.inputBorder,
+      borderColor: colors.inputBorder,
       paddingHorizontal: Spacing.lg,
       minHeight: 48,
     },
@@ -667,37 +574,10 @@ function createStyles(palette: ReturnType<typeof useAppTheme>["palette"]) {
       flex: 1,
       paddingVertical: Spacing.md,
       ...TypeScale.bodyMd,
-      color: palette.inputText,
+      color: colors.inputText,
     },
     eyeButton: {
       paddingLeft: Spacing.sm,
-    },
-
-    // Strength bar
-    strengthContainer: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: Spacing.sm,
-      marginTop: Spacing.sm,
-    },
-    strengthBarRow: {
-      flex: 1,
-      flexDirection: "row",
-      height: 4,
-      gap: Spacing.xs,
-    },
-    strengthSegment: {
-      flex: 1,
-      borderRadius: Radius.full,
-    },
-    strengthSegmentGap: {
-      marginLeft: Spacing.xs,
-    },
-    strengthLabel: {
-      ...TypeScale.labelSm,
-      fontWeight: FontWeight.semibold,
-      minWidth: 44,
-      textAlign: "right",
     },
 
     // Match indicator
@@ -720,62 +600,13 @@ function createStyles(palette: ReturnType<typeof useAppTheme>["palette"]) {
     },
     errorText: {
       ...TypeScale.labelMd,
-      color: palette.error,
+      color: colors.error,
       flex: 1,
-    },
-
-    // Captcha
-    captchaCard: {
-      backgroundColor: palette.elevated,
-      borderRadius: Radius.lg,
-      borderWidth: 1,
-      borderColor: palette.cardBorder,
-      padding: Spacing.lg,
-      marginBottom: Spacing.lg,
-    },
-    captchaHeader: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      marginBottom: Spacing.md,
-    },
-    captchaTitleRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: Spacing.xs,
-    },
-    captchaTitle: {
-      ...TypeScale.titleSm,
-      color: palette.accentText,
-    },
-    refreshButton: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: Spacing.xs,
-      backgroundColor: palette.cardBackground,
-      borderRadius: Radius.sm,
-      paddingHorizontal: Spacing.sm,
-      paddingVertical: Spacing.xs,
-      borderWidth: 1,
-      borderColor: palette.cardBorder,
-    },
-    refreshText: {
-      ...TypeScale.labelMd,
-      color: palette.highlight,
-      fontWeight: FontWeight.semibold,
-    },
-    captchaEquation: {
-      ...TypeScale.headingSm,
-      color: palette.textPrimary,
-      marginBottom: Spacing.md,
-    },
-    captchaInput: {
-      marginBottom: 0,
     },
 
     // Button
     primaryButton: {
-      backgroundColor: palette.primaryAction,
+      backgroundColor: colors.primaryAction,
       borderRadius: Radius.md,
       height: 52,
       alignItems: "center",
@@ -787,19 +618,19 @@ function createStyles(palette: ReturnType<typeof useAppTheme>["palette"]) {
     },
     primaryButtonText: {
       ...TypeScale.titleMd,
-      color: palette.buttonTextOnAction,
+      color: colors.buttonTextOnAction,
       fontWeight: FontWeight.bold,
     },
 
     // Footer
     footerText: {
       ...TypeScale.bodyMd,
-      color: palette.bodyText,
+      color: colors.textSecondary,
       textAlign: "center",
       marginTop: Spacing.xl,
     },
     footerLink: {
-      color: palette.highlight,
+      color: colors.highlight,
       fontWeight: FontWeight.semibold,
     },
   });

@@ -37,7 +37,7 @@ import {
   type AuthErrors,
   type AuthField,
 } from "../utils/auth-errors";
-import { useAppTheme } from "../utils/app-theme";
+import { useAppTheme } from "../components/app-theme-provider";
 import { Radius, Spacing, TypeScale, FontWeight, shadow } from "../constants/design-system";
 
 const CARETRIP_ICON = require("../assets/images/CareTrip.png");
@@ -48,7 +48,7 @@ const TIMING_FAST = { duration: 220, easing: Easing.out(Easing.quad) };
 
 export default function Login() {
   const router = useRouter();
-  const { palette } = useAppTheme();
+  const { colors } = useAppTheme();
 
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -59,7 +59,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
 
-  const styles = useMemo(() => createStyles(palette), [palette]);
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   // ── Entrance animations ──────────────────────────────────────────────────
   const logoScale = useSharedValue(0.6);
@@ -317,7 +317,7 @@ export default function Login() {
                 <Text style={styles.label}>Email or Username</Text>
                 <TextInput
                   placeholder="you@example.com"
-                  placeholderTextColor={palette.inputPlaceholder}
+                  placeholderTextColor={colors.inputPlaceholder}
                   style={[styles.input, errors.identifier ? styles.inputError : null]}
                   value={identifier}
                   onChangeText={(text) => {
@@ -334,7 +334,7 @@ export default function Login() {
                 />
                 {errors.identifier ? (
                   <View style={styles.errorRow}>
-                    <MaterialIcons name="error-outline" size={14} color={palette.error} />
+                    <MaterialIcons name="error-outline" size={14} color={colors.error} />
                     <Text style={styles.errorText}>{errors.identifier}</Text>
                   </View>
                 ) : null}
@@ -350,7 +350,7 @@ export default function Login() {
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   >
                     {resetLoading ? (
-                      <ActivityIndicator size={12} color={palette.highlight} />
+                      <ActivityIndicator size={12} color={colors.highlight} />
                     ) : (
                       <Text style={styles.forgotLink}>Forgot password?</Text>
                     )}
@@ -359,7 +359,7 @@ export default function Login() {
                 <View style={[styles.passwordRow, errors.password ? styles.inputError : null]}>
                   <TextInput
                     placeholder="••••••••"
-                    placeholderTextColor={palette.inputPlaceholder}
+                    placeholderTextColor={colors.inputPlaceholder}
                     style={styles.passwordInput}
                     secureTextEntry={!showPassword}
                     value={password}
@@ -383,13 +383,13 @@ export default function Login() {
                     <MaterialIcons
                       name={showPassword ? "visibility-off" : "visibility"}
                       size={20}
-                      color={palette.bodyText}
+                      color={colors.textSecondary}
                     />
                   </Pressable>
                 </View>
                 {errors.password ? (
                   <View style={styles.errorRow}>
-                    <MaterialIcons name="error-outline" size={14} color={palette.error} />
+                    <MaterialIcons name="error-outline" size={14} color={colors.error} />
                     <Text style={styles.errorText}>{errors.password}</Text>
                   </View>
                 ) : null}
@@ -398,7 +398,7 @@ export default function Login() {
               {/* Wrong-password inline reset hint */}
               {showResetHint ? (
                 <Pressable style={styles.resetHintRow} onPress={handleResetPassword}>
-                  <MaterialIcons name="lock-reset" size={14} color={palette.primaryAction} />
+                  <MaterialIcons name="lock-reset" size={14} color={colors.primaryAction} />
                   <Text style={styles.resetHintText}>Wrong password? Tap here to reset it.</Text>
                 </Pressable>
               ) : null}
@@ -406,7 +406,7 @@ export default function Login() {
               {/* Reset success */}
               {resetMessage ? (
                 <View style={styles.successRow}>
-                  <MaterialIcons name="check-circle-outline" size={14} color={palette.success} />
+                  <MaterialIcons name="check-circle-outline" size={14} color={colors.success} />
                   <Text style={styles.successText}>{resetMessage}</Text>
                 </View>
               ) : null}
@@ -421,7 +421,7 @@ export default function Login() {
                   disabled={loading}
                 >
                   {loading ? (
-                    <ActivityIndicator color={palette.buttonTextOnAction} size="small" />
+                    <ActivityIndicator color={colors.buttonTextOnAction} size="small" />
                   ) : (
                     <Text style={styles.primaryButtonText}>Sign In</Text>
                   )}
@@ -443,15 +443,15 @@ export default function Login() {
   );
 }
 
-function createStyles(palette: ReturnType<typeof useAppTheme>["palette"]) {
+function createStyles(colors: ReturnType<typeof useAppTheme>["colors"]) {
   return StyleSheet.create({
     screen: {
       flex: 1,
-      backgroundColor: palette.appBackground,
+      backgroundColor: colors.screen,
     },
     overlay: {
       ...StyleSheet.absoluteFillObject,
-      backgroundColor: palette.overlay,
+      backgroundColor: colors.overlay,
     },
     keyboardView: {
       flex: 1,
@@ -478,10 +478,10 @@ function createStyles(palette: ReturnType<typeof useAppTheme>["palette"]) {
     card: {
       width: "100%",
       maxWidth: 460,
-      backgroundColor: palette.cardBackground,
+      backgroundColor: colors.card,
       borderRadius: Radius["3xl"],
       borderWidth: 1,
-      borderColor: palette.cardBorder,
+      borderColor: colors.border,
       padding: Spacing["2xl"],
       ...shadow("lg"),
     },
@@ -489,13 +489,13 @@ function createStyles(palette: ReturnType<typeof useAppTheme>["palette"]) {
     // Header
     title: {
       ...TypeScale.headingMd,
-      color: palette.textPrimary,
+      color: colors.textPrimary,
       textAlign: "center",
       marginBottom: Spacing.xs,
     },
     subtitle: {
       ...TypeScale.bodyMd,
-      color: palette.bodyText,
+      color: colors.textSecondary,
       textAlign: "center",
       marginBottom: Spacing["2xl"],
     },
@@ -512,37 +512,37 @@ function createStyles(palette: ReturnType<typeof useAppTheme>["palette"]) {
     },
     label: {
       ...TypeScale.labelLg,
-      color: palette.accentText,
+      color: colors.accentText,
       marginBottom: Spacing.xs,
     },
     forgotLink: {
       ...TypeScale.labelMd,
-      color: palette.highlight,
+      color: colors.highlight,
       fontWeight: FontWeight.semibold,
     },
 
     // Inputs
     input: {
-      backgroundColor: palette.inputBackground,
+      backgroundColor: colors.inputBackground,
       borderRadius: Radius.md,
       borderWidth: 1,
-      borderColor: palette.inputBorder,
+      borderColor: colors.inputBorder,
       paddingHorizontal: Spacing.lg,
       paddingVertical: Spacing.md,
       ...TypeScale.bodyMd,
-      color: palette.inputText,
+      color: colors.inputText,
       minHeight: 48,
     },
     inputError: {
-      borderColor: palette.error,
+      borderColor: colors.error,
     },
     passwordRow: {
       flexDirection: "row",
       alignItems: "center",
-      backgroundColor: palette.inputBackground,
+      backgroundColor: colors.inputBackground,
       borderRadius: Radius.md,
       borderWidth: 1,
-      borderColor: palette.inputBorder,
+      borderColor: colors.inputBorder,
       paddingHorizontal: Spacing.lg,
       minHeight: 48,
     },
@@ -550,7 +550,7 @@ function createStyles(palette: ReturnType<typeof useAppTheme>["palette"]) {
       flex: 1,
       paddingVertical: Spacing.md,
       ...TypeScale.bodyMd,
-      color: palette.inputText,
+      color: colors.inputText,
     },
     eyeButton: {
       paddingLeft: Spacing.sm,
@@ -565,14 +565,14 @@ function createStyles(palette: ReturnType<typeof useAppTheme>["palette"]) {
     },
     errorText: {
       ...TypeScale.labelMd,
-      color: palette.error,
+      color: colors.error,
       flex: 1,
     },
     successRow: {
       flexDirection: "row",
       alignItems: "center",
       gap: Spacing.xs,
-      backgroundColor: palette.skeleton,
+      backgroundColor: colors.skeleton,
       borderRadius: Radius.sm,
       paddingHorizontal: Spacing.md,
       paddingVertical: Spacing.sm,
@@ -580,7 +580,7 @@ function createStyles(palette: ReturnType<typeof useAppTheme>["palette"]) {
     },
     successText: {
       ...TypeScale.labelMd,
-      color: palette.success,
+      color: colors.success,
       flex: 1,
     },
     resetHintRow: {
@@ -591,13 +591,13 @@ function createStyles(palette: ReturnType<typeof useAppTheme>["palette"]) {
     },
     resetHintText: {
       ...TypeScale.labelMd,
-      color: palette.primaryAction,
+      color: colors.primaryAction,
       fontWeight: FontWeight.semibold,
     },
 
     // Button
     primaryButton: {
-      backgroundColor: palette.primaryAction,
+      backgroundColor: colors.primaryAction,
       borderRadius: Radius.md,
       height: 52,
       alignItems: "center",
@@ -609,19 +609,19 @@ function createStyles(palette: ReturnType<typeof useAppTheme>["palette"]) {
     },
     primaryButtonText: {
       ...TypeScale.titleMd,
-      color: palette.buttonTextOnAction,
+      color: colors.buttonTextOnAction,
       fontWeight: FontWeight.bold,
     },
 
     // Footer
     footerText: {
       ...TypeScale.bodyMd,
-      color: palette.bodyText,
+      color: colors.textSecondary,
       textAlign: "center",
       marginTop: Spacing.xl,
     },
     footerLink: {
-      color: palette.highlight,
+      color: colors.highlight,
       fontWeight: FontWeight.semibold,
     },
   });

@@ -1,10 +1,11 @@
 import React, { type ReactNode } from "react";
-import { Keyboard, Platform, StyleSheet, TouchableWithoutFeedback, View } from "react-native";
+import { Keyboard, Platform, Pressable, StyleSheet } from "react-native";
 
 /**
  * Wraps children so that tapping outside a TextInput dismisses the keyboard.
  * On web the keyboard is virtual so this is a no-op wrapper.
- * Uses TouchableWithoutFeedback so it does not intercept ScrollView gestures.
+ * Uses Pressable instead of TouchableWithoutFeedback so it does not steal
+ * the touch responder from nested ScrollViews.
  */
 export function DismissKeyboard({ children }: { children: ReactNode }) {
   if (Platform.OS === "web") {
@@ -12,11 +13,9 @@ export function DismissKeyboard({ children }: { children: ReactNode }) {
   }
 
   return (
-    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-      <View style={styles.fill}>
-        {children}
-      </View>
-    </TouchableWithoutFeedback>
+    <Pressable style={styles.fill} onPress={Keyboard.dismiss} accessible={false}>
+      {children}
+    </Pressable>
   );
 }
 
