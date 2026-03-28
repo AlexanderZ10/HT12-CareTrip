@@ -506,6 +506,24 @@ function extractCount(value: string, fallback: number) {
   return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : fallback;
 }
 
+function extractBudgetCap(value: string) {
+  const matches = value.match(/\d+(?:[.,]\d+)?/g);
+
+  if (!matches || matches.length === 0) {
+    return null;
+  }
+
+  const numbers = matches
+    .map((item) => Number(item.replace(",", ".")))
+    .filter((item) => Number.isFinite(item));
+
+  if (numbers.length === 0) {
+    return null;
+  }
+
+  return Math.max(...numbers);
+}
+
 function toIsoDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
@@ -549,6 +567,86 @@ export function resolveSearchWindow(timing: string, days: string) {
     returnDate: toIsoDate(returnDate),
     windowLabel: `${toIsoDate(departureDate)} → ${toIsoDate(returnDate)}`,
   };
+}
+
+function buildLocalStubOffers(
+  input: SearchTravelOffersInput,
+  searchWindow: ReturnType<typeof resolveSearchWindow>
+) {
+  const destination = sanitizeString(input.destination, "Избрана дестинация");
+  const travelerCount = Math.max(extractCount(input.travelers, 1), 1);
+  const nights = Math.max(searchWindow.nights, 1);
+  const budgetCap = extractBudgetCap(input.budget) ?? 1400;
+  const transportBase = Math.max(55, Math.round((budgetCap * 0.22) / travelerCount));
+  const stayBase = Math.max(45, Math.round((budgetCap * 0.28) / nights));
+  const normalizedTransport = input.transportPreference.toLowerCase();
+
+  const firstMode = normalizedTransport.includes("автобус")
+    ? "Автобус"
+    : normalizedTransport.includes("влак")
+      ? "Влак"
+      : normalizedTransport.includes("кола")
+        ? "Кола под наем"
+        : "Самолет";
+  const secondMode = firstMode === "Самолет" ? "Влак" : "Самолет";
+
+  return {
+    notes: [
+      "Provider backend временно не е достъпен. Показваме локални ориентировъчни оферти.",
+      "Цените са ориентировъчни до следващо обновяване с live данни.",
+    ],
+    searchContext: searchWindow,
+    stayOptions: [
+      {
+        area: "Център",
+        bookingUrl: "https://www.booking.com",
+        imageUrl: "",
+        name: `${destination} Central Stay`,
+        note: "Добра локация за първо посещение",
+        priceAmount: stayBase,
+        priceCurrency: "EUR",
+        ratingLabel: "4.3/5",
+        sourceLabel: "Local fallback",
+        type: "Хотел",
+      },
+      {
+        area: "Тих район",
+        bookingUrl: "https://www.airbnb.com",
+        imageUrl: "",
+        name: `${destination} Cozy Apartments`,
+        note: "Подходящо за по-дълъг престой",
+        priceAmount: Math.max(35, stayBase - 12),
+        priceCurrency: "EUR",
+        ratingLabel: "4.5/5",
+        sourceLabel: "Local fallback",
+        type: "Апартамент",
+      },
+    ],
+    transportOptions: [
+      {
+        bookingUrl: "https://www.google.com/travel/flights",
+        durationMinutes: 190,
+        mode: firstMode,
+        note: "Ориентировъчен вариант",
+        priceAmount: transportBase,
+        priceCurrency: "EUR",
+        provider: "Travel gateway",
+        route: `България → ${destination}`,
+        sourceLabel: "Local fallback",
+      },
+      {
+        bookingUrl: "https://www.omio.com",
+        durationMinutes: 300,
+        mode: secondMode,
+        note: "Баланс между цена и удобство",
+        priceAmount: Math.max(40, transportBase - 18),
+        priceCurrency: "EUR",
+        provider: "Regional carrier",
+        route: `България → ${destination}`,
+        sourceLabel: "Local fallback",
+      },
+    ],
+  } satisfies LiveTravelOffersResponse;
 }
 
 function buildFallbackGroundingPrompt(
@@ -659,7 +757,11 @@ export async function searchTravelOffers(input: SearchTravelOffersInput) {
   const searchWindow = resolveSearchWindow(input.timing, input.days);
 
   if (!shouldUseFunctionsBackend()) {
-    return searchTravelOffersFallback(input, searchWindow);
+    try {
+      return await searchTravelOffersFallback(input, searchWindow);
+    } catch {
+      return buildLocalStubOffers(input, searchWindow);
+    }
   }
 
   try {
@@ -725,14 +827,33 @@ export async function searchTravelOffers(input: SearchTravelOffersInput) {
     } satisfies LiveTravelOffersResponse;
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
+    const code =
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      typeof (error as { code?: unknown }).code === "string"
+        ? (((error as { code: string }).code ?? "").toLowerCase() as string)
+        : "";
 
     if (
       message.includes("functions/not-found") ||
       message.includes("functions/unavailable") ||
+      message.includes("functions/internal") ||
+      message.includes("functions/unauthenticated") ||
+      message.includes("functions/failed-precondition") ||
+      message.includes("unauthenticated") ||
+      message.includes("internal") ||
       message.includes("Failed to fetch") ||
-      message.includes("CORS")
+      message.includes("CORS") ||
+      code.includes("internal") ||
+      code.includes("unauthenticated") ||
+      code.includes("failed-precondition")
     ) {
-      return searchTravelOffersFallback(input, searchWindow);
+      try {
+        return await searchTravelOffersFallback(input, searchWindow);
+      } catch {
+        return buildLocalStubOffers(input, searchWindow);
+      }
     }
 
     throw error;

@@ -112,6 +112,15 @@ function extractCount(value: string, fallback: number) {
   return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : fallback;
 }
 
+function isPersonalCarMode(mode: string) {
+  const normalizedMode = mode.toLowerCase();
+  return (
+    normalizedMode.includes("личен автомобил") ||
+    normalizedMode.includes("собствен автомобил") ||
+    normalizedMode.includes("personal car")
+  );
+}
+
 export function getBookingEstimate(params: {
   days: string;
   stay: PlannerStayOption | null;
@@ -122,7 +131,10 @@ export function getBookingEstimate(params: {
   const nightCount = extractCount(params.days, 1);
   const roomCount = Math.max(1, Math.ceil(travelerCount / 2));
 
-  const transportAmount = extractFirstEuroAmount(params.transport?.price ?? "");
+  const transportAmount =
+    params.transport && isPersonalCarMode(params.transport.mode)
+      ? null
+      : extractFirstEuroAmount(params.transport?.price ?? "");
   const stayAmount = extractFirstEuroAmount(params.stay?.pricePerNight ?? "");
 
   let total = 0;
