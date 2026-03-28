@@ -1,46 +1,59 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import type { BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
 import { Tabs } from "expo-router";
 import React from "react";
-import { StyleSheet, TouchableOpacity, View } from "react-native";
+import { Platform, StyleSheet } from "react-native";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from "react-native-reanimated";
 
 import { useAppTheme } from "../../components/app-theme-provider";
+import { Spacing } from "../../constants/design-system";
 
-function CenterActionButton({
-  accessibilityState,
-  activeColor,
-  borderColor,
-  iconColor,
-  onPress,
-}: BottomTabBarButtonProps & {
-  activeColor: string;
-  borderColor: string;
-  iconColor: string;
+const TAB_BAR_HEIGHT = 64;
+const ACTIVE_DOT_SIZE = 5;
+
+type TabIconName = React.ComponentProps<typeof MaterialIcons>["name"];
+
+function TabIcon({
+  name,
+  color,
+  focused,
+}: {
+  name: TabIconName;
+  color: string;
+  focused: boolean;
 }) {
-  const focused = Boolean(accessibilityState?.selected);
+  const scale = useSharedValue(focused ? 1 : 0.85);
+  const dotOpacity = useSharedValue(focused ? 1 : 0);
+
+  React.useEffect(() => {
+    scale.value = withSpring(focused ? 1 : 0.85, { damping: 15, stiffness: 200 });
+    dotOpacity.value = withSpring(focused ? 1 : 0, { damping: 15, stiffness: 200 });
+  }, [focused, scale, dotOpacity]);
+
+  const iconStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  const dotStyle = useAnimatedStyle(() => ({
+    opacity: dotOpacity.value,
+    transform: [{ scale: dotOpacity.value }],
+  }));
 
   return (
-    <TouchableOpacity
-      accessibilityRole="button"
-      activeOpacity={0.92}
-      onPress={onPress}
-      style={styles.centerButtonWrapper}
-    >
-      <View
-        style={[
-          styles.centerButton,
-          { backgroundColor: activeColor, borderColor },
-          focused && styles.centerButtonActive,
-        ]}
-      >
-        <MaterialIcons name="add" size={34} color={iconColor} />
-      </View>
-    </TouchableOpacity>
+    <Animated.View style={[styles.tabIconContainer, iconStyle]}>
+      <MaterialIcons name={name} size={24} color={color} />
+      <Animated.View
+        style={[styles.activeDot, { backgroundColor: color }, dotStyle]}
+      />
+    </Animated.View>
   );
 }
 
 export default function TabsLayout() {
-  const { colors, isDark } = useAppTheme();
+  const { colors } = useAppTheme();
 
   return (
     <Tabs
@@ -49,60 +62,28 @@ export default function TabsLayout() {
         sceneStyle: {
           backgroundColor: colors.screen,
         },
-        tabBarActiveTintColor: colors.accent,
+        tabBarActiveTintColor: colors.textPrimary,
         tabBarInactiveTintColor: colors.tabInactive,
+        tabBarShowLabel: false,
         tabBarStyle: {
           backgroundColor: colors.tabBar,
-          borderTopWidth: 0,
-          elevation: isDark ? 0 : 10,
-          height: 88,
-          paddingBottom: 14,
-          paddingTop: 12,
-          shadowColor: "#18240F",
-          shadowOffset: { width: 0, height: -6 },
-          shadowOpacity: isDark ? 0.28 : 0.08,
-          shadowRadius: 14,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: colors.divider,
+          elevation: 0,
+          height: TAB_BAR_HEIGHT,
+          paddingBottom: Platform.OS === "ios" ? Spacing.sm : Spacing.xs,
+          paddingTop: Spacing.sm,
         },
         tabBarHideOnKeyboard: true,
-        tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: "700",
-        },
-        tabBarItemStyle: {
-          paddingTop: 6,
-        },
       }}
     >
-      <Tabs.Screen
-        name="saved"
-        options={{
-          title: "Trips",
-          tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="format-list-bulleted" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="groups"
-        options={{
-          title: "Groups",
-          tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="people-outline" size={size} color={color} />
-          ),
-        }}
-      />
       <Tabs.Screen
         name="home"
         options={{
           title: "Home",
-          tabBarAccessibilityLabel: "Open home planner",
-          tabBarButton: (props) => (
-            <CenterActionButton
-              {...props}
-              activeColor={colors.accent}
-              borderColor={colors.centerButtonBorder}
-              iconColor={colors.card}
-            />
+          tabBarAccessibilityLabel: "Home",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="home" color={color} focused={focused} />
           ),
         }}
       />
@@ -110,8 +91,26 @@ export default function TabsLayout() {
         name="discover"
         options={{
           title: "Discover",
-          tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="travel-explore" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="explore" color={color} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="saved"
+        options={{
+          title: "Saved",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="favorite-outline" color={color} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="groups"
+        options={{
+          title: "Groups",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="chat-bubble-outline" color={color} focused={focused} />
           ),
         }}
       />
@@ -119,8 +118,8 @@ export default function TabsLayout() {
         name="profile"
         options={{
           title: "Profile",
-          tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="person" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="person-outline" color={color} focused={focused} />
           ),
         }}
       />
@@ -129,24 +128,14 @@ export default function TabsLayout() {
 }
 
 const styles = StyleSheet.create({
-  centerButtonWrapper: {
+  tabIconContainer: {
     alignItems: "center",
     justifyContent: "center",
-    marginTop: -24,
+    gap: 4,
   },
-  centerButton: {
-    alignItems: "center",
-    borderRadius: 34,
-    borderWidth: 6,
-    height: 68,
-    justifyContent: "center",
-    shadowColor: "#18240F",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    width: 68,
-  },
-  centerButtonActive: {
-    transform: [{ scale: 0.98 }],
+  activeDot: {
+    width: ACTIVE_DOT_SIZE,
+    height: ACTIVE_DOT_SIZE,
+    borderRadius: ACTIVE_DOT_SIZE / 2,
   },
 });

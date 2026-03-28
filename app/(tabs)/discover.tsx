@@ -1,5 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
@@ -12,15 +13,27 @@ import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,
 } from "react-native";
+import Animated, {
+  FadeInDown,
+  FadeInUp,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 
 import { useAppTheme } from "../../components/app-theme-provider";
+import {
+  FontWeight,
+  Radius,
+  Spacing,
+  TypeScale,
+  shadow,
+} from "../../constants/design-system";
 import { auth, db } from "../../firebase";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
-import { getProfileDisplayName } from "../../utils/profile-info";
 import {
   buildSavedTripFromDiscover,
   getDiscoverSavedSourceKey,
@@ -55,14 +68,14 @@ type ExpandedPreviewState =
 
 function formatGeneratedDate(value: number | null) {
   if (!value) {
-    return "Още не е генерирано";
+    return "Not generated yet";
   }
 
-  return new Intl.DateTimeFormat("bg-BG", {
+  return new Intl.DateTimeFormat("en-US", {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    month: "long",
+    month: "short",
   }).format(new Date(value));
 }
 
@@ -196,17 +209,54 @@ function ZoomableMap({
   );
 }
 
+function SaveHeartButton({
+  isSaved,
+  isSaving,
+  onPress,
+}: {
+  isSaved: boolean;
+  isSaving: boolean;
+  onPress: () => void;
+}) {
+  const scale = useSharedValue(1);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  const handlePress = () => {
+    if (isSaved || isSaving) return;
+    scale.value = withSpring(0.7, { damping: 10, stiffness: 300 }, () => {
+      scale.value = withSpring(1, { damping: 8, stiffness: 200 });
+    });
+    onPress();
+  };
+
+  return (
+    <TouchableOpacity
+      style={styles.heartButton}
+      onPress={handlePress}
+      disabled={isSaved || isSaving}
+      activeOpacity={0.9}
+    >
+      <Animated.View style={animatedStyle}>
+        <MaterialIcons
+          name={isSaved ? "favorite" : "favorite-outline"}
+          size={22}
+          color={isSaved ? "#DC3545" : "#FFFFFF"}
+        />
+      </Animated.View>
+    </TouchableOpacity>
+  );
+}
+
 export default function DiscoverTabScreen() {
   const router = useRouter();
-  const { colors, isDark } = useAppTheme();
-  const { width } = useWindowDimensions();
-  const isWideLayout = width >= 980;
-  const isPhoneLayout = width < 768;
+  const { colors } = useAppTheme();
 
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [user, setUser] = useState<User | null>(null);
-  const [profileName, setProfileName] = useState("Traveler");
   const [profile, setProfile] = useState<DiscoverProfile | null>(null);
   const [discoverData, setDiscoverData] = useState<StoredDiscoverData | null>(null);
   const [error, setError] = useState("");
@@ -215,6 +265,7 @@ export default function DiscoverTabScreen() {
   const [savedSourceKeys, setSavedSourceKeys] = useState<string[]>([]);
   const [savingTripKey, setSavingTripKey] = useState<string | null>(null);
   const [expandedPreview, setExpandedPreview] = useState<ExpandedPreviewState>(null);
+  const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set());
   const previewImageUrls =
     expandedPreview?.kind === "image" ? getTripImageUrls(expandedPreview.trip) : [];
   const hasRequestedInitialTripsRef = useRef(false);
@@ -222,10 +273,18 @@ export default function DiscoverTabScreen() {
 
   const todayKey = getLocalDateKey();
   const refreshUsedToday = discoverData?.lastRefreshDateKey === todayKey;
-  const heroTitle = isPhoneLayout ? `Discover за ${profileName}` : `Settlements for ${profileName}`;
-  const heroSubtitle = isPhoneLayout
-    ? "Реални селища със снимка, карта и идеи какво да видиш."
-    : "Вместо generic trip идеи, тук получаваш реални селища с tourism activity, активности, забележителности, снимка и map preview.";
+
+  const toggleDetails = (tripId: string) => {
+    setExpandedDetails((prev) => {
+      const next = new Set(prev);
+      if (next.has(tripId)) {
+        next.delete(tripId);
+      } else {
+        next.add(tripId);
+      }
+      return next;
+    });
+  };
 
   const generateAndStoreTrips = useCallback(
     async (
@@ -321,16 +380,6 @@ export default function DiscoverTabScreen() {
           }
 
           setProfile(discoverProfile);
-          setProfileName(
-            getProfileDisplayName({
-              email: nextUser.email,
-              profileInfo:
-                profileData.profileInfo && typeof profileData.profileInfo === "object"
-                  ? (profileData.profileInfo as Record<string, unknown>)
-                  : undefined,
-              username: typeof profileData.username === "string" ? profileData.username : null,
-            })
-          );
           setSavedSourceKeys(parseSavedTrips(profileData).map((trip) => trip.sourceKey));
 
           const storedDiscoverData = parseStoredDiscoverData(profileData);
@@ -471,7 +520,7 @@ export default function DiscoverTabScreen() {
         style={[styles.loader, { backgroundColor: colors.screen }]}
         edges={["top", "left", "right"]}
       >
-        <ActivityIndicator size="large" color="#639922" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </SafeAreaView>
     );
   }
@@ -486,321 +535,330 @@ export default function DiscoverTabScreen() {
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
         >
-          <View
-            style={[
-              styles.hero,
-              isPhoneLayout && styles.heroPhone,
-              { backgroundColor: colors.hero },
-            ]}
+          {/* Clean header — no dark hero */}
+          <Animated.View
+            entering={FadeInDown.duration(400).springify()}
+            style={styles.header}
           >
-            <Text style={[styles.kicker, { color: colors.accent }]}>CareTrip</Text>
-            <Text
-              style={[
-                styles.heroTitle,
-                isPhoneLayout && styles.heroTitlePhone,
-                { color: colors.textPrimary },
-              ]}
-            >
-              {heroTitle}
-            </Text>
-            <Text
-              style={[
-                styles.heroSubtitle,
-                isPhoneLayout && styles.heroSubtitlePhone,
-                { color: colors.textSecondary },
-              ]}
-            >
-              {heroSubtitle}
-            </Text>
-
-          <View style={[styles.heroMetaRow, isPhoneLayout && styles.heroMetaRowPhone]}>
-            <View style={[styles.metaChip, isPhoneLayout && styles.metaChipPhone]}>
-              <Text style={styles.metaLabel}>Generated</Text>
-              <Text style={styles.metaValue}>
-                {formatGeneratedDate(discoverData?.generatedAtMs ?? null)}
-              </Text>
-            </View>
-          </View>
-
-          <TouchableOpacity
-            style={[
-              styles.primaryButton,
-              isPhoneLayout && styles.primaryButtonPhone,
-              (generating || refreshUsedToday) && styles.primaryButtonDisabled,
-            ]}
-            onPress={handleRefresh}
-            disabled={generating || refreshUsedToday}
-            activeOpacity={0.9}
-          >
-            <Text style={styles.primaryButtonText}>
-              {generating
-                ? "Refreshing settlements..."
-                : refreshUsedToday
-                  ? "Refresh used today"
-                  : "Refresh settlements"}
-            </Text>
-          </TouchableOpacity>
-
-          <Text style={styles.refreshNote}>
-            {refreshUsedToday
-              ? "Днес вече беше използван refresh. Утре можеш да заредиш нови селища."
-              : "Можеш да поискаш нов set settlements веднъж на ден."}
-          </Text>
-        </View>
-
-        {error ? (
-          <View
-            style={[
-              styles.errorCard,
-              { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
-            ]}
-          >
-            <Text style={styles.errorTitle}>Discover is blocked</Text>
-            <Text style={[styles.errorText, { color: colors.errorText }]}>{error}</Text>
-          </View>
-        ) : null}
-
-        {saveSuccess ? (
-          <View
-            style={[
-              styles.saveSuccessCard,
-              { backgroundColor: colors.successBackground, borderColor: colors.successBorder },
-            ]}
-          >
-            <Text style={[styles.saveSuccessText, { color: colors.successText }]}>{saveSuccess}</Text>
-          </View>
-        ) : null}
-
-        {saveError ? (
-          <View
-            style={[
-              styles.saveErrorCard,
-              { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
-            ]}
-          >
-            <Text style={[styles.saveErrorText, { color: colors.errorText }]}>{saveError}</Text>
-          </View>
-        ) : null}
-
-        {discoverData?.summary ? (
-          <View
-            style={[
-              styles.summaryCard,
-              isPhoneLayout && styles.summaryCardPhone,
-              {
-                backgroundColor: colors.warningBackground,
-                borderColor: colors.warningBorder,
-              },
-            ]}
-          >
-            <Text style={[styles.summaryTitle, { color: colors.warningText }]}>Защо тези места са точни за теб</Text>
-            <Text style={[styles.summaryText, { color: isDark ? "#DCC59A" : "#6A5731" }]}>
-              {discoverData.summary}
-            </Text>
-          </View>
-        ) : null}
-
-        {generating && !discoverData?.trips.length ? (
-          <View
-            style={[
-              styles.loadingCard,
-              isPhoneLayout && styles.loadingCardPhone,
-              { backgroundColor: colors.cardAlt },
-            ]}
-          >
-            <ActivityIndicator size="large" color="#639922" />
-            <Text style={[styles.loadingTitle, { color: colors.textPrimary }]}>
-              Preparing your settlements feed
-            </Text>
-            <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-              Комбинираме профила ти с internet research, за да върнем реални селища с
-              какво да се прави в тях.
-            </Text>
-          </View>
-        ) : null}
-
-          {discoverData?.trips.map((trip) => {
-          const sourceKey = getDiscoverSavedSourceKey(trip);
-          const isSaved = savedSourceKeys.includes(sourceKey);
-          const isSaving = savingTripKey === sourceKey;
-          const mapUrl =
-            trip.latitude !== null && trip.longitude !== null
-              ? buildOpenStreetMapSource({
-                  latitude: trip.latitude,
-                  longitude: trip.longitude,
-                  viewportHeight: isPhoneLayout ? 360 : 420,
-                  viewportWidth: isPhoneLayout ? 360 : 560,
-                  zoom: PREVIEW_MAP_ZOOM,
-                })
-              : "";
-          return (
-            <View
-              key={trip.id}
-              style={[
-                styles.tripCard,
-                isPhoneLayout && styles.tripCardPhone,
-                { backgroundColor: colors.cardAlt },
-              ]}
-            >
-              <View style={styles.tripHeader}>
-                <View style={styles.tripHeaderText}>
-                  <Text style={[styles.tripTitle, isPhoneLayout && styles.tripTitlePhone]}>
-                    {trip.title}
-                  </Text>
-                </View>
+            <View style={styles.headerTop}>
+              <View>
+                <Text style={[styles.greeting, { color: colors.textSecondary }]}>
+                  Welcome back
+                </Text>
+                <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
+                  Discover
+                </Text>
               </View>
-
-              <View style={[styles.topRow, !isWideLayout && styles.topRowStacked]}>
-                <View style={[styles.imagePanel, !isWideLayout && styles.imagePanelStacked]}>
-                  {trip.imageUrl ? (
-                    <TouchableOpacity
-                      onPress={() =>
-                        setExpandedPreview({ kind: "image", trip, imageIndex: 0 })
-                      }
-                      activeOpacity={0.92}
-                    >
-                      <Image
-                        source={{ uri: trip.imageUrl }}
-                        style={[styles.heroImage, isPhoneLayout && styles.heroImagePhone]}
-                        contentFit="cover"
-                      />
-                    </TouchableOpacity>
-                  ) : (
-                    <View style={[styles.imageFallback, isPhoneLayout && styles.imageFallbackPhone]}>
-                      <Text
-                        style={[
-                          styles.imageFallbackTitle,
-                          isPhoneLayout && styles.imageFallbackTitlePhone,
-                        ]}
-                      >
-                        {trip.title}
-                      </Text>
-                      <Text style={styles.imageFallbackText}>No photo found yet</Text>
-                    </View>
-                  )}
-                </View>
-
-                <View style={styles.mapPanel}>
-                  {mapUrl ? (
-                    <TouchableOpacity
-                      style={styles.previewTapContainer}
-                      onPress={() => setExpandedPreview({ kind: "map", trip })}
-                      activeOpacity={0.92}
-                    >
-                      <View style={[styles.mapImage, isPhoneLayout && styles.mapImagePhone]}>
-                        <WebView
-                          key={`${trip.id}-map-preview`}
-                          source={{ uri: mapUrl }}
-                          style={styles.previewMapWebView}
-                          pointerEvents="none"
-                          originWhitelist={["*"]}
-                          scrollEnabled={false}
-                          setSupportMultipleWindows={false}
-                          javaScriptEnabled
-                          domStorageEnabled
-                          bounces={false}
-                        />
-                      </View>
-                    </TouchableOpacity>
-                  ) : (
-                    <View style={[styles.mapFallback, isPhoneLayout && styles.mapImagePhone]}>
-                      <Text style={styles.mapFallbackText}>Map coordinates not available</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-
-              <Text style={styles.tripWhy}>{trip.whyItFits}</Text>
-              <Text style={styles.popularityText}>{trip.popularityNote}</Text>
-
-              <View style={styles.sectionBlock}>
-                <Text style={styles.sectionTitle}>What to do</Text>
-                {trip.highlights.map((highlight) => (
-                  <Text key={`${trip.id}-activity-${highlight}`} style={styles.sectionText}>
-                    • {highlight}
-                  </Text>
-                ))}
-              </View>
-
-              <View style={styles.sectionBlock}>
-                <Text style={styles.sectionTitle}>Must-see spots</Text>
-                {trip.attractions.map((attraction) => (
-                  <Text key={`${trip.id}-attraction-${attraction}`} style={styles.sectionText}>
-                    • {attraction}
-                  </Text>
-                ))}
-              </View>
-
-              <View style={styles.sectionBlock}>
-                <Text style={styles.sectionTitle}>Accessibility</Text>
-                <Text style={styles.sectionText}>{trip.accessibilityNotes}</Text>
-              </View>
-
               <TouchableOpacity
                 style={[
-                  styles.saveButton,
-                  isPhoneLayout && styles.saveButtonPhone,
-                  (isSaved || isSaving) && styles.saveButtonDisabled,
-                  isSaved && styles.saveButtonSaved,
+                  styles.refreshButton,
+                  { backgroundColor: colors.textPrimary },
+                  (generating || refreshUsedToday) && styles.refreshButtonDisabled,
                 ]}
-                onPress={() => {
-                  void handleSaveTrip(trip);
-                }}
-                disabled={isSaved || isSaving}
-                activeOpacity={0.9}
+                onPress={handleRefresh}
+                disabled={generating || refreshUsedToday}
+                activeOpacity={0.85}
               >
-                <Text
-                  style={[
-                    styles.saveButtonText,
-                    isSaved && styles.saveButtonTextSaved,
-                  ]}
-                >
-                  {isSaving
-                    ? "Saving..."
-                    : isSaved
-                      ? "Saved in Trips"
-                      : "Save to Trips"}
-                </Text>
+                {generating ? (
+                  <ActivityIndicator size="small" color={colors.textInverse} />
+                ) : (
+                  <MaterialIcons name="refresh" size={20} color={colors.textInverse} />
+                )}
               </TouchableOpacity>
             </View>
-          );
+
+            <Text style={[styles.headerSubtitle, { color: colors.textMuted }]}>
+              {discoverData?.generatedAtMs
+                ? `Updated ${formatGeneratedDate(discoverData.generatedAtMs)}`
+                : "AI-curated places just for you"}
+              {refreshUsedToday ? "  ·  Refresh available tomorrow" : ""}
+            </Text>
+          </Animated.View>
+
+          {/* Status messages */}
+          {error ? (
+            <View
+              style={[
+                styles.statusCard,
+                { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
+              ]}
+            >
+              <MaterialIcons name="error-outline" size={18} color={colors.errorText} />
+              <Text style={[styles.statusText, { color: colors.errorText }]}>{error}</Text>
+            </View>
+          ) : null}
+
+          {saveSuccess ? (
+            <View
+              style={[
+                styles.statusCard,
+                { backgroundColor: colors.successBackground, borderColor: colors.successBorder },
+              ]}
+            >
+              <MaterialIcons name="check-circle-outline" size={18} color={colors.successText} />
+              <Text style={[styles.statusText, { color: colors.successText }]}>{saveSuccess}</Text>
+            </View>
+          ) : null}
+
+          {saveError ? (
+            <View
+              style={[
+                styles.statusCard,
+                { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
+              ]}
+            >
+              <MaterialIcons name="error-outline" size={18} color={colors.errorText} />
+              <Text style={[styles.statusText, { color: colors.errorText }]}>{saveError}</Text>
+            </View>
+          ) : null}
+
+          {/* Summary callout */}
+          {discoverData?.summary ? (
+            <Animated.View
+              entering={FadeInDown.delay(100).duration(400).springify()}
+              style={[
+                styles.summaryCard,
+                { backgroundColor: colors.cardAlt, borderColor: colors.border },
+              ]}
+            >
+              <MaterialIcons name="auto-awesome" size={16} color={colors.accent} />
+              <Text style={[styles.summaryText, { color: colors.textSecondary }]}>
+                {discoverData.summary}
+              </Text>
+            </Animated.View>
+          ) : null}
+
+          {/* Loading state */}
+          {generating && !discoverData?.trips.length ? (
+            <View
+              style={[styles.loadingCard, { backgroundColor: colors.cardAlt }]}
+            >
+              <ActivityIndicator size="large" color={colors.accent} />
+              <Text style={[styles.loadingTitle, { color: colors.textPrimary }]}>
+                Finding perfect places for you
+              </Text>
+              <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+                Combining your profile with real destination data...
+              </Text>
+            </View>
+          ) : null}
+
+          {/* Trip cards — image-first design */}
+          {discoverData?.trips.map((trip, index) => {
+            const sourceKey = getDiscoverSavedSourceKey(trip);
+            const isSaved = savedSourceKeys.includes(sourceKey);
+            const isSaving = savingTripKey === sourceKey;
+            const isDetailsExpanded = expandedDetails.has(trip.id);
+            const mapUrl =
+              trip.latitude !== null && trip.longitude !== null
+                ? buildOpenStreetMapSource({
+                    latitude: trip.latitude,
+                    longitude: trip.longitude,
+                    viewportHeight: 360,
+                    viewportWidth: 360,
+                    zoom: PREVIEW_MAP_ZOOM,
+                  })
+                : "";
+
+            return (
+              <Animated.View
+                key={trip.id}
+                entering={FadeInUp.delay(150 * Math.min(index, 4)).duration(500).springify()}
+                style={[
+                  styles.tripCard,
+                  { backgroundColor: colors.card, borderColor: colors.border },
+                ]}
+              >
+                {/* Image with gradient overlay */}
+                <TouchableOpacity
+                  onPress={() =>
+                    trip.imageUrl
+                      ? setExpandedPreview({ kind: "image", trip, imageIndex: 0 })
+                      : null
+                  }
+                  activeOpacity={0.95}
+                  style={styles.imageContainer}
+                >
+                  {trip.imageUrl ? (
+                    <Image
+                      source={{ uri: trip.imageUrl }}
+                      style={styles.tripImage}
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                      recyclingKey={trip.id}
+                      placeholder={{ blurhash: "L6PZfSi_.AyE_3t7t7R**0o#DgR4" }}
+                      transition={200}
+                    />
+                  ) : (
+                    <View style={[styles.tripImage, styles.imageFallback, { backgroundColor: colors.cardAlt }]}>
+                      <MaterialIcons name="landscape" size={48} color={colors.textMuted} />
+                    </View>
+                  )}
+                  <LinearGradient
+                    colors={["transparent", "rgba(0,0,0,0.7)"]}
+                    style={styles.imageGradient}
+                  />
+                  <View style={styles.imageOverlayContent}>
+                    <Text style={styles.overlayTitle}>{trip.title}</Text>
+                    {trip.popularityNote ? (
+                      <View style={styles.ratingRow}>
+                        <MaterialIcons name="star" size={14} color="#F59E0B" />
+                        <Text style={styles.ratingText}>{trip.popularityNote}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+
+                  {/* Save heart on image */}
+                  <SaveHeartButton
+                    isSaved={isSaved}
+                    isSaving={isSaving}
+                    onPress={() => void handleSaveTrip(trip)}
+                  />
+                </TouchableOpacity>
+
+                {/* Info section below image */}
+                <View style={styles.tripInfo}>
+                  <Text style={[styles.whyText, { color: colors.textSecondary }]}>
+                    {trip.whyItFits}
+                  </Text>
+
+                  {/* Highlights preview */}
+                  <View style={styles.highlightsRow}>
+                    {trip.highlights.slice(0, 3).map((highlight) => (
+                      <View
+                        key={`${trip.id}-h-${highlight}`}
+                        style={[styles.highlightChip, { backgroundColor: colors.cardAlt }]}
+                      >
+                        <Text style={[styles.highlightText, { color: colors.textPrimary }]} numberOfLines={1}>
+                          {highlight}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+
+                  {/* Expandable details */}
+                  <TouchableOpacity
+                    style={[styles.seeMoreButton, { borderTopColor: colors.divider }]}
+                    onPress={() => toggleDetails(trip.id)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.seeMoreText, { color: colors.textPrimary }]}>
+                      {isDetailsExpanded ? "Show less" : "See more"}
+                    </Text>
+                    <MaterialIcons
+                      name={isDetailsExpanded ? "keyboard-arrow-up" : "keyboard-arrow-down"}
+                      size={20}
+                      color={colors.textPrimary}
+                    />
+                  </TouchableOpacity>
+
+                  {isDetailsExpanded ? (
+                    <Animated.View entering={FadeInDown.duration(300)}>
+                      {/* Map preview */}
+                      {mapUrl ? (
+                        <TouchableOpacity
+                          style={styles.mapContainer}
+                          onPress={() => setExpandedPreview({ kind: "map", trip })}
+                          activeOpacity={0.92}
+                        >
+                          <WebView
+                            key={`${trip.id}-map-preview`}
+                            source={{ uri: mapUrl }}
+                            style={styles.mapPreview}
+                            pointerEvents="none"
+                            originWhitelist={["*"]}
+                            scrollEnabled={false}
+                            setSupportMultipleWindows={false}
+                            javaScriptEnabled
+                            domStorageEnabled
+                            bounces={false}
+                          />
+                          <View style={styles.mapExpandHint}>
+                            <MaterialIcons name="open-in-full" size={16} color="#FFFFFF" />
+                          </View>
+                        </TouchableOpacity>
+                      ) : null}
+
+                      <View style={styles.detailsSection}>
+                        <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
+                          WHAT TO DO
+                        </Text>
+                        {trip.highlights.map((highlight) => (
+                          <View key={`${trip.id}-a-${highlight}`} style={styles.detailRow}>
+                            <MaterialIcons name="check" size={16} color={colors.accent} />
+                            <Text style={[styles.detailText, { color: colors.textPrimary }]}>
+                              {highlight}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+
+                      <View style={styles.detailsSection}>
+                        <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
+                          MUST-SEE SPOTS
+                        </Text>
+                        {trip.attractions.map((attraction) => (
+                          <View key={`${trip.id}-s-${attraction}`} style={styles.detailRow}>
+                            <MaterialIcons name="place" size={16} color={colors.accent} />
+                            <Text style={[styles.detailText, { color: colors.textPrimary }]}>
+                              {attraction}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+
+                      <View style={styles.detailsSection}>
+                        <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
+                          ACCESSIBILITY
+                        </Text>
+                        <Text style={[styles.detailText, { color: colors.textSecondary, marginLeft: 0 }]}>
+                          {trip.accessibilityNotes}
+                        </Text>
+                      </View>
+                    </Animated.View>
+                  ) : null}
+                </View>
+              </Animated.View>
+            );
           })}
         </ScrollView>
       </SafeAreaView>
 
+      {/* Expanded preview modal */}
       <Modal
         visible={!!expandedPreview}
         transparent
         animationType="fade"
         onRequestClose={() => setExpandedPreview(null)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
             <View style={styles.modalHeaderRow}>
-              <View style={styles.modalHeaderText}>
-                <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
-                  {expandedPreview?.trip.title}
-                </Text>
-              </View>
+              <Text
+                style={[styles.modalTitle, { color: colors.textPrimary }]}
+                numberOfLines={1}
+              >
+                {expandedPreview?.trip.title}
+              </Text>
               <TouchableOpacity
-                style={styles.modalCloseButton}
+                style={[styles.modalCloseButton, { backgroundColor: colors.cardAlt }]}
                 onPress={() => setExpandedPreview(null)}
                 activeOpacity={0.9}
               >
-                <MaterialIcons name="close" size={20} color="#29440F" />
+                <MaterialIcons name="close" size={20} color={colors.textPrimary} />
               </TouchableOpacity>
             </View>
             {expandedPreview ? (
               expandedPreview.kind === "image" ? (
                 <View>
                   {previewImageUrls[expandedPreview.imageIndex] ? (
-                    <View style={styles.modalHeroImageWrap}>
-                      <Image
-                        source={{ uri: previewImageUrls[expandedPreview.imageIndex] }}
-                        style={styles.modalHeroImage}
-                        contentFit="cover"
-                      />
-                    </View>
+                    <Image
+                      source={{ uri: previewImageUrls[expandedPreview.imageIndex] }}
+                      style={styles.modalHeroImage}
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                      transition={200}
+                    />
                   ) : null}
                   {previewImageUrls.length > 1 ? (
                     <ScrollView
@@ -809,13 +867,13 @@ export default function DiscoverTabScreen() {
                       contentContainerStyle={styles.modalThumbnailRow}
                       showsHorizontalScrollIndicator={false}
                     >
-                      {previewImageUrls.map((imageUrl, index) => (
+                      {previewImageUrls.map((imageUrl, imgIdx) => (
                         <TouchableOpacity
-                          key={`${expandedPreview.trip.id}-image-${index}`}
+                          key={`${expandedPreview.trip.id}-image-${imgIdx}`}
                           onPress={() =>
                             setExpandedPreview({
                               ...expandedPreview,
-                              imageIndex: index,
+                              imageIndex: imgIdx,
                             })
                           }
                           activeOpacity={0.92}
@@ -824,8 +882,9 @@ export default function DiscoverTabScreen() {
                             source={{ uri: imageUrl }}
                             style={[
                               styles.modalThumbnailImage,
-                              index === expandedPreview.imageIndex &&
-                                styles.modalThumbnailImageActive,
+                              imgIdx === expandedPreview.imageIndex && {
+                                borderColor: colors.accent,
+                              },
                             ]}
                             contentFit="cover"
                           />
@@ -851,533 +910,336 @@ export default function DiscoverTabScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#EEF4E5",
   },
   content: {
     width: "100%",
-    maxWidth: 1180,
+    maxWidth: 600,
     alignSelf: "center",
-    padding: 20,
-    paddingBottom: 32,
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing["3xl"],
   },
   loader: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#EEF4E5",
   },
-  hero: {
-    backgroundColor: "#223814",
-    borderRadius: 28,
-    padding: 24,
-    marginBottom: 18,
+
+  // Header
+  header: {
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing.md,
   },
-  heroPhone: {
-    borderRadius: 22,
-    padding: 16,
-    marginBottom: 14,
-  },
-  kicker: {
-    color: "#C8E08E",
-    fontSize: 13,
-    fontWeight: "700",
-    letterSpacing: 0.8,
-    textTransform: "uppercase",
-    marginBottom: 10,
-  },
-  heroTitle: {
-    color: "#FFFFFF",
-    fontSize: 28,
-    lineHeight: 36,
-    fontWeight: "800",
-    marginBottom: 10,
-  },
-  heroTitlePhone: {
-    fontSize: 20,
-    lineHeight: 26,
-    marginBottom: 8,
-  },
-  heroSubtitle: {
-    color: "#EAF3DE",
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: 16,
-  },
-  heroSubtitlePhone: {
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 12,
-  },
-  heroMetaRow: {
+  headerTop: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    marginBottom: 16,
+    justifyContent: "space-between",
+    alignItems: "flex-start",
   },
-  heroMetaRowPhone: {
-    marginBottom: 12,
+  greeting: {
+    ...TypeScale.bodySm,
+    marginBottom: 2,
   },
-  metaChip: {
-    backgroundColor: "rgba(255,255,255,0.12)",
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginRight: 10,
-    marginBottom: 10,
+  headerTitle: {
+    fontSize: 32,
+    fontWeight: FontWeight.black,
+    lineHeight: 38,
   },
-  metaChipPhone: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginRight: 8,
-    marginBottom: 8,
+  headerSubtitle: {
+    ...TypeScale.bodySm,
+    marginTop: Spacing.xs,
   },
-  metaLabel: {
-    color: "#D6E8AE",
-    fontSize: 11,
-    fontWeight: "700",
-    marginBottom: 4,
-    textTransform: "uppercase",
-  },
-  metaValue: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  primaryButton: {
-    backgroundColor: "#BA7517",
-    borderRadius: 16,
-    paddingVertical: 16,
+  refreshButton: {
+    width: 44,
+    height: 44,
+    borderRadius: Radius.full,
     alignItems: "center",
+    justifyContent: "center",
   },
-  primaryButtonPhone: {
-    borderRadius: 14,
-    paddingVertical: 13,
+  refreshButtonDisabled: {
+    opacity: 0.35,
   },
-  primaryButtonDisabled: {
-    opacity: 0.55,
-  },
-  primaryButtonText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "800",
-  },
-  refreshNote: {
-    marginTop: 10,
-    color: "#DCEAC0",
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  errorCard: {
-    backgroundColor: "#FFF1EF",
-    borderRadius: 22,
-    padding: 18,
+
+  // Status cards
+  statusCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: Radius.md,
+    padding: Spacing.md,
     borderWidth: 1,
-    borderColor: "#F0B6AE",
-    marginBottom: 16,
+    marginBottom: Spacing.md,
+    gap: Spacing.sm,
   },
-  errorTitle: {
-    color: "#A63228",
-    fontSize: 17,
-    fontWeight: "800",
-    marginBottom: 6,
+  statusText: {
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.medium,
+    flex: 1,
   },
-  errorText: {
-    color: "#8A3D35",
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  saveSuccessCard: {
-    backgroundColor: "#F3F9E6",
-    borderRadius: 20,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#C9DF98",
-    marginBottom: 16,
-  },
-  saveSuccessText: {
-    color: "#3B6D11",
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: "700",
-  },
-  saveErrorCard: {
-    backgroundColor: "#FFF1EF",
-    borderRadius: 20,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#F0B6AE",
-    marginBottom: 16,
-  },
-  saveErrorText: {
-    color: "#8A3D35",
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: "700",
-  },
+
+  // Summary
   summaryCard: {
-    backgroundColor: "#FFF8E7",
-    borderRadius: 22,
-    padding: 20,
-    marginBottom: 16,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    borderRadius: Radius.lg,
+    padding: Spacing.lg,
+    marginBottom: Spacing.lg,
     borderWidth: 1,
-    borderColor: "#F1D7A5",
-  },
-  summaryCardPhone: {
-    borderRadius: 18,
-    padding: 16,
-  },
-  summaryTitle: {
-    color: "#8B5611",
-    fontSize: 16,
-    fontWeight: "800",
-    marginBottom: 8,
+    gap: Spacing.sm,
   },
   summaryText: {
-    color: "#6A5731",
-    fontSize: 15,
-    lineHeight: 22,
+    ...TypeScale.bodySm,
+    flex: 1,
+    lineHeight: 20,
   },
+
+  // Loading
   loadingCard: {
-    backgroundColor: "#F6F8EE",
-    borderRadius: 24,
-    padding: 24,
+    borderRadius: Radius.xl,
+    padding: Spacing["2xl"],
     alignItems: "center",
-    marginBottom: 16,
-  },
-  loadingCardPhone: {
-    borderRadius: 20,
-    padding: 18,
+    marginBottom: Spacing.lg,
   },
   loadingTitle: {
-    marginTop: 14,
-    color: "#29440F",
-    fontSize: 18,
-    fontWeight: "800",
-    marginBottom: 8,
+    marginTop: Spacing.md,
+    ...TypeScale.titleMd,
+    fontWeight: FontWeight.bold,
+    marginBottom: Spacing.xs,
     textAlign: "center",
   },
   loadingText: {
-    color: "#5F6E53",
-    fontSize: 14,
-    lineHeight: 20,
+    ...TypeScale.bodySm,
     textAlign: "center",
   },
+
+  // Trip card
   tripCard: {
-    backgroundColor: "#F6F8EE",
-    borderRadius: 26,
-    padding: 20,
-    marginBottom: 18,
-    shadowColor: "#1E2A12",
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
+    borderRadius: Radius.xl,
+    marginBottom: Spacing.xl,
+    borderWidth: 1,
+    overflow: "hidden",
+    ...shadow("sm"),
   },
-  tripCardPhone: {
-    borderRadius: 22,
-    padding: 14,
+
+  // Image section
+  imageContainer: {
+    position: "relative",
   },
-  topRow: {
-    flexDirection: "row",
-    marginBottom: 18,
-  },
-  topRowStacked: {
-    flexDirection: "column",
-  },
-  imagePanel: {
-    flex: 1,
-    marginRight: 14,
-  },
-  imagePanelStacked: {
-    marginRight: 0,
-    marginBottom: 12,
-  },
-  mapPanel: {
-    flex: 1,
-  },
-  heroImage: {
+  tripImage: {
     width: "100%",
-    height: 240,
-    borderRadius: 22,
-    backgroundColor: "#E0E8D0",
-  },
-  heroImagePhone: {
-    height: 180,
-    borderRadius: 18,
+    height: 260,
   },
   imageFallback: {
-    height: 240,
-    borderRadius: 22,
-    backgroundColor: "#EAF3DE",
     alignItems: "center",
     justifyContent: "center",
-    padding: 20,
   },
-  imageFallbackPhone: {
-    height: 180,
-    borderRadius: 18,
-    padding: 16,
+  imageGradient: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 120,
   },
-  imageFallbackTitle: {
-    color: "#29440F",
-    fontSize: 24,
-    fontWeight: "800",
-    textAlign: "center",
-    marginBottom: 8,
+  imageOverlayContent: {
+    position: "absolute",
+    bottom: Spacing.lg,
+    left: Spacing.lg,
+    right: 60,
   },
-  imageFallbackTitlePhone: {
-    fontSize: 18,
-    lineHeight: 24,
-  },
-  imageFallbackText: {
-    color: "#5F6E53",
-    fontSize: 14,
-    textAlign: "center",
-  },
-  mapImage: {
-    width: "100%",
-    height: 240,
-    borderRadius: 20,
-    backgroundColor: "#DDE8C7",
-    overflow: "hidden",
-  },
-  mapImagePhone: {
-    height: 180,
-    borderRadius: 18,
-  },
-  mapFrameContainer: {
-    width: "100%",
-    height: 196,
-    borderRadius: 20,
-    overflow: "hidden",
-    backgroundColor: "#DDE8C7",
-  },
-  previewTapContainer: {
-    position: "relative",
-    width: "100%",
-  },
-  expandButton: {
-    marginTop: 10,
-    backgroundColor: "#FFF2DA",
-    borderRadius: 14,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
-  expandButtonPhone: {
-    marginTop: 8,
-    paddingVertical: 10,
-  },
-  expandButtonText: {
-    color: "#8B5611",
-    fontWeight: "800",
-  },
-  mapFallback: {
-    height: 196,
-    borderRadius: 20,
-    backgroundColor: "#EEF4E5",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 16,
-  },
-  mapFallbackText: {
-    color: "#627254",
-    fontSize: 13,
-    textAlign: "center",
-  },
-  tripHeader: {
-    marginBottom: 14,
-  },
-  tripHeaderText: {
-    flex: 1,
-  },
-  tripTitle: {
-    color: "#29440F",
-    fontSize: 24,
-    fontWeight: "800",
-    marginBottom: 6,
-  },
-  tripTitlePhone: {
-    fontSize: 19,
-    lineHeight: 24,
-  },
-  tripDestination: {
-    color: "#5A6E41",
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  popularityBadge: {
-    backgroundColor: "#FFF2DA",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  popularityBadgeText: {
-    color: "#8B5611",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  tripWhy: {
-    color: "#3C4B30",
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: 10,
-  },
-  popularityText: {
-    color: "#6A5731",
-    fontSize: 14,
-    lineHeight: 21,
-    marginBottom: 14,
-  },
-  sectionBlock: {
-    marginTop: 6,
-  },
-  sectionTitle: {
-    color: "#3B6D11",
-    fontSize: 13,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    marginBottom: 6,
-  },
-  sectionText: {
-    color: "#46563A",
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 4,
-  },
-  saveButton: {
-    marginTop: 18,
-    backgroundColor: "#639922",
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  saveButtonPhone: {
-    marginTop: 14,
-    borderRadius: 14,
-    paddingVertical: 12,
-  },
-  saveButtonDisabled: {
-    opacity: 0.7,
-  },
-  saveButtonSaved: {
-    backgroundColor: "#E4EFD0",
-    borderWidth: 1,
-    borderColor: "#C8DAA5",
-  },
-  saveButtonText: {
+  overlayTitle: {
     color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "800",
+    fontSize: 22,
+    fontWeight: FontWeight.bold,
+    lineHeight: 28,
   },
-  saveButtonTextSaved: {
-    color: "#3B6D11",
+  ratingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: Spacing.xs,
+    gap: 4,
   },
+  ratingText: {
+    color: "rgba(255,255,255,0.85)",
+    ...TypeScale.labelLg,
+  },
+
+  // Heart button
+  heartButton: {
+    position: "absolute",
+    top: Spacing.md,
+    right: Spacing.md,
+    width: 40,
+    height: 40,
+    borderRadius: Radius.full,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  // Trip info
+  tripInfo: {
+    padding: Spacing.lg,
+  },
+  whyText: {
+    ...TypeScale.bodyMd,
+    lineHeight: 22,
+    marginBottom: Spacing.md,
+  },
+
+  // Highlights chips
+  highlightsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  highlightChip: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.full,
+  },
+  highlightText: {
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.medium,
+  },
+
+  // See more
+  seeMoreButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: Spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 4,
+  },
+  seeMoreText: {
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.semibold,
+  },
+
+  // Map preview
+  mapContainer: {
+    marginTop: Spacing.lg,
+    borderRadius: Radius.lg,
+    overflow: "hidden",
+    height: 180,
+    position: "relative",
+  },
+  mapPreview: {
+    flex: 1,
+    backgroundColor: "#E5E7EB",
+  },
+  mapExpandHint: {
+    position: "absolute",
+    top: Spacing.sm,
+    right: Spacing.sm,
+    width: 32,
+    height: 32,
+    borderRadius: Radius.sm,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  // Details sections
+  detailsSection: {
+    marginTop: Spacing.lg,
+  },
+  sectionLabel: {
+    ...TypeScale.labelSm,
+    fontWeight: FontWeight.bold,
+    letterSpacing: 1,
+    marginBottom: Spacing.sm,
+  },
+  detailRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: Spacing.sm,
+    gap: Spacing.sm,
+  },
+  detailText: {
+    ...TypeScale.bodyMd,
+    flex: 1,
+    lineHeight: 22,
+  },
+
+  // Modal
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(18, 27, 10, 0.54)",
     alignItems: "center",
     justifyContent: "center",
-    padding: 20,
+    padding: Spacing.xl,
   },
   modalCard: {
     width: "100%",
     maxWidth: 900,
-    backgroundColor: "#FAFCF5",
-    borderRadius: 28,
-    padding: 20,
+    borderRadius: Radius.xl,
+    padding: Spacing.lg,
+    ...shadow("lg"),
   },
   modalHeaderRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    marginBottom: 14,
-  },
-  modalHeaderText: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  modalCloseButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
     alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#EEF4E5",
-    borderWidth: 1,
-    borderColor: "#DDE8C7",
+    justifyContent: "space-between",
+    marginBottom: Spacing.md,
+    gap: Spacing.md,
   },
   modalTitle: {
-    color: "#29440F",
-    fontSize: 24,
-    fontWeight: "800",
+    ...TypeScale.headingMd,
+    fontWeight: FontWeight.bold,
+    flex: 1,
+  },
+  modalCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.full,
+    alignItems: "center",
+    justifyContent: "center",
   },
   modalHeroImage: {
     width: "100%",
-    height: 520,
-    borderRadius: 22,
-    backgroundColor: "#DDE8C7",
-  },
-  modalHeroImageWrap: {
-    position: "relative",
+    height: 420,
+    borderRadius: Radius.lg,
+    backgroundColor: "#E5E7EB",
   },
   modalThumbnailScroll: {
-    marginTop: 14,
+    marginTop: Spacing.md,
   },
   modalThumbnailRow: {
-    paddingBottom: 4,
+    gap: Spacing.sm,
   },
   modalThumbnailImage: {
-    width: 110,
-    height: 82,
-    borderRadius: 16,
-    backgroundColor: "#DDE8C7",
-    marginRight: 10,
+    width: 80,
+    height: 60,
+    borderRadius: Radius.sm,
+    backgroundColor: "#E5E7EB",
     borderWidth: 2,
     borderColor: "transparent",
   },
-  modalThumbnailImageActive: {
-    borderColor: "#5C8C1F",
-  },
-  modalMapImage: {
-    width: "100%",
-    height: 420,
-    backgroundColor: "#DDE8C7",
-  },
-  previewMapWebView: {
-    flex: 1,
-    backgroundColor: "#DDE8C7",
-  },
   modalMapWebView: {
     flex: 1,
-    backgroundColor: "#DDE8C7",
+    backgroundColor: "#E5E7EB",
   },
+
+  // Zoomable map
   zoomableMapRoot: {
     width: "100%",
   },
   zoomableMapViewport: {
     width: "100%",
     height: 420,
-    borderRadius: 22,
+    borderRadius: Radius.lg,
     overflow: "hidden",
-    backgroundColor: "#DDE8C7",
+    backgroundColor: "#E5E7EB",
   },
-  zoomableMapContent: {
-    width: "100%",
-    height: "100%",
-  },
-  mapZoomControls: {
-    position: "absolute",
-    left: 14,
-    top: 14,
-  },
-  mapZoomButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+  mapFallback: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(250, 252, 245, 0.92)",
-    borderWidth: 1,
-    borderColor: "#DDE8C7",
-    marginBottom: 10,
+    padding: Spacing.lg,
+    backgroundColor: "#F3F4F6",
+    borderRadius: Radius.lg,
+  },
+  mapFallbackText: {
+    color: "#9CA3AF",
+    ...TypeScale.bodySm,
+    textAlign: "center",
   },
 });

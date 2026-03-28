@@ -335,6 +335,14 @@ async function fetchWikipediaSummaryImage(candidates: string[]) {
 }
 
 async function fetchWikipediaImages(candidates: string[]) {
+  // Try the summary API first — returns a single direct image URL (most reliable on mobile)
+  const summaryImages = await fetchWikipediaSummaryImage(candidates);
+
+  if (summaryImages.length > 0) {
+    return summaryImages;
+  }
+
+  // Fallback: query API for multiple images
   for (const trimmedCandidate of dedupeCandidates(candidates)) {
     if (!trimmedCandidate) {
       continue;
@@ -405,7 +413,7 @@ async function fetchWikipediaImages(candidates: string[]) {
     } catch {}
   }
 
-  return fetchWikipediaSummaryImage(candidates);
+  return [] as string[];
 }
 
 async function fetchSettlementCoordinates(candidates: string[]) {
@@ -568,7 +576,7 @@ export function getLocalDateKey(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}` + 5;
+  return `${year}-${month}-${day}`;
 }
 
 function buildGroundedSettlementResearchPrompt(

@@ -14,6 +14,7 @@ import {
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -33,8 +34,9 @@ import Animated, {
   withSpring,
   withTiming,
 } from "react-native-reanimated";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { DismissKeyboard } from "../../components/dismiss-keyboard";
 import { auth, db } from "../../firebase";
 import {
   useAppTheme,
@@ -249,6 +251,7 @@ const PROFILE_PHOTO_MAX_LENGTH = 850000;
 export default function ProfileTabScreen() {
   const router = useRouter();
   const { colors, setThemePreference, themePreference } = useAppTheme();
+  const insets = useSafeAreaInsets();
 
   // ── State ──────────────────────────────────────────────────────────────
   const [loading, setLoading] = useState(true);
@@ -818,9 +821,17 @@ export default function ProfileTabScreen() {
       style={[staticStyles.screen, { backgroundColor: colors.screen }]}
       edges={["top", "left", "right"]}
     >
+      <DismissKeyboard>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior="padding"
+        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 8 : 0}
+      >
       <ScrollView
         contentContainerStyle={staticStyles.scroll}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
         {/* ───────── 1. Avatar + identity ───────── */}
         <Animated.View style={[staticStyles.profileHeader, avatarAnimStyle]}>
@@ -1100,6 +1111,8 @@ export default function ProfileTabScreen() {
 
         <View style={staticStyles.footer} />
       </ScrollView>
+      </KeyboardAvoidingView>
+      </DismissKeyboard>
 
       {/* ───────── Floating notice ───────── */}
       {floatingNotice ? (

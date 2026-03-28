@@ -325,7 +325,7 @@ export default function PaymentReturnScreen() {
       <View style={styles.card}>
         {stage === "processing" ? (
           <>
-            <ActivityIndicator size="large" color="#5C8C1F" />
+            <ActivityIndicator size="large" color="#2D6A4F" />
             <Text style={styles.title}>Завършваме Stripe checkout</Text>
             <Text style={styles.text}>{message}</Text>
           </>
@@ -383,15 +383,15 @@ export default function PaymentReturnScreen() {
 const styles = StyleSheet.create({
   screen: {
     alignItems: "center",
-    backgroundColor: "#EAF3DE",
+    backgroundColor: "#F0F0F0",
     flex: 1,
     justifyContent: "center",
     padding: 20,
   },
   card: {
     alignItems: "center",
-    backgroundColor: "#FAFCF5",
-    borderColor: "#DDE8C7",
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E8E8E8",
     borderRadius: 24,
     borderWidth: 1,
     maxWidth: 520,
@@ -399,7 +399,7 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   title: {
-    color: "#29440F",
+    color: "#1A1A1A",
     fontSize: 24,
     fontWeight: "800",
     marginBottom: 10,
@@ -443,7 +443,7 @@ const styles = StyleSheet.create({
   },
   button: {
     alignItems: "center",
-    backgroundColor: "#5C8C1F",
+    backgroundColor: "#2D6A4F",
     borderRadius: 16,
     marginTop: 20,
     paddingHorizontal: 18,

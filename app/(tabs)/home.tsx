@@ -30,6 +30,14 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAppTheme } from "../../components/app-theme-provider";
+import {
+  FontWeight,
+  Layout,
+  Radius,
+  Spacing,
+  TypeScale,
+  shadow,
+} from "../../constants/design-system";
 import { ConfirmDialog } from "../../components/confirm-dialog";
 import { auth, db } from "../../firebase";
 import { normalizeBudgetToEuro } from "../../utils/currency";
@@ -463,7 +471,7 @@ export default function HomeTabScreen() {
   const isFocused = useIsFocused();
   const isWideLayout = width >= 980;
   const isPhoneLayout = width < 768;
-  const isCompactPhone = width < 430;
+
 
   const [loading, setLoading] = useState(true);
   const [planning, setPlanning] = useState(false);
@@ -513,7 +521,7 @@ export default function HomeTabScreen() {
   const [typingMessageId, setTypingMessageId] = useState<string | null>(null);
   const [typingVisibleText, setTypingVisibleText] = useState("");
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const keyboardHeightRef = useRef(0);
 
   const sortedChats = useMemo(
     () => sortHomePlannerChats(homeStore.chats),
@@ -655,12 +663,12 @@ export default function HomeTabScreen() {
 
     const showSubscription = Keyboard.addListener(showEvent, (event) => {
       setIsKeyboardOpen(true);
-      setKeyboardHeight(event?.endCoordinates?.height ?? 0);
+      keyboardHeightRef.current = event?.endCoordinates?.height ?? 0;
       scrollMessagesToBottom(true);
     });
     const hideSubscription = Keyboard.addListener(hideEvent, () => {
       setIsKeyboardOpen(false);
-      setKeyboardHeight(0);
+      keyboardHeightRef.current = 0;
     });
 
     return () => {
@@ -865,15 +873,6 @@ export default function HomeTabScreen() {
   }, [currentPlannerState, profile]);
 
   const canSend = chatInput.trim().length > 0 && !planning;
-  const androidKeyboardOffset =
-    Platform.OS === "android" && isKeyboardOpen
-      ? Math.max(0, keyboardHeight - 72)
-      : 0;
-  const phoneComposerBottomMargin =
-    insets.bottom + (isKeyboardOpen ? 4 : 10) + androidKeyboardOffset;
-  const scrollToBottomOffset = isPhoneLayout
-    ? phoneComposerBottomMargin + (quickReplies.length > 0 ? 176 : 112)
-    : 148;
 
   const persistStore = async (nextStore: HomePlannerStore) => {
     if (!user) {
@@ -1770,7 +1769,7 @@ export default function HomeTabScreen() {
                 value={renameValue}
                 onChangeText={setRenameValue}
                 placeholder="Chat name"
-                placeholderTextColor="#78876C"
+                placeholderTextColor="#9CA3AF"
               />
               <View style={styles.renameActions}>
                 <TouchableOpacity
@@ -1780,7 +1779,7 @@ export default function HomeTabScreen() {
                   }}
                   activeOpacity={0.9}
                 >
-                  <MaterialIcons name="check" size={18} color="#3B6D11" />
+                  <MaterialIcons name="check" size={18} color="#2D6A4F" />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.iconButton}
@@ -1790,7 +1789,7 @@ export default function HomeTabScreen() {
                   }}
                   activeOpacity={0.9}
                 >
-                  <MaterialIcons name="close" size={18} color="#8A3D35" />
+                  <MaterialIcons name="close" size={18} color="#DC3545" />
                 </TouchableOpacity>
               </View>
             </View>
@@ -1807,7 +1806,7 @@ export default function HomeTabScreen() {
                     {chat.title}
                   </Text>
                   {chat.pinned ? (
-                    <MaterialIcons name="push-pin" size={16} color="#8B5611" />
+                    <MaterialIcons name="push-pin" size={16} color="#92400E" />
                   ) : null}
                 </View>
                 <Text style={styles.chatItemMeta}>{formatUpdatedDate(chat.updatedAtMs)}</Text>
@@ -1822,7 +1821,7 @@ export default function HomeTabScreen() {
                   }}
                   activeOpacity={0.9}
                 >
-                  <MaterialIcons name="edit" size={16} color="#5A6E41" />
+                  <MaterialIcons name="edit" size={16} color="#6B7280" />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.iconButton}
@@ -1834,7 +1833,7 @@ export default function HomeTabScreen() {
                   <MaterialIcons
                     name={chat.pinned ? "push-pin" : "outlined-flag"}
                     size={16}
-                    color="#5A6E41"
+                    color="#6B7280"
                   />
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -1842,7 +1841,7 @@ export default function HomeTabScreen() {
                   onPress={() => setPendingDeleteChat(chat)}
                   activeOpacity={0.9}
                 >
-                  <MaterialIcons name="delete-outline" size={16} color="#8A3D35" />
+                  <MaterialIcons name="delete-outline" size={16} color="#DC3545" />
                 </TouchableOpacity>
               </View>
             </>
@@ -1858,7 +1857,7 @@ export default function HomeTabScreen() {
         style={[styles.loader, { backgroundColor: colors.screen }]}
         edges={["top", "left", "right"]}
       >
-        <ActivityIndicator size="large" color="#5C8C1F" />
+        <ActivityIndicator size="large" color="#2D6A4F" />
       </SafeAreaView>
     );
   }
@@ -1869,55 +1868,53 @@ export default function HomeTabScreen() {
       edges={["top", "left", "right"]}
     >
       <KeyboardAvoidingView
-        style={styles.keyboardWrap}
+        style={styles.flex1}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 8 : 0}
       >
-      <View style={[styles.shell, { backgroundColor: colors.screen }]}>
-        <View
-          style={[
-            styles.layout,
-            !isWideLayout && styles.layoutStacked,
-          ]}
-        >
-          <View style={styles.main}>
+      <View style={styles.chatShell}>
             <View
               style={[
-                styles.plannerTopBar,
-                isPhoneLayout && styles.plannerTopBarPhone,
-                { backgroundColor: colors.card, borderColor: colors.border },
+                styles.header,
+                { borderBottomColor: colors.border },
               ]}
             >
               <TouchableOpacity
-                activeOpacity={0.9}
+                activeOpacity={0.7}
                 onPress={() => setChatMenuVisible(true)}
                 style={[
-                  styles.plannerMenuButton,
+                  styles.headerIconBtn,
                   { backgroundColor: colors.cardAlt, borderColor: colors.border },
                 ]}
               >
-                <MaterialIcons color={colors.textPrimary} name="menu" size={26} />
+                <MaterialIcons color={colors.textPrimary} name="menu" size={22} />
               </TouchableOpacity>
-              <View style={styles.plannerTopBarTextWrap}>
-                <Text style={[styles.plannerTopBarTitle, { color: colors.textPrimary }]}>
+              <View style={styles.headerCenter}>
+                <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
                   AI Planner
                 </Text>
                 <Text
                   numberOfLines={1}
-                  style={[styles.plannerTopBarMeta, { color: colors.textSecondary }]}
+                  style={[styles.headerSub, { color: colors.textSecondary }]}
                 >
                   {currentChat?.title ?? "Последен чат"}
                 </Text>
               </View>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={() => {
+                  void handleCreateChat();
+                }}
+                style={[
+                  styles.headerIconBtn,
+                  { backgroundColor: colors.accent },
+                ]}
+              >
+                <MaterialIcons color={colors.buttonTextOnAction} name="add" size={22} />
+              </TouchableOpacity>
             </View>
 
-            <View
-              style={[
-                styles.chatCard,
-                isPhoneLayout && styles.chatCardPhone,
-                { backgroundColor: colors.card, borderColor: colors.border },
-              ]}
-            >
+            <View style={styles.chatArea}>
               {[currentPlannerState.budget,
                 currentPlannerState.days,
                 currentPlannerState.travelers,
@@ -1925,15 +1922,15 @@ export default function HomeTabScreen() {
                 currentPlannerState.timing,
                 currentPlannerState.destination,
               ].filter(Boolean).length > 0 ? (
-                <View style={[styles.contextStrip, isPhoneLayout && styles.contextStripPhone]}>
-                  <Text style={styles.contextStripTitle}>Current plan</Text>
-                  <View style={[styles.profileMetaRow, isPhoneLayout && styles.profileMetaRowPhone]}>
+                <View style={[styles.contextStrip, { backgroundColor: colors.cardAlt, borderColor: colors.border }]}>
+                  <Text style={[styles.contextStripTitle, { color: colors.textMuted }]}>Current plan</Text>
+                  <View style={styles.profileMetaRow}>
                     {currentPlannerState.budget ? (
-                      <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
+                      <View style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
                         <Text
                           style={[
                             styles.profileMetaChipText,
-                            isPhoneLayout && styles.profileMetaChipTextPhone,
+                            { color: colors.textPrimary },
                           ]}
                         >
                           {currentPlannerState.budget}
@@ -1941,11 +1938,11 @@ export default function HomeTabScreen() {
                       </View>
                     ) : null}
                     {currentPlannerState.days ? (
-                      <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
+                      <View style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
                         <Text
                           style={[
                             styles.profileMetaChipText,
-                            isPhoneLayout && styles.profileMetaChipTextPhone,
+                            { color: colors.textPrimary },
                           ]}
                         >
                           {currentPlannerState.days}
@@ -1953,11 +1950,11 @@ export default function HomeTabScreen() {
                       </View>
                     ) : null}
                     {currentPlannerState.travelers ? (
-                      <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
+                      <View style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
                         <Text
                           style={[
                             styles.profileMetaChipText,
-                            isPhoneLayout && styles.profileMetaChipTextPhone,
+                            { color: colors.textPrimary },
                           ]}
                         >
                           {currentPlannerState.travelers}
@@ -1965,11 +1962,11 @@ export default function HomeTabScreen() {
                       </View>
                     ) : null}
                     {currentPlannerState.transportPreference ? (
-                      <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
+                      <View style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
                         <Text
                           style={[
                             styles.profileMetaChipText,
-                            isPhoneLayout && styles.profileMetaChipTextPhone,
+                            { color: colors.textPrimary },
                           ]}
                         >
                           {currentPlannerState.transportPreference}
@@ -1977,11 +1974,11 @@ export default function HomeTabScreen() {
                       </View>
                     ) : null}
                     {currentPlannerState.timing ? (
-                      <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
+                      <View style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
                         <Text
                           style={[
                             styles.profileMetaChipText,
-                            isPhoneLayout && styles.profileMetaChipTextPhone,
+                            { color: colors.textPrimary },
                           ]}
                         >
                           {currentPlannerState.timing}
@@ -1989,11 +1986,11 @@ export default function HomeTabScreen() {
                       </View>
                     ) : null}
                     {currentPlannerState.destination ? (
-                      <View style={[styles.profileMetaChip, isPhoneLayout && styles.profileMetaChipPhone]}>
+                      <View style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
                         <Text
                           style={[
                             styles.profileMetaChipText,
-                            isPhoneLayout && styles.profileMetaChipTextPhone,
+                            { color: colors.textPrimary },
                           ]}
                         >
                           {currentPlannerState.destination}
@@ -2006,11 +2003,8 @@ export default function HomeTabScreen() {
 
               <ScrollView
                 ref={messagesScrollRef}
-                style={[styles.messagesContainer, isPhoneLayout && styles.messagesContainerPhone]}
-                contentContainerStyle={[
-                  styles.messagesContent,
-                  isPhoneLayout && styles.messagesContentPhone,
-                ]}
+                style={styles.messagesContainer}
+                contentContainerStyle={styles.messagesContent}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
@@ -2027,29 +2021,28 @@ export default function HomeTabScreen() {
                     key={message.id}
                     style={[
                       styles.messageBubble,
-                      isPhoneLayout && styles.messageBubblePhone,
-                      isPhoneLayout &&
-                        (message.role === "assistant"
-                          ? styles.assistantBubblePhone
-                          : styles.userBubblePhone),
                       message.role === "assistant"
-                        ? styles.assistantBubble
-                        : styles.userBubble,
+                        ? [styles.assistantBubble, { backgroundColor: colors.cardAlt }]
+                        : [styles.userBubble, { backgroundColor: colors.accent }],
                     ]}
                   >
-                    <Text style={styles.messageRoleLabel}>
-                      {message.role === "assistant" ? "AI Planner" : "You"}
-                    </Text>
                     <Text
                       style={[
-                        styles.messageText,
-                        message.role === "assistant"
-                          ? styles.assistantMessageText
-                          : styles.userMessageText,
+                        styles.messageRoleLabel,
+                        { color: message.role === "assistant" ? colors.textMuted : "rgba(255,255,255,0.7)" },
                       ]}
                     >
-                      {message.text}
+                      {message.role === "assistant" ? "AI Planner" : "You"}
                     </Text>
+                    <FormattedMessageText
+                      text={getDisplayedMessageText(message)}
+                      textStyle={[
+                        styles.messageText,
+                        message.role === "assistant"
+                          ? [styles.assistantMessageText, { color: colors.textPrimary }]
+                          : styles.userMessageText,
+                      ]}
+                    />
                   </View>
                 ))}
 
@@ -2058,13 +2051,17 @@ export default function HomeTabScreen() {
                     key={message.id}
                     style={[
                       styles.messageBubble,
-                      isPhoneLayout && styles.messageBubblePhone,
                       message.role === "assistant"
-                        ? styles.assistantBubble
-                        : styles.userBubble,
+                        ? [styles.assistantBubble, { backgroundColor: colors.cardAlt }]
+                        : [styles.userBubble, { backgroundColor: colors.accent }],
                     ]}
                   >
-                    <Text style={styles.messageRoleLabel}>
+                    <Text
+                      style={[
+                        styles.messageRoleLabel,
+                        { color: message.role === "assistant" ? colors.textMuted : "rgba(255,255,255,0.7)" },
+                      ]}
+                    >
                       {message.role === "assistant" ? "AI Planner" : "You"}
                     </Text>
                     <FormattedMessageText
@@ -2072,7 +2069,7 @@ export default function HomeTabScreen() {
                       textStyle={[
                         styles.messageText,
                         message.role === "assistant"
-                          ? styles.assistantMessageText
+                          ? [styles.assistantMessageText, { color: colors.textPrimary }]
                           : styles.userMessageText,
                       ]}
                     />
@@ -2083,15 +2080,17 @@ export default function HomeTabScreen() {
                   <View
                     style={[
                       styles.messageBubble,
-                      isPhoneLayout && styles.messageBubblePhone,
-                      isPhoneLayout && styles.assistantBubblePhone,
                       styles.assistantBubble,
+                      { backgroundColor: colors.cardAlt },
                     ]}
                   >
-                    <Text style={styles.messageRoleLabel}>AI Planner</Text>
-                    <Text style={styles.assistantMessageText}>
-                      Търся най-добрите цени за transport и stay...
-                    </Text>
+                    <Text style={[styles.messageRoleLabel, { color: colors.textMuted }]}>AI Planner</Text>
+                    <View style={styles.typingRow}>
+                      <ActivityIndicator size="small" color={colors.accent} style={{ marginRight: 8 }} />
+                      <Text style={[styles.assistantMessageText, { color: colors.textPrimary }]}>
+                        Търся най-добрите цени...
+                      </Text>
+                    </View>
                   </View>
                 ) : null}
 
@@ -2119,7 +2118,7 @@ export default function HomeTabScreen() {
                       </View>
                       {!isPhoneLayout ? (
                         <View style={styles.planHeaderIcon}>
-                          <MaterialIcons name="map" size={24} color="#8B5611" />
+                          <MaterialIcons name="map" size={24} color="#92400E" />
                         </View>
                       ) : null}
                     </View>
@@ -2128,7 +2127,7 @@ export default function HomeTabScreen() {
 
                     {latestPlan.plan.budgetNote ? (
                       <View style={styles.budgetNotePill}>
-                        <MaterialIcons name="euro" size={16} color="#8B5611" />
+                        <MaterialIcons name="euro" size={16} color="#92400E" />
                         <Text style={styles.budgetNoteText}>
                           {latestPlan.plan.budgetNote}
                         </Text>
@@ -2144,7 +2143,7 @@ export default function HomeTabScreen() {
                               <MaterialIcons
                                 name={getTransportIconName(option)}
                                 size={18}
-                                color="#3B6D11"
+                                color="#2D6A4F"
                               />
                               <Text style={styles.optionModeText}>{option.mode}</Text>
                             </View>
@@ -2168,7 +2167,7 @@ export default function HomeTabScreen() {
                                 }}
                                 activeOpacity={0.9}
                               >
-                                <MaterialIcons name="open-in-new" size={16} color="#365A14" />
+                                <MaterialIcons name="open-in-new" size={16} color="#1A1A1A" />
                                 <Text style={styles.optionLinkButtonText}>Офертата</Text>
                               </TouchableOpacity>
                             ) : null}
@@ -2214,7 +2213,7 @@ export default function HomeTabScreen() {
                                 }}
                                 activeOpacity={0.9}
                               >
-                                <MaterialIcons name="open-in-new" size={16} color="#365A14" />
+                                <MaterialIcons name="open-in-new" size={16} color="#1A1A1A" />
                                 <Text style={styles.optionLinkButtonText}>Офертата</Text>
                               </TouchableOpacity>
                             ) : null}
@@ -2309,143 +2308,118 @@ export default function HomeTabScreen() {
 
               {showScrollToBottom ? (
                 <TouchableOpacity
-                  style={[
-                    styles.scrollToBottomButton,
-                    isPhoneLayout && styles.scrollToBottomButtonPhone,
-                    { bottom: scrollToBottomOffset },
-                  ]}
+                  style={styles.scrollToBottomButton}
                   onPress={() => {
                     scrollMessagesToBottom(true);
                   }}
                   activeOpacity={0.9}
                 >
-                  <MaterialIcons name="keyboard-double-arrow-down" size={20} color="#FFFFFF" />
+                  <MaterialIcons name="keyboard-double-arrow-down" size={20} color={colors.buttonTextOnAction} />
                 </TouchableOpacity>
               ) : null}
 
               {quickReplies.length > 0 ? (
                 <View style={styles.quickRepliesSection}>
-                  <Text style={styles.quickRepliesTitle}>
+                  <Text style={[styles.quickRepliesTitle, { color: colors.textMuted }]}>
                     {getStepTitle(currentPlannerState.step)}
                   </Text>
-                  {isPhoneLayout ? (
-                    <View style={styles.quickRepliesWrap}>
-                      {quickReplies.map((reply) => (
-                        <TouchableOpacity
-                          key={reply}
-                          style={[styles.quickReplyChip, styles.quickReplyChipPhone]}
-                          onPress={() => {
-                            void sendPlannerMessage(reply);
-                          }}
-                          disabled={planning}
-                          activeOpacity={0.9}
-                        >
-                          <Text style={styles.quickReplyText}>{reply}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  ) : (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                      {quickReplies.map((reply) => (
-                        <TouchableOpacity
-                          key={reply}
-                          style={styles.quickReplyChip}
-                          onPress={() => {
-                            void sendPlannerMessage(reply);
-                          }}
-                          disabled={planning}
-                          activeOpacity={0.9}
-                        >
-                          <Text style={styles.quickReplyText}>{reply}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  )}
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.quickRepliesRow}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    {quickReplies.map((reply) => (
+                      <TouchableOpacity
+                        key={reply}
+                        style={[
+                          styles.quickReplyChip,
+                          { borderColor: colors.inputBorder, backgroundColor: colors.cardAlt },
+                        ]}
+                        onPress={() => {
+                          void sendPlannerMessage(reply);
+                        }}
+                        disabled={planning}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[styles.quickReplyText, { color: colors.textPrimary }]}>{reply}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
                 </View>
               ) : null}
 
               <View
                 style={[
                   styles.composer,
-                  isPhoneLayout && styles.composerPhone,
-                  { backgroundColor: colors.card, borderColor: colors.border },
-                  isPhoneLayout && { marginBottom: phoneComposerBottomMargin },
+                  { backgroundColor: colors.screen, borderTopColor: colors.border },
+                  { paddingBottom: Math.max(insets.bottom, 8) },
                 ]}
               >
-                <TextInput
-                  style={[
-                    styles.input,
-                    isPhoneLayout && styles.inputPhone,
-                    {
-                      backgroundColor: colors.inputBackground,
-                      borderColor: colors.inputBorder,
-                      color: colors.textPrimary,
-                    },
-                  ]}
-                  placeholder={
-                    currentPlannerState.step === "budget"
-                      ? "Напиши бюджета в евро..."
-                      : currentPlannerState.step === "days"
-                        ? "Напиши броя дни..."
-                        : currentPlannerState.step === "travelers"
-                          ? "Напиши колко човека ще пътуват..."
-                          : currentPlannerState.step === "transport"
-                            ? "Напиши предпочитан транспорт..."
-                            : currentPlannerState.step === "timing"
-                              ? "Напиши кога искате да пътувате..."
-                              : currentPlannerState.step === "destination"
-                                ? "Напиши дестинацията..."
-                                : "Натисни „Нов чат“ или „Нов план“"
-                  }
-                  placeholderTextColor={colors.inputPlaceholder}
-                  value={chatInput}
-                  onChangeText={setChatInput}
-                  editable={currentPlannerState.step !== "done" && !planning}
-                  multiline
-                />
-
                 <View
                   style={[
-                    styles.actionsRow,
-                    isCompactPhone && styles.actionsRowStacked,
+                    styles.composerInputRow,
+                    { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder },
                   ]}
                 >
-                  <TouchableOpacity
+                  <TextInput
                     style={[
-                      styles.secondaryButton,
-                      isCompactPhone && styles.secondaryButtonStacked,
-                      planning && styles.disabledButton,
+                      styles.input,
+                      { color: colors.textPrimary },
                     ]}
-                    onPress={() => {
-                      void resetConversation();
-                    }}
-                    disabled={planning}
-                    activeOpacity={0.9}
-                  >
-                    <Text style={styles.secondaryButtonText}>Нов план</Text>
-                  </TouchableOpacity>
-
+                    placeholder={
+                      currentPlannerState.step === "budget"
+                        ? "Напиши бюджета в евро..."
+                        : currentPlannerState.step === "days"
+                          ? "Напиши броя дни..."
+                          : currentPlannerState.step === "travelers"
+                            ? "Напиши колко човека ще пътуват..."
+                            : currentPlannerState.step === "transport"
+                              ? "Напиши предпочитан транспорт..."
+                              : currentPlannerState.step === "timing"
+                                ? "Напиши кога искате да пътувате..."
+                                : currentPlannerState.step === "destination"
+                                  ? "Напиши дестинацията..."
+                                  : "Напиши съобщение..."
+                    }
+                    placeholderTextColor={colors.inputPlaceholder}
+                    value={chatInput}
+                    onChangeText={setChatInput}
+                    editable={currentPlannerState.step !== "done" && !planning}
+                    multiline
+                  />
                   <TouchableOpacity
                     style={[
-                      styles.primaryButton,
-                      isCompactPhone && styles.primaryButtonStacked,
-                      !canSend && styles.disabledButton,
+                      styles.sendButton,
+                      { backgroundColor: canSend ? colors.accent : colors.disabledBackground },
                     ]}
                     onPress={() => {
                       void sendPlannerMessage(chatInput);
                     }}
                     disabled={!canSend}
-                    activeOpacity={0.9}
+                    activeOpacity={0.7}
                   >
-                    <MaterialIcons name="send" size={18} color="#FFFFFF" />
-                    <Text style={styles.primaryButtonText}>Изпрати</Text>
+                    <MaterialIcons
+                      name="arrow-upward"
+                      size={20}
+                      color={canSend ? colors.buttonTextOnAction : colors.disabledText}
+                    />
                   </TouchableOpacity>
                 </View>
+                <TouchableOpacity
+                  style={styles.resetButton}
+                  onPress={() => {
+                    void resetConversation();
+                  }}
+                  disabled={planning}
+                  activeOpacity={0.7}
+                >
+                  <MaterialIcons name="refresh" size={14} color={colors.textMuted} />
+                  <Text style={[styles.resetButtonText, { color: colors.textMuted }]}>Нов план</Text>
+                </TouchableOpacity>
               </View>
             </View>
           </View>
-          </View>
-        </View>
       </KeyboardAvoidingView>
 
       {isPhoneLayout && isPhoneChatDrawerMounted ? (
@@ -2472,18 +2446,18 @@ export default function HomeTabScreen() {
                 onPress={() => setIsPhoneChatMenuOpen(false)}
                 activeOpacity={0.9}
               >
-                <MaterialIcons name="close" size={20} color="#29440F" />
+                <MaterialIcons name="close" size={20} color="#1A1A1A" />
               </TouchableOpacity>
             </View>
 
             <View style={styles.phoneDrawerSearchWrap}>
-              <MaterialIcons name="search" size={18} color="#7B8870" />
+              <MaterialIcons name="search" size={18} color="#9CA3AF" />
               <TextInput
                 style={styles.phoneDrawerSearchInput}
                 value={chatSearch}
                 onChangeText={setChatSearch}
                 placeholder="Search chats"
-                placeholderTextColor="#7B8870"
+                placeholderTextColor="#9CA3AF"
               />
             </View>
 
@@ -2581,7 +2555,7 @@ export default function HomeTabScreen() {
                             value={renameValue}
                             onChangeText={setRenameValue}
                             placeholder="Име на чат"
-                            placeholderTextColor="#78876C"
+                            placeholderTextColor="#9CA3AF"
                           />
                           <View style={styles.renameActions}>
                             <TouchableOpacity
@@ -2591,7 +2565,7 @@ export default function HomeTabScreen() {
                               }}
                               activeOpacity={0.9}
                             >
-                              <MaterialIcons name="check" size={18} color="#3B6D11" />
+                              <MaterialIcons name="check" size={18} color="#2D6A4F" />
                             </TouchableOpacity>
                             <TouchableOpacity
                               style={styles.iconButton}
@@ -2601,7 +2575,7 @@ export default function HomeTabScreen() {
                               }}
                               activeOpacity={0.9}
                             >
-                              <MaterialIcons name="close" size={18} color="#8A3D35" />
+                              <MaterialIcons name="close" size={18} color="#DC3545" />
                             </TouchableOpacity>
                           </View>
                         </View>
@@ -2618,7 +2592,7 @@ export default function HomeTabScreen() {
                                 {chat.title}
                               </Text>
                               {chat.pinned ? (
-                                <MaterialIcons name="push-pin" size={16} color="#8B5611" />
+                                <MaterialIcons name="push-pin" size={16} color="#92400E" />
                               ) : null}
                             </View>
                             <Text style={styles.chatItemMeta}>
@@ -2635,7 +2609,7 @@ export default function HomeTabScreen() {
                               }}
                               activeOpacity={0.9}
                             >
-                              <MaterialIcons name="edit" size={16} color="#5A6E41" />
+                              <MaterialIcons name="edit" size={16} color="#6B7280" />
                             </TouchableOpacity>
                             <TouchableOpacity
                               style={styles.iconButton}
@@ -2647,7 +2621,7 @@ export default function HomeTabScreen() {
                               <MaterialIcons
                                 name={chat.pinned ? "push-pin" : "outlined-flag"}
                                 size={16}
-                                color="#5A6E41"
+                                color="#6B7280"
                               />
                             </TouchableOpacity>
                             <TouchableOpacity
@@ -2657,7 +2631,7 @@ export default function HomeTabScreen() {
                               }}
                               activeOpacity={0.9}
                             >
-                              <MaterialIcons name="delete-outline" size={16} color="#8A3D35" />
+                              <MaterialIcons name="delete-outline" size={16} color="#DC3545" />
                             </TouchableOpacity>
                           </View>
                         </>
@@ -2714,7 +2688,7 @@ export default function HomeTabScreen() {
                   disabled={bookingProcessing}
                   activeOpacity={0.9}
                 >
-                  <MaterialIcons name="close" size={18} color="#29440F" />
+                  <MaterialIcons name="close" size={18} color="#1A1A1A" />
                 </TouchableOpacity>
               </View>
 
@@ -2724,7 +2698,7 @@ export default function HomeTabScreen() {
                     <MaterialIcons
                       name={getPaymentMethodIcon(bookingForm.paymentMethod)}
                       size={34}
-                      color="#29440F"
+                      color="#1A1A1A"
                     />
                   </View>
                   <Text style={styles.checkoutProcessingTitle}>
@@ -2925,7 +2899,7 @@ export default function HomeTabScreen() {
                 <TextInput
                   style={styles.bookingInput}
                   placeholder="Име за резервацията"
-                  placeholderTextColor="#7B8870"
+                  placeholderTextColor="#9CA3AF"
                   value={bookingForm.contactName}
                   onChangeText={(value) =>
                     setBookingForm((current) => ({
@@ -2937,7 +2911,7 @@ export default function HomeTabScreen() {
                 <TextInput
                   style={styles.bookingInput}
                   placeholder="Email за потвърждение"
-                  placeholderTextColor="#7B8870"
+                  placeholderTextColor="#9CA3AF"
                   keyboardType="email-address"
                   autoCapitalize="none"
                   value={bookingForm.contactEmail}
@@ -2951,7 +2925,7 @@ export default function HomeTabScreen() {
                 <TextInput
                   style={[styles.bookingInput, styles.bookingNoteInput]}
                   placeholder="Бележка по желание"
-                  placeholderTextColor="#7B8870"
+                  placeholderTextColor="#9CA3AF"
                   value={bookingForm.note}
                   onChangeText={(value) =>
                     setBookingForm((current) => ({
@@ -3053,135 +3027,125 @@ export default function HomeTabScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#EEF4E5",
-    paddingHorizontal: 14,
-    paddingTop: 14,
-    paddingBottom: 12,
   },
-  shell: {
+  flex1: {
+    flex: 1,
+  },
+  chatShell: {
     flex: 1,
     width: "100%",
-    maxWidth: 1320,
+    maxWidth: 860,
     alignSelf: "center",
-  },
-  layout: {
-    flex: 1,
-    flexDirection: "row",
-  },
-  layoutStacked: {
-    flexDirection: "column",
   },
   loader: {
     flex: 1,
-    backgroundColor: "#EEF4E5",
     alignItems: "center",
     justifyContent: "center",
   },
   sidebar: {
     width: 290,
-    backgroundColor: "#FAFCF5",
-    borderRadius: 28,
+    backgroundColor: "#FFFFFF",
+    borderRadius: Radius["3xl"],
     borderWidth: 1,
-    borderColor: "#DDE8C7",
-    padding: 16,
-    marginRight: 14,
+    borderColor: "#E8E8E8",
+    padding: Spacing.lg,
+    marginRight: Spacing.md,
   },
   sidebarStacked: {
     width: "100%",
     marginRight: 0,
-    marginBottom: 14,
+    marginBottom: Spacing.md,
   },
   sidebarPhone: {
     backgroundColor: "transparent",
     borderWidth: 0,
     padding: 0,
-    marginBottom: 10,
+    marginBottom: Spacing.sm,
   },
   sidebarHeader: {
-    marginBottom: 12,
+    marginBottom: Spacing.md,
   },
   sidebarHeaderPhone: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 8,
+    marginBottom: Spacing.sm,
   },
   sidebarTitle: {
-    color: "#29440F",
-    fontSize: 20,
-    fontWeight: "800",
-    marginBottom: 10,
+    color: "#1A1A1A",
+    ...TypeScale.headingSm,
+    fontWeight: FontWeight.extrabold,
+    marginBottom: Spacing.sm,
   },
   sidebarTitlePhone: {
-    fontSize: 16,
+    ...TypeScale.titleMd,
     marginBottom: 0,
   },
   newChatButton: {
-    backgroundColor: "#5C8C1F",
-    borderRadius: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+    backgroundColor: "#2D6A4F",
+    borderRadius: Radius.lg,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.md,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
   },
   newChatButtonPhone: {
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
   },
   newChatButtonText: {
     color: "#FFFFFF",
-    fontWeight: "800",
-    marginLeft: 6,
+    fontWeight: FontWeight.extrabold,
+    marginLeft: Spacing.xs,
   },
   newChatButtonTextPhone: {
-    fontSize: 14,
+    ...TypeScale.bodyMd,
   },
   sidebarList: {
     flex: 1,
   },
   sidebarListContent: {
-    paddingBottom: 12,
+    paddingBottom: Spacing.md,
   },
   chatListItem: {
-    backgroundColor: "#F3F8E8",
-    borderRadius: 18,
-    padding: 12,
+    backgroundColor: "#F5F5F5",
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
     borderWidth: 1,
-    borderColor: "#DDE8C7",
-    marginBottom: 10,
+    borderColor: "#E8E8E8",
+    marginBottom: Spacing.sm,
   },
   chatListItemStacked: {
     width: 250,
-    marginRight: 10,
+    marginRight: Spacing.sm,
   },
   chatListItemPhone: {
     width: 210,
-    padding: 10,
+    padding: Spacing.sm,
   },
   chatListItemActive: {
-    backgroundColor: "#E6F1D4",
-    borderColor: "#BFD694",
+    backgroundColor: "#E5E7EB",
+    borderColor: "#D1D5DB",
   },
   chatTitleRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 6,
+    marginBottom: Spacing.xs,
   },
   chatItemTitle: {
-    color: "#29440F",
-    fontSize: 14,
-    lineHeight: 19,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
     flex: 1,
-    paddingRight: 8,
+    paddingRight: Spacing.sm,
   },
   chatItemMeta: {
-    color: "#6F7D63",
-    fontSize: 12,
-    marginBottom: 10,
+    color: "#9CA3AF",
+    ...TypeScale.labelMd,
+    marginBottom: Spacing.sm,
   },
   chatItemActions: {
     flexDirection: "row",
@@ -3189,24 +3153,24 @@ const styles = StyleSheet.create({
   iconButton: {
     width: 30,
     height: 30,
-    borderRadius: 10,
+    borderRadius: Radius.sm,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#FFFFFF",
-    marginRight: 8,
+    marginRight: Spacing.sm,
   },
   renameWrap: {
     width: "100%",
   },
   renameInput: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: "#29440F",
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    color: "#1A1A1A",
     borderWidth: 1,
-    borderColor: "#DDE8C7",
-    marginBottom: 10,
+    borderColor: "#E8E8E8",
+    marginBottom: Spacing.sm,
   },
   renameActions: {
     flexDirection: "row",
@@ -3214,135 +3178,120 @@ const styles = StyleSheet.create({
   main: {
     flex: 1,
   },
-  plannerTopBar: {
+  header: {
     alignItems: "center",
     flexDirection: "row",
-    marginBottom: 12,
-    minHeight: 54,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: 1,
   },
-  plannerTopBarPhone: {
-    marginBottom: 10,
-  },
-  plannerTopBarTextWrap: {
-    flex: 1,
-    paddingLeft: 12,
-  },
-  plannerTopBarTitle: {
-    color: "#29440F",
-    fontSize: 24,
-    fontWeight: "800",
-  },
-  plannerTopBarMeta: {
-    color: "#5F6E53",
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 4,
-  },
-  plannerMenuButton: {
+  headerIconBtn: {
     alignItems: "center",
-    backgroundColor: "#FAFCF5",
-    borderColor: "#DDE8C7",
-    borderRadius: 22,
+    borderRadius: Radius.full,
     borderWidth: 1,
-    height: 44,
+    borderColor: "transparent",
+    height: 40,
     justifyContent: "center",
-    width: 44,
+    width: 40,
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: "center",
+    paddingHorizontal: Spacing.md,
+  },
+  headerTitle: {
+    ...TypeScale.titleMd,
+    fontWeight: FontWeight.bold,
+  },
+  headerSub: {
+    ...TypeScale.labelMd,
+    marginTop: 2,
+  },
+  chatArea: {
+    flex: 1,
   },
   historyMenuBackdrop: {
-    backgroundColor: "rgba(34,56,20,0.18)",
+    backgroundColor: "rgba(0,0,0,0.15)",
     flex: 1,
     flexDirection: "row",
-    paddingBottom: 16,
-    paddingRight: 16,
+    paddingBottom: Spacing.lg,
+    paddingRight: Spacing.lg,
   },
   historyMenuDismissArea: {
     flex: 1,
   },
   historyMenuCard: {
-    backgroundColor: "#FAFCF5",
-    borderColor: "#DDE8C7",
-    borderBottomRightRadius: 28,
-    borderTopRightRadius: 28,
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E8E8E8",
+    borderBottomRightRadius: Radius["3xl"],
+    borderTopRightRadius: Radius["3xl"],
     borderWidth: 1,
     height: "100%",
     maxWidth: 380,
-    padding: 16,
-    shadowColor: "#1E2A12",
-    shadowOffset: { width: 10, height: 0 },
-    shadowOpacity: 0.14,
-    shadowRadius: 24,
+    padding: Spacing.lg,
+    ...shadow("xl"),
     width: "82%",
   },
   historyMenuHeader: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 14,
+    marginBottom: Spacing.md,
   },
   historyMenuTitle: {
-    color: "#29440F",
-    fontSize: 22,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.headingMd,
+    fontWeight: FontWeight.extrabold,
   },
   historyMenuSubtitle: {
-    color: "#5F6E53",
-    fontSize: 13,
-    marginTop: 4,
+    color: "#6B7280",
+    ...TypeScale.bodySm,
+    marginTop: Spacing.xs,
   },
   historyMenuClose: {
     alignItems: "center",
-    backgroundColor: "#EEF4E5",
-    borderRadius: 999,
+    backgroundColor: "#F5F5F5",
+    borderRadius: Radius.full,
     height: 38,
     justifyContent: "center",
     width: 38,
   },
   historyMenuNewChatButton: {
-    marginBottom: 14,
+    marginBottom: Spacing.md,
   },
   contextStrip: {
-    backgroundColor: "#F3F8E8",
-    borderRadius: 18,
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: "#DDE8C7",
-    padding: 14,
-    marginBottom: 12,
-  },
-  contextStripPhone: {
-    padding: 12,
-    borderRadius: 16,
+    padding: Spacing.sm,
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.sm,
   },
   contextStripTitle: {
-    color: "#47642A",
-    fontSize: 12,
-    fontWeight: "800",
+    ...TypeScale.labelSm,
+    fontWeight: FontWeight.bold,
     textTransform: "uppercase",
-    marginBottom: 8,
+    marginBottom: Spacing.xs,
     letterSpacing: 0.8,
   },
   hero: {
-    backgroundColor: "#223814",
-    borderRadius: 28,
-    padding: 22,
-    marginBottom: 14,
-    shadowColor: "#18240F",
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 6,
+    backgroundColor: "#1A1A1A",
+    borderRadius: Radius["3xl"],
+    padding: Spacing.xl,
+    marginBottom: Spacing.md,
+    ...shadow("lg"),
   },
   heroTopRowPhone: {
-    marginBottom: 8,
+    marginBottom: Spacing.sm,
   },
   heroTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 12,
+    marginBottom: Spacing.md,
   },
   heroTextWrap: {
     flex: 1,
-    paddingRight: 12,
+    paddingRight: Spacing.md,
   },
   heroTextWrapPhone: {
     paddingRight: 0,
@@ -3350,686 +3299,587 @@ const styles = StyleSheet.create({
   heroIconBadge: {
     width: 52,
     height: 52,
-    borderRadius: 18,
+    borderRadius: Radius.lg,
     backgroundColor: "rgba(255,255,255,0.08)",
     alignItems: "center",
     justifyContent: "center",
   },
   kicker: {
-    color: "#C8E08E",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#9CA3AF",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
     letterSpacing: 1,
-    marginBottom: 8,
+    marginBottom: Spacing.sm,
   },
   title: {
     color: "#FFFFFF",
-    fontSize: 28,
-    lineHeight: 34,
-    fontWeight: "800",
-    marginBottom: 8,
+    ...TypeScale.displayMd,
+    marginBottom: Spacing.sm,
   },
   titlePhone: {
-    fontSize: 18,
-    lineHeight: 24,
-    marginBottom: 6,
+    ...TypeScale.titleLg,
+    marginBottom: Spacing.xs,
   },
   subtitle: {
-    color: "#E6F0CF",
-    fontSize: 14,
-    lineHeight: 21,
+    color: "rgba(255,255,255,0.7)",
+    ...TypeScale.bodyMd,
   },
   subtitlePhone: {
-    fontSize: 13,
-    lineHeight: 18,
+    ...TypeScale.bodySm,
   },
   profileMetaRow: {
     flexDirection: "row",
     flexWrap: "wrap",
   },
-  profileMetaRowPhone: {
-    marginTop: 2,
-  },
   profileMetaChip: {
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginRight: 8,
-    marginBottom: 8,
-  },
-  profileMetaChipPhone: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginRight: 6,
-    marginBottom: 6,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+    marginRight: Spacing.xs,
+    marginBottom: Spacing.xs,
   },
   profileMetaChipText: {
-    color: "#F4F8E8",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  profileMetaChipTextPhone: {
-    fontSize: 11,
-  },
-  chatCard: {
-    flex: 1,
-    backgroundColor: "#FAFCF5",
-    borderRadius: 30,
-    borderWidth: 1,
-    borderColor: "#DDE8C7",
-    padding: 14,
-  },
-  chatCardPhone: {
-    borderRadius: 24,
-    padding: 10,
-    paddingBottom: 8,
+    ...TypeScale.labelSm,
+    fontWeight: FontWeight.semibold,
   },
   messagesContainer: {
     flex: 1,
   },
-  messagesContainerPhone: {
-    minHeight: 180,
-  },
   messagesContent: {
-    paddingBottom: 18,
-  },
-  messagesContentPhone: {
-    paddingBottom: 26,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing["2xl"],
   },
   messageBubble: {
-    borderRadius: 22,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    marginBottom: 12,
-    maxWidth: "93%",
-  },
-  messageBubblePhone: {
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    maxWidth: "96%",
-  },
-  assistantBubblePhone: {
-    marginRight: 10,
-  },
-  userBubblePhone: {
-    marginLeft: 10,
+    borderRadius: 20,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    marginBottom: Spacing.sm,
+    maxWidth: "88%",
   },
   assistantBubble: {
     alignSelf: "flex-start",
-    backgroundColor: "#F0F5E3",
-    borderWidth: 1,
-    borderColor: "#DAE5C3",
+    borderTopLeftRadius: 4,
   },
   userBubble: {
     alignSelf: "flex-end",
-    backgroundColor: "#5C8C1F",
+    borderTopRightRadius: 4,
   },
   messageRoleLabel: {
-    fontSize: 11,
-    fontWeight: "800",
+    ...TypeScale.labelSm,
+    fontWeight: FontWeight.semibold,
     textTransform: "uppercase",
-    letterSpacing: 0.8,
-    color: "#7B8870",
-    marginBottom: 6,
+    letterSpacing: 0.6,
+    marginBottom: 3,
   },
   messageText: {
-    fontSize: 15,
+    ...TypeScale.bodyMd,
     lineHeight: 22,
   },
   assistantMessageText: {
-    color: "#2C3E1A",
+    color: "#1A1A1A",
   },
   userMessageText: {
     color: "#FFFFFF",
   },
+  typingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
   errorText: {
-    color: "#A63228",
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 4,
-    marginBottom: 10,
+    color: "#DC3545",
+    ...TypeScale.bodyMd,
+    marginTop: Spacing.xs,
+    marginBottom: Spacing.sm,
   },
   planCard: {
-    backgroundColor: "#FFFDF7",
-    borderRadius: 26,
+    backgroundColor: "#FFFBF5",
+    borderRadius: Radius["2xl"],
     borderWidth: 1,
-    borderColor: "#F0E1B8",
-    padding: 18,
-    marginTop: 6,
+    borderColor: "#E8E8E8",
+    padding: Spacing.lg,
+    marginTop: Spacing.xs,
   },
   planCardPhone: {
-    borderRadius: 20,
-    padding: 14,
+    borderRadius: Radius.xl,
+    padding: Spacing.md,
   },
   planHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 10,
+    marginBottom: Spacing.sm,
   },
   planHeaderPhone: {
-    marginBottom: 8,
+    marginBottom: Spacing.sm,
   },
   planHeaderTextWrap: {
     flex: 1,
-    paddingRight: 10,
+    paddingRight: Spacing.sm,
   },
   planHeaderIcon: {
     width: 46,
     height: 46,
-    borderRadius: 16,
-    backgroundColor: "#FFF2DA",
+    borderRadius: Radius.lg,
+    backgroundColor: "#FFF7ED",
     alignItems: "center",
     justifyContent: "center",
   },
   planTitle: {
-    color: "#533D18",
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: "800",
-    marginBottom: 6,
+    color: "#78350F",
+    ...TypeScale.headingLg,
+    fontWeight: FontWeight.extrabold,
+    marginBottom: Spacing.xs,
   },
   planTitlePhone: {
-    fontSize: 19,
-    lineHeight: 24,
+    ...TypeScale.titleLg,
   },
   planMeta: {
-    color: "#7E6740",
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: "700",
-    marginBottom: 4,
+    color: "#92400E",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.bold,
+    marginBottom: Spacing.xs,
   },
   planMetaSecondary: {
-    color: "#8E7D5C",
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "600",
+    color: "#B45309",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.semibold,
   },
   planSummary: {
-    color: "#4E442E",
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: 12,
+    color: "#78350F",
+    ...TypeScale.titleSm,
+    marginBottom: Spacing.md,
   },
   budgetNotePill: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFF2DA",
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 16,
+    backgroundColor: "#FFF7ED",
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginBottom: Spacing.lg,
   },
   budgetNoteText: {
-    color: "#8B5611",
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "700",
-    marginLeft: 8,
+    color: "#92400E",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.bold,
+    marginLeft: Spacing.sm,
     flex: 1,
   },
   section: {
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
   },
   sectionTitle: {
-    color: "#365A14",
-    fontSize: 16,
-    fontWeight: "800",
-    marginBottom: 10,
+    color: "#1A1A1A",
+    ...TypeScale.titleMd,
+    fontWeight: FontWeight.extrabold,
+    marginBottom: Spacing.sm,
   },
   optionCard: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 20,
-    padding: 14,
+    borderRadius: Radius.xl,
+    padding: Spacing.md,
     borderWidth: 1,
-    borderColor: "#E7ECD8",
-    marginBottom: 10,
+    borderColor: "#E8E8E8",
+    marginBottom: Spacing.sm,
   },
   optionTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 8,
+    marginBottom: Spacing.sm,
   },
   optionModeWrap: {
     flexDirection: "row",
     alignItems: "center",
     flex: 1,
-    paddingRight: 10,
+    paddingRight: Spacing.sm,
   },
   optionModeText: {
-    color: "#3B6D11",
-    fontSize: 13,
-    fontWeight: "800",
-    marginLeft: 8,
+    color: "#2D6A4F",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.extrabold,
+    marginLeft: Spacing.sm,
   },
   optionPrice: {
-    color: "#8B5611",
-    fontSize: 13,
-    fontWeight: "800",
+    color: "#92400E",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.extrabold,
   },
   optionProvider: {
-    color: "#273C17",
-    fontSize: 15,
-    fontWeight: "800",
-    marginBottom: 4,
+    color: "#1A1A1A",
+    ...TypeScale.titleSm,
+    fontWeight: FontWeight.extrabold,
+    marginBottom: Spacing.xs,
     flexShrink: 1,
     flexWrap: "wrap",
   },
   optionRoute: {
-    color: "#4E5F40",
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 4,
+    color: "#6B7280",
+    ...TypeScale.bodyMd,
+    marginBottom: Spacing.xs,
   },
   optionMeta: {
-    color: "#69785B",
-    fontSize: 13,
-    fontWeight: "700",
-    marginBottom: 6,
+    color: "#9CA3AF",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.bold,
+    marginBottom: Spacing.xs,
   },
   optionNote: {
-    color: "#5C694C",
-    fontSize: 13,
-    lineHeight: 19,
+    color: "#6B7280",
+    ...TypeScale.bodySm,
   },
   offerSourceText: {
-    color: "#7A6842",
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: "700",
-    marginBottom: 6,
+    color: "#B45309",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.bold,
+    marginBottom: Spacing.xs,
   },
   optionActionsRow: {
     flexDirection: "row",
-    marginTop: 12,
+    marginTop: Spacing.md,
   },
   optionHalfButton: {
     flex: 1,
   },
   optionLinkButton: {
-    backgroundColor: "#EEF4E5",
-    borderRadius: 12,
-    paddingVertical: 11,
+    backgroundColor: "#F5F5F5",
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.sm,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
-    marginRight: 8,
+    marginRight: Spacing.sm,
     borderWidth: 1,
-    borderColor: "#D8E3C2",
+    borderColor: "#E0E0E0",
   },
   optionLinkButtonText: {
-    color: "#365A14",
-    fontSize: 13,
-    fontWeight: "800",
-    marginLeft: 8,
+    color: "#1A1A1A",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.extrabold,
+    marginLeft: Spacing.sm,
   },
   optionActionButton: {
-    backgroundColor: "#365A14",
-    borderRadius: 12,
-    paddingVertical: 11,
+    backgroundColor: "#1A1A1A",
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.sm,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
   },
   optionActionButtonText: {
     color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "800",
-    marginLeft: 8,
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.extrabold,
+    marginLeft: Spacing.sm,
   },
   dayCard: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 20,
-    padding: 14,
+    borderRadius: Radius.xl,
+    padding: Spacing.md,
     borderWidth: 1,
-    borderColor: "#E7ECD8",
-    marginBottom: 10,
+    borderColor: "#E8E8E8",
+    marginBottom: Spacing.sm,
   },
   dayLabel: {
-    color: "#8B5611",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#92400E",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
     letterSpacing: 0.6,
-    marginBottom: 4,
+    marginBottom: Spacing.xs,
   },
   dayTitle: {
-    color: "#273C17",
-    fontSize: 16,
-    fontWeight: "800",
-    marginBottom: 6,
+    color: "#1A1A1A",
+    ...TypeScale.titleMd,
+    fontWeight: FontWeight.extrabold,
+    marginBottom: Spacing.xs,
   },
   dayItem: {
-    color: "#4E5F40",
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 4,
+    color: "#6B7280",
+    ...TypeScale.bodyMd,
+    marginBottom: Spacing.xs,
   },
   profileTipCard: {
-    backgroundColor: "#EEF4E5",
-    borderRadius: 20,
-    padding: 14,
-    marginBottom: 14,
+    backgroundColor: "#F5F5F5",
+    borderRadius: Radius.xl,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
   },
   profileTipTitle: {
-    color: "#365A14",
-    fontSize: 14,
-    fontWeight: "800",
-    marginBottom: 6,
+    color: "#1A1A1A",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
+    marginBottom: Spacing.xs,
   },
   profileTipText: {
-    color: "#405236",
-    fontSize: 14,
-    lineHeight: 20,
+    color: "#6B7280",
+    ...TypeScale.bodyMd,
   },
   saveSuccessText: {
-    color: "#3B6D11",
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: "700",
-    marginBottom: 10,
+    color: "#2D6A4F",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.bold,
+    marginBottom: Spacing.sm,
   },
   saveErrorText: {
-    color: "#A63228",
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: "700",
-    marginBottom: 10,
+    color: "#DC3545",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.bold,
+    marginBottom: Spacing.sm,
   },
   bookingSuccessText: {
-    color: "#1D6C4D",
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: "700",
-    marginBottom: 10,
+    color: "#2D6A4F",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.bold,
+    marginBottom: Spacing.sm,
   },
   bookingErrorText: {
-    color: "#A63228",
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: "700",
-    marginBottom: 10,
+    color: "#DC3545",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.bold,
+    marginBottom: Spacing.sm,
   },
   savePlanButton: {
-    backgroundColor: "#5C8C1F",
-    borderRadius: 14,
-    paddingVertical: 14,
+    backgroundColor: "#2D6A4F",
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.md,
     alignItems: "center",
   },
   savePlanButtonText: {
     color: "#FFFFFF",
-    fontWeight: "800",
+    fontWeight: FontWeight.extrabold,
   },
   savedPlanButton: {
-    backgroundColor: "#E4EFD0",
+    backgroundColor: "#E5E7EB",
     borderWidth: 1,
-    borderColor: "#C8DAA5",
+    borderColor: "#D1D5DB",
   },
   savedPlanButtonText: {
-    color: "#3B6D11",
+    color: "#2D6A4F",
   },
   bookNowButton: {
-    marginTop: 10,
-    backgroundColor: "#223814",
-    borderRadius: 14,
-    paddingVertical: 14,
+    marginTop: Spacing.sm,
+    backgroundColor: "#1A1A1A",
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.md,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
   },
   bookNowButtonText: {
     color: "#FFFFFF",
-    fontWeight: "800",
-    marginLeft: 8,
+    fontWeight: FontWeight.extrabold,
+    marginLeft: Spacing.sm,
   },
   quickRepliesSection: {
-    marginTop: 8,
-    marginBottom: 10,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.sm,
   },
   quickRepliesTitle: {
-    color: "#5D6C4C",
-    fontSize: 13,
-    fontWeight: "800",
-    marginBottom: 10,
+    ...TypeScale.labelSm,
+    fontWeight: FontWeight.semibold,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: Spacing.xs,
+  },
+  quickRepliesRow: {
+    paddingRight: Spacing.lg,
   },
   quickReplyChip: {
-    backgroundColor: "#EAF3DA",
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginRight: 10,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginRight: Spacing.sm,
     borderWidth: 1,
-    borderColor: "#D2E2B0",
-  },
-  quickRepliesWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-  },
-  quickReplyChipPhone: {
-    marginRight: 8,
-    marginBottom: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
   },
   quickReplyText: {
-    color: "#31521A",
-    fontSize: 13,
-    fontWeight: "700",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.semibold,
   },
   composer: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 24,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#DDE8C7",
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.sm,
+    borderTopWidth: 1,
   },
-  composerPhone: {
-    borderRadius: 20,
-    padding: 12,
+  composerInputRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    borderRadius: Radius["2xl"],
+    borderWidth: 1,
+    paddingLeft: Spacing.lg,
+    paddingRight: Spacing.xs,
+    paddingVertical: Spacing.xs,
   },
   input: {
-    minHeight: 74,
+    flex: 1,
+    minHeight: 40,
     maxHeight: 120,
-    color: "#29440F",
-    fontSize: 15,
-    lineHeight: 22,
+    ...TypeScale.bodyMd,
     textAlignVertical: "top",
-    marginBottom: 12,
+    paddingTop: Platform.OS === "ios" ? 10 : 8,
+    paddingBottom: Platform.OS === "ios" ? 10 : 8,
   },
-  inputPhone: {
-    minHeight: 54,
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 10,
-  },
-  actionsRow: {
-    flexDirection: "row",
-  },
-  actionsRowStacked: {
-    flexDirection: "column",
-  },
-  secondaryButton: {
-    flex: 1,
-    backgroundColor: "#FFF2DA",
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: "center",
-    marginRight: 8,
-  },
-  secondaryButtonStacked: {
-    marginRight: 0,
-    marginBottom: 8,
-  },
-  secondaryButtonText: {
-    color: "#8B5611",
-    fontWeight: "800",
-  },
-  primaryButton: {
-    flex: 1,
-    backgroundColor: "#5C8C1F",
-    paddingVertical: 14,
-    borderRadius: 16,
+  sendButton: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.full,
     alignItems: "center",
     justifyContent: "center",
+    marginLeft: Spacing.sm,
+  },
+  resetButton: {
     flexDirection: "row",
-    marginLeft: 8,
+    alignItems: "center",
+    alignSelf: "center",
+    paddingVertical: Spacing.sm,
   },
-  primaryButtonStacked: {
-    marginLeft: 0,
-  },
-  primaryButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "800",
-    marginLeft: 8,
+  resetButtonText: {
+    ...TypeScale.labelSm,
+    fontWeight: FontWeight.semibold,
+    marginLeft: Spacing.xs,
   },
   bookingModalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(18, 27, 10, 0.54)",
+    backgroundColor: "rgba(0,0,0,0.5)",
     justifyContent: "center",
-    padding: 18,
+    padding: Spacing.lg,
   },
   bookingModalCard: {
     width: "100%",
     maxWidth: 760,
     alignSelf: "center",
     maxHeight: "92%",
-    backgroundColor: "#FAFCF5",
-    borderRadius: 28,
-    padding: 18,
+    backgroundColor: "#FFFFFF",
+    borderRadius: Radius["3xl"],
+    padding: Spacing.lg,
     borderWidth: 1,
-    borderColor: "#DDE8C7",
+    borderColor: "#E8E8E8",
   },
   bookingModalContent: {
-    paddingBottom: 6,
+    paddingBottom: Spacing.xs,
   },
   bookingModalHeader: {
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
   },
   bookingModalHeaderText: {
     flex: 1,
-    paddingRight: 12,
+    paddingRight: Spacing.md,
   },
   bookingModalKicker: {
-    color: "#6A8F2A",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#2D6A4F",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
     letterSpacing: 1,
-    marginBottom: 8,
+    marginBottom: Spacing.sm,
   },
   bookingModalTitle: {
-    color: "#29440F",
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: "800",
-    marginBottom: 8,
+    color: "#1A1A1A",
+    ...TypeScale.headingLg,
+    fontWeight: FontWeight.extrabold,
+    marginBottom: Spacing.sm,
   },
   bookingModalSubtitle: {
-    color: "#5C694C",
-    fontSize: 14,
-    lineHeight: 20,
+    color: "#6B7280",
+    ...TypeScale.bodyMd,
   },
   bookingCloseButton: {
     width: 36,
     height: 36,
-    borderRadius: 12,
-    backgroundColor: "#EEF4E5",
+    borderRadius: Radius.md,
+    backgroundColor: "#F5F5F5",
     alignItems: "center",
     justifyContent: "center",
   },
   bookingSection: {
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
   },
   bookingSectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 10,
+    marginBottom: Spacing.sm,
   },
   bookingSectionTitle: {
-    color: "#365A14",
-    fontSize: 15,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.titleSm,
+    fontWeight: FontWeight.extrabold,
   },
   bookingSkipChip: {
-    backgroundColor: "#EEF4E5",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    backgroundColor: "#F5F5F5",
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
     borderWidth: 1,
-    borderColor: "#D8E3C2",
+    borderColor: "#E0E0E0",
   },
   bookingSkipChipSelected: {
-    backgroundColor: "#365A14",
-    borderColor: "#365A14",
+    backgroundColor: "#1A1A1A",
+    borderColor: "#1A1A1A",
   },
   bookingSkipChipText: {
-    color: "#365A14",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
   },
   bookingSkipChipTextSelected: {
     color: "#FFFFFF",
   },
   bookingOptionCard: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 18,
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: "#DDE8C7",
-    padding: 14,
-    marginBottom: 10,
+    borderColor: "#E8E8E8",
+    padding: Spacing.md,
+    marginBottom: Spacing.sm,
   },
   bookingOptionCardSelected: {
-    borderColor: "#5C8C1F",
-    backgroundColor: "#F0F7E3",
+    borderColor: "#2D6A4F",
+    backgroundColor: "#F5F5F5",
   },
   bookingOptionTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 6,
+    marginBottom: Spacing.xs,
   },
   bookingOptionTitle: {
-    color: "#29440F",
-    fontSize: 15,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.titleSm,
+    fontWeight: FontWeight.extrabold,
     flex: 1,
-    paddingRight: 10,
+    paddingRight: Spacing.sm,
   },
   bookingOptionPrice: {
-    color: "#8B5611",
-    fontSize: 14,
-    fontWeight: "800",
+    color: "#92400E",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
   },
   bookingOptionMeta: {
-    color: "#516244",
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 4,
+    color: "#6B7280",
+    ...TypeScale.bodySm,
+    marginBottom: Spacing.xs,
   },
   bookingOptionNote: {
-    color: "#627254",
-    fontSize: 13,
-    lineHeight: 19,
+    color: "#9CA3AF",
+    ...TypeScale.bodySm,
   },
   bookingInput: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 16,
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: "#DDE8C7",
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    color: "#29440F",
-    fontSize: 14,
-    marginBottom: 10,
+    borderColor: "#E8E8E8",
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+    color: "#1A1A1A",
+    ...TypeScale.bodyMd,
+    marginBottom: Spacing.sm,
   },
   bookingNoteInput: {
     minHeight: 86,
@@ -4040,209 +3890,195 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
   },
   paymentMethodChip: {
-    backgroundColor: "#EEF4E5",
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginRight: 8,
-    marginBottom: 8,
+    backgroundColor: "#F5F5F5",
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginRight: Spacing.sm,
+    marginBottom: Spacing.sm,
     borderWidth: 1,
-    borderColor: "#D8E3C2",
+    borderColor: "#E0E0E0",
   },
   paymentMethodChipSelected: {
-    backgroundColor: "#5C8C1F",
-    borderColor: "#5C8C1F",
+    backgroundColor: "#2D6A4F",
+    borderColor: "#2D6A4F",
   },
   paymentMethodChipText: {
-    color: "#365A14",
-    fontSize: 13,
-    fontWeight: "700",
+    color: "#1A1A1A",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.bold,
   },
   paymentMethodChipTextSelected: {
     color: "#FFFFFF",
   },
   bookingSummaryCard: {
-    backgroundColor: "#FFF8E7",
-    borderRadius: 20,
-    padding: 16,
+    backgroundColor: "#FFFBEB",
+    borderRadius: Radius.xl,
+    padding: Spacing.lg,
     borderWidth: 1,
-    borderColor: "#F1D7A5",
-    marginBottom: 16,
+    borderColor: "#FCD34D",
+    marginBottom: Spacing.lg,
   },
   bookingSummaryTitle: {
-    color: "#8B5611",
-    fontSize: 15,
-    fontWeight: "800",
-    marginBottom: 8,
+    color: "#92400E",
+    ...TypeScale.titleSm,
+    fontWeight: FontWeight.extrabold,
+    marginBottom: Spacing.sm,
   },
   bookingSummaryLine: {
-    color: "#6A5731",
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 4,
+    color: "#92400E",
+    ...TypeScale.bodyMd,
+    marginBottom: Spacing.xs,
   },
   bookingSummaryTotal: {
-    color: "#4E3A19",
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: "800",
-    marginTop: 8,
-    marginBottom: 6,
+    color: "#78350F",
+    ...TypeScale.headingLg,
+    fontWeight: FontWeight.extrabold,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.xs,
   },
   bookingSummaryHint: {
-    color: "#7A6842",
-    fontSize: 12,
-    lineHeight: 18,
+    color: "#B45309",
+    ...TypeScale.labelMd,
   },
   checkoutProcessingCard: {
-    backgroundColor: "#F7FBEF",
-    borderRadius: 24,
+    backgroundColor: "#F8F8F8",
+    borderRadius: Radius["2xl"],
     borderWidth: 1,
-    borderColor: "#DDE8C7",
-    padding: 20,
+    borderColor: "#E8E8E8",
+    padding: Spacing.xl,
   },
   checkoutProcessingIcon: {
     width: 72,
     height: 72,
-    borderRadius: 24,
-    backgroundColor: "#E7F0D7",
+    borderRadius: Radius["2xl"],
+    backgroundColor: "#E5E7EB",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
     alignSelf: "center",
   },
   checkoutProcessingTitle: {
-    color: "#223814",
-    fontSize: 22,
-    lineHeight: 28,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.headingMd,
+    fontWeight: FontWeight.extrabold,
     textAlign: "center",
-    marginBottom: 8,
+    marginBottom: Spacing.sm,
   },
   checkoutProcessingSubtitle: {
-    color: "#5D6D50",
-    fontSize: 14,
-    lineHeight: 20,
+    color: "#6B7280",
+    ...TypeScale.bodyMd,
     textAlign: "center",
-    marginBottom: 18,
+    marginBottom: Spacing.lg,
   },
   checkoutProgressTrack: {
-    height: 12,
-    borderRadius: 999,
-    backgroundColor: "#E8F0DB",
+    height: Spacing.md,
+    borderRadius: Radius.full,
+    backgroundColor: "#E5E7EB",
     overflow: "hidden",
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
   },
   checkoutProgressFill: {
     height: "100%",
-    borderRadius: 999,
-    backgroundColor: "#5C8C1F",
+    borderRadius: Radius.full,
+    backgroundColor: "#2D6A4F",
   },
   checkoutProcessingSteps: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 18,
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: "#DDE8C7",
-    padding: 14,
-    marginBottom: 16,
+    borderColor: "#E8E8E8",
+    padding: Spacing.md,
+    marginBottom: Spacing.lg,
   },
   checkoutProcessingStep: {
-    color: "#43563A",
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 6,
+    color: "#6B7280",
+    ...TypeScale.bodyMd,
+    marginBottom: Spacing.xs,
   },
   checkoutSuccessCard: {
-    backgroundColor: "#F7FBEF",
-    borderRadius: 24,
+    backgroundColor: "#F8F8F8",
+    borderRadius: Radius["2xl"],
     borderWidth: 1,
-    borderColor: "#DDE8C7",
-    padding: 20,
+    borderColor: "#E8E8E8",
+    padding: Spacing.xl,
     alignItems: "center",
   },
   checkoutSuccessBadge: {
     width: 74,
     height: 74,
-    borderRadius: 24,
-    backgroundColor: "#5C8C1F",
+    borderRadius: Radius["2xl"],
+    backgroundColor: "#2D6A4F",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
   },
   checkoutSuccessTitle: {
-    color: "#223814",
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.headingLg,
+    fontWeight: FontWeight.extrabold,
     textAlign: "center",
-    marginBottom: 8,
+    marginBottom: Spacing.sm,
   },
   checkoutSuccessSubtitle: {
-    color: "#5D6D50",
-    fontSize: 14,
-    lineHeight: 20,
+    color: "#6B7280",
+    ...TypeScale.bodyMd,
     textAlign: "center",
-    marginBottom: 18,
+    marginBottom: Spacing.lg,
   },
   checkoutReceiptCard: {
     width: "100%",
-    backgroundColor: "#FFF8E7",
-    borderRadius: 20,
-    padding: 16,
+    backgroundColor: "#FFFBEB",
+    borderRadius: Radius.xl,
+    padding: Spacing.lg,
     borderWidth: 1,
-    borderColor: "#F1D7A5",
-    marginBottom: 16,
+    borderColor: "#FCD34D",
+    marginBottom: Spacing.lg,
   },
   checkoutReceiptKicker: {
-    color: "#8B5611",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#92400E",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
     letterSpacing: 1,
-    marginBottom: 10,
+    marginBottom: Spacing.sm,
   },
   checkoutReceiptLine: {
-    color: "#654F29",
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 6,
+    color: "#78350F",
+    ...TypeScale.bodyMd,
+    marginBottom: Spacing.xs,
   },
   checkoutReceiptTotal: {
-    color: "#3D2E15",
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: "800",
-    marginTop: 6,
-    marginBottom: 8,
+    color: "#78350F",
+    ...TypeScale.headingLg,
+    fontWeight: FontWeight.extrabold,
+    marginTop: Spacing.xs,
+    marginBottom: Spacing.sm,
   },
   checkoutReceiptRef: {
-    color: "#7B6844",
-    fontSize: 12,
-    lineHeight: 18,
+    color: "#B45309",
+    ...TypeScale.labelMd,
   },
   bookingPayButton: {
-    backgroundColor: "#223814",
-    borderRadius: 16,
-    paddingVertical: 16,
+    backgroundColor: "#1A1A1A",
+    borderRadius: Radius.lg,
+    paddingVertical: Spacing.lg,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
   },
   bookingPayButtonText: {
     color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "800",
-    marginLeft: 8,
+    ...TypeScale.titleSm,
+    fontWeight: FontWeight.extrabold,
+    marginLeft: Spacing.sm,
   },
   disabledButton: {
     opacity: 0.55,
   },
-  keyboardWrap: {
-    flex: 1,
-  },
   chatListItemPhoneMenu: {
     width: "100%",
-    padding: 10,
+    padding: Spacing.sm,
   },
   phoneDrawerOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -4251,119 +4087,108 @@ const styles = StyleSheet.create({
   },
   phoneDrawerBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(18, 27, 10, 0.34)",
+    backgroundColor: "rgba(0,0,0,0.3)",
   },
   phoneDrawerPanel: {
     position: "absolute",
     top: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: "#FAFCF5",
-    borderTopRightRadius: 24,
-    borderBottomRightRadius: 24,
+    backgroundColor: "#FFFFFF",
+    borderTopRightRadius: Radius["2xl"],
+    borderBottomRightRadius: Radius["2xl"],
     borderRightWidth: 1,
-    borderColor: "#DDE8C7",
-    paddingHorizontal: 14,
-    shadowColor: "#121B0A",
-    shadowOpacity: 0.18,
-    shadowRadius: 24,
-    shadowOffset: { width: 8, height: 0 },
+    borderColor: "#E8E8E8",
+    paddingHorizontal: Spacing.md,
+    ...shadow("xl"),
   },
   phoneDrawerTopRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 14,
+    marginBottom: Spacing.md,
   },
   phoneDrawerBrand: {
-    color: "#29440F",
-    fontSize: 22,
-    fontWeight: "900",
+    color: "#1A1A1A",
+    ...TypeScale.headingMd,
+    fontWeight: FontWeight.black,
   },
   phoneDrawerCloseButton: {
     width: 36,
     height: 36,
-    borderRadius: 12,
+    borderRadius: Radius.md,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F3F8E8",
+    backgroundColor: "#F5F5F5",
     borderWidth: 1,
-    borderColor: "#DDE8C7",
+    borderColor: "#E8E8E8",
   },
   phoneDrawerSearchWrap: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F5F7EF",
-    borderRadius: 16,
+    backgroundColor: "#F5F5F5",
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: "#DDE8C7",
-    paddingHorizontal: 12,
-    marginBottom: 14,
+    borderColor: "#E8E8E8",
+    paddingHorizontal: Spacing.md,
+    marginBottom: Spacing.md,
   },
   phoneDrawerSearchInput: {
     flex: 1,
-    minHeight: 48,
-    marginLeft: 8,
-    color: "#29440F",
+    minHeight: Layout.touchTarget,
+    marginLeft: Spacing.sm,
+    color: "#1A1A1A",
   },
   phoneDrawerList: {
     flex: 1,
   },
   phoneDrawerListContent: {
-    paddingBottom: 10,
+    paddingBottom: Spacing.sm,
   },
   emptyChatSearchState: {
-    paddingVertical: 16,
-    paddingHorizontal: 12,
-    borderRadius: 18,
-    backgroundColor: "#F3F8E8",
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.lg,
+    backgroundColor: "#F5F5F5",
     borderWidth: 1,
-    borderColor: "#DDE8C7",
+    borderColor: "#E8E8E8",
   },
   emptyChatSearchText: {
-    color: "#6F7D63",
-    fontSize: 14,
+    color: "#9CA3AF",
+    ...TypeScale.bodyMd,
     textAlign: "center",
   },
   scrollToBottomButton: {
     position: "absolute",
-    right: 18,
-    bottom: 148,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#5C8C1F",
+    right: Spacing.lg,
+    bottom: Spacing.lg,
+    width: 40,
+    height: 40,
+    borderRadius: Radius.full,
+    backgroundColor: "#2D6A4F",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#121B0A",
-    shadowOpacity: 0.16,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
-  },
-  scrollToBottomButtonPhone: {
-    right: 14,
-    bottom: 144,
+    ...shadow("md"),
   },
   messageTextBold: {
-    fontWeight: "800",
+    fontWeight: FontWeight.extrabold,
   },
   messageParagraph: {
-    marginBottom: 6,
+    marginBottom: Spacing.xs,
   },
   messageBulletRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    marginBottom: 6,
+    marginBottom: Spacing.xs,
   },
   messageBulletMark: {
-    width: 16,
-    fontWeight: "800",
+    width: Spacing.lg,
+    fontWeight: FontWeight.extrabold,
   },
   messageBulletText: {
     flex: 1,
   },
   messageSpacer: {
-    height: 8,
+    height: Spacing.sm,
   },
 });

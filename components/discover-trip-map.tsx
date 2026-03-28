@@ -40,13 +40,13 @@ export default function DiscoverTripMap({
 
 const styles = StyleSheet.create({
   mapImage: {
-    backgroundColor: "#DDE8C7",
+    backgroundColor: "#E8E8E8",
     borderRadius: 20,
     width: "100%",
   },
   fallback: {
     alignItems: "center",
-    backgroundColor: "#EEF4E5",
+    backgroundColor: "#F5F5F5",
     borderRadius: 20,
     justifyContent: "center",
     padding: 16,

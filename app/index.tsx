@@ -76,7 +76,7 @@ export default function EntryScreen() {
         <View style={styles.loadingCard}>
           <Text style={styles.loadingTitle}>CareTrip</Text>
           <Text style={styles.loadingSubtitle}>Preparing your journey</Text>
-          <ActivityIndicator size="large" color="#639922" style={styles.spinner} />
+          <ActivityIndicator size="large" color="#2D6A4F" style={styles.spinner} />
         </View>
       </View>
     </SafeAreaView>
@@ -86,7 +86,7 @@ export default function EntryScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#EAF3DE",
+    backgroundColor: "#F0F0F0",
     justifyContent: "center",
     alignItems: "center",
     padding: 20,
@@ -125,7 +125,7 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   loadingTitle: {
-    color: "#29440F",
+    color: "#1A1A1A",
     fontSize: 28,
     fontWeight: "900",
     marginBottom: 4,

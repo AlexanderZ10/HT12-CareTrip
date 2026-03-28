@@ -90,10 +90,10 @@ const styles = StyleSheet.create({
     maxWidth: 420,
     borderRadius: 24,
     padding: 20,
-    backgroundColor: "#FAFCF5",
+    backgroundColor: "#FFFFFF",
   },
   title: {
-    color: "#29440F",
+    color: "#1A1A1A",
     fontSize: 22,
     fontWeight: "800",
     marginBottom: 8,
@@ -116,10 +116,10 @@ const styles = StyleSheet.create({
   },
   cancelButton: {
     marginRight: 10,
-    backgroundColor: "#EEF4E5",
+    backgroundColor: "#F5F5F5",
   },
   confirmButton: {
-    backgroundColor: "#5C8C1F",
+    backgroundColor: "#2D6A4F",
   },
   deleteButton: {
     backgroundColor: "#A63C2F",

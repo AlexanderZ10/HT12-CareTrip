@@ -4,6 +4,8 @@ import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,9 +13,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { auth, db } from "../firebase";
+import { DismissKeyboard } from "../components/dismiss-keyboard";
 import { getFirestoreUserMessage } from "../utils/firestore-errors";
 import React from "react";
 
@@ -92,6 +95,7 @@ function ChoiceChip({ label, selected, onPress }: ChoiceChipProps) {
 
 export default function OnboardingScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ returnTo?: string }>();
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [loading, setLoading] = useState(true);
@@ -278,16 +282,24 @@ export default function OnboardingScreen() {
   if (loading || user === undefined || user === null) {
     return (
       <SafeAreaView style={styles.loader} edges={["top", "bottom", "left", "right"]}>
-        <ActivityIndicator size="large" color="#639922" />
+        <ActivityIndicator size="large" color="#2D6A4F" />
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.screen} edges={["top", "bottom", "left", "right"]}>
+      <DismissKeyboard>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior="padding"
+        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 8 : 0}
+      >
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
         <View style={styles.hero}>
           <Text style={styles.kicker}>Нека те опознаем</Text>
@@ -411,6 +423,8 @@ export default function OnboardingScreen() {
           </Text>
         </TouchableOpacity>
       </ScrollView>
+      </KeyboardAvoidingView>
+      </DismissKeyboard>
     </SafeAreaView>
   );
 }
@@ -418,7 +432,7 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#EAF3DE",
+    backgroundColor: "#F0F0F0",
   },
   content: {
     padding: 20,
@@ -426,18 +440,18 @@ const styles = StyleSheet.create({
   },
   loader: {
     flex: 1,
-    backgroundColor: "#EAF3DE",
+    backgroundColor: "#F0F0F0",
     alignItems: "center",
     justifyContent: "center",
   },
   hero: {
-    backgroundColor: "#2F4F14",
+    backgroundColor: "#2D2D2D",
     borderRadius: 24,
     padding: 24,
     marginBottom: 18,
   },
   kicker: {
-    color: "#CFE7A4",
+    color: "#9CA3AF",
     fontSize: 13,
     fontWeight: "700",
     letterSpacing: 0.8,
@@ -452,7 +466,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   subtitle: {
-    color: "#EAF3DE",
+    color: "#F0F0F0",
     fontSize: 15,
     lineHeight: 22,
   },
@@ -471,13 +485,13 @@ const styles = StyleSheet.create({
     fontSize: 19,
     lineHeight: 26,
     fontWeight: "700",
-    color: "#29440F",
+    color: "#1A1A1A",
     marginBottom: 6,
   },
   questionSubtitle: {
     fontSize: 14,
     lineHeight: 20,
-    color: "#5F6E53",
+    color: "#6B7280",
     marginBottom: 14,
   },
   chipWrap: {
@@ -485,18 +499,18 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
   },
   chip: {
-    backgroundColor: "#F6F8EE",
+    backgroundColor: "#F8F8F8",
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginRight: 10,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#D8E3C2",
+    borderColor: "#E0E0E0",
   },
   chipSelected: {
-    backgroundColor: "#639922",
-    borderColor: "#639922",
+    backgroundColor: "#2D6A4F",
+    borderColor: "#2D6A4F",
   },
   chipText: {
     color: "#39521C",
@@ -517,11 +531,11 @@ const styles = StyleSheet.create({
     minHeight: 92,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#D8E3C2",
-    backgroundColor: "#F9FBF4",
+    borderColor: "#E0E0E0",
+    backgroundColor: "#F5F5F5",
     paddingHorizontal: 14,
     paddingVertical: 12,
-    color: "#29440F",
+    color: "#1A1A1A",
     fontSize: 14,
     lineHeight: 20,
   },
@@ -537,7 +551,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   primaryButton: {
-    backgroundColor: "#639922",
+    backgroundColor: "#2D6A4F",
     borderRadius: 16,
     paddingVertical: 17,
     alignItems: "center",

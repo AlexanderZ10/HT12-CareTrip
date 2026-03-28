@@ -5,7 +5,9 @@ import { doc, onSnapshot } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,10 +16,19 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAppTheme } from "../../components/app-theme-provider";
+import { DismissKeyboard } from "../../components/dismiss-keyboard";
 import { ConfirmDialog } from "../../components/confirm-dialog";
+import {
+  FontWeight,
+  Layout,
+  Radius,
+  Spacing,
+  TypeScale,
+  shadow,
+} from "../../constants/design-system";
 import { auth, db } from "../../firebase";
 import { parseBookingOrders, type BookingOrder } from "../../utils/bookings";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
@@ -73,6 +84,7 @@ function buildTripPreviewPoints(trip: SavedTrip) {
 export default function SavedTabScreen() {
   const router = useRouter();
   const { colors, isDark } = useAppTheme();
+  const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const isPhoneLayout = width < 768;
   const [user, setUser] = useState<User | null>(null);
@@ -191,7 +203,7 @@ export default function SavedTabScreen() {
         style={[styles.loader, { backgroundColor: colors.screenSoft }]}
         edges={["top", "left", "right"]}
       >
-        <ActivityIndicator size="large" color="#639922" />
+        <ActivityIndicator size="large" color="#2D6A4F" />
       </SafeAreaView>
     );
   }
@@ -201,9 +213,17 @@ export default function SavedTabScreen() {
       style={[styles.screen, { backgroundColor: colors.screenSoft }]}
       edges={["top", "left", "right"]}
     >
+      <DismissKeyboard>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior="padding"
+        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 8 : 0}
+      >
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
         <View style={[styles.hero, { backgroundColor: colors.heroAlt }]}>
           <Text style={[styles.kicker, { color: isDark ? "#B7E07C" : "#D6E8AE" }]}>Saved</Text>
@@ -214,7 +234,7 @@ export default function SavedTabScreen() {
         </View>
 
         <View style={styles.searchShell}>
-          <MaterialIcons color="#7B8A6D" name="search" size={22} />
+          <MaterialIcons color="#9CA3AF" name="search" size={22} />
           <TextInput
             style={styles.searchInput}
             placeholder="Search Trips"
@@ -408,9 +428,9 @@ export default function SavedTabScreen() {
                 disabled={isDeleting}
               >
                 {isDeleting ? (
-                  <ActivityIndicator size="small" color="#A63228" />
+                  <ActivityIndicator size="small" color="#DC3545" />
                 ) : (
-                  <MaterialIcons name="delete-outline" size={20} color="#A63228" />
+                  <MaterialIcons name="delete-outline" size={20} color="#DC3545" />
                 )}
               </TouchableOpacity>
             </View>
@@ -467,6 +487,8 @@ export default function SavedTabScreen() {
         );
         })}
       </ScrollView>
+      </KeyboardAvoidingView>
+      </DismissKeyboard>
 
       <Modal
         visible={!!selectedTrip}
@@ -486,7 +508,7 @@ export default function SavedTabScreen() {
                 onPress={() => setSelectedTrip(null)}
                 activeOpacity={0.9}
               >
-                <MaterialIcons name="close" size={20} color="#29440F" />
+                <MaterialIcons name="close" size={20} color="#1A1A1A" />
               </TouchableOpacity>
             </View>
 
@@ -557,417 +579,393 @@ export default function SavedTabScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#EAF3DE",
+    backgroundColor: "#F0F0F0",
   },
   content: {
-    padding: 20,
-    paddingBottom: 32,
+    padding: Spacing.xl,
+    paddingBottom: Spacing["3xl"],
   },
   loader: {
     flex: 1,
-    backgroundColor: "#EAF3DE",
+    backgroundColor: "#F0F0F0",
     alignItems: "center",
     justifyContent: "center",
   },
   hero: {
-    backgroundColor: "#2F4F14",
-    borderRadius: 28,
-    padding: 24,
-    marginBottom: 18,
+    backgroundColor: "#2D2D2D",
+    borderRadius: Radius["3xl"],
+    padding: Spacing["2xl"],
+    marginBottom: Spacing.lg,
   },
   searchShell: {
     alignItems: "center",
-    backgroundColor: "#F8FBF2",
-    borderColor: "#D8E3C2",
-    borderRadius: 18,
+    backgroundColor: "#F5F5F5",
+    borderColor: "#E0E0E0",
+    borderRadius: Radius.lg,
     borderWidth: 1,
     flexDirection: "row",
-    marginBottom: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    marginBottom: Spacing.lg,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
   },
   searchInput: {
-    color: "#29440F",
+    color: "#1A1A1A",
     flex: 1,
-    fontSize: 15,
-    marginLeft: 10,
+    ...TypeScale.titleSm,
+    marginLeft: Spacing.sm,
   },
   kicker: {
     color: "#D6E8AE",
-    fontSize: 13,
-    fontWeight: "700",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.bold,
     textTransform: "uppercase",
     letterSpacing: 0.8,
-    marginBottom: 10,
+    marginBottom: Spacing.sm,
   },
   title: {
     color: "#FFFFFF",
-    fontSize: 28,
-    lineHeight: 36,
-    fontWeight: "800",
-    marginBottom: 10,
+    ...TypeScale.displayMd,
+    marginBottom: Spacing.sm,
   },
   subtitle: {
-    color: "#EAF3DE",
-    fontSize: 15,
-    lineHeight: 22,
+    color: "#F0F0F0",
+    ...TypeScale.titleSm,
   },
   errorCard: {
     backgroundColor: "#FFF1EF",
-    borderRadius: 22,
-    padding: 18,
+    borderRadius: Radius.xl,
+    padding: Spacing.lg,
     borderWidth: 1,
     borderColor: "#F0B6AE",
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
   },
   errorTitle: {
-    color: "#A63228",
-    fontSize: 17,
-    fontWeight: "800",
-    marginBottom: 6,
+    color: "#DC3545",
+    ...TypeScale.titleLg,
+    fontWeight: FontWeight.extrabold,
+    marginBottom: Spacing.xs,
   },
   errorText: {
-    color: "#8A3D35",
-    fontSize: 14,
-    lineHeight: 20,
+    color: "#991B1B",
+    ...TypeScale.bodyMd,
   },
   emptyCard: {
-    backgroundColor: "#F6F8EE",
-    borderRadius: 24,
-    padding: 24,
+    backgroundColor: "#F8F8F8",
+    borderRadius: Radius["2xl"],
+    padding: Spacing["2xl"],
     alignItems: "center",
   },
   emptyTitle: {
-    color: "#29440F",
-    fontSize: 22,
-    fontWeight: "800",
-    marginBottom: 10,
+    color: "#1A1A1A",
+    ...TypeScale.headingMd,
+    marginBottom: Spacing.sm,
     textAlign: "center",
   },
   emptyText: {
-    color: "#5F6E53",
-    fontSize: 15,
-    lineHeight: 22,
+    color: "#6B7280",
+    ...TypeScale.titleSm,
     textAlign: "center",
   },
   filterSection: {
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
   },
   filterLabel: {
-    color: "#47642A",
-    fontSize: 13,
-    fontWeight: "800",
+    color: "#6B7280",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
-    marginBottom: 8,
+    marginBottom: Spacing.sm,
   },
   filterButton: {
-    backgroundColor: "#FAFCF5",
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    backgroundColor: "#FFFFFF",
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
     borderWidth: 1,
-    borderColor: "#DDE8C7",
+    borderColor: "#E8E8E8",
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
   filterButtonText: {
-    color: "#29440F",
-    fontSize: 15,
-    fontWeight: "700",
+    color: "#1A1A1A",
+    ...TypeScale.titleSm,
+    fontWeight: FontWeight.bold,
   },
   filterButtonArrow: {
-    color: "#5A6E41",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#6B7280",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
   },
   filterMenu: {
-    marginTop: 8,
-    backgroundColor: "#FAFCF5",
-    borderRadius: 18,
+    marginTop: Spacing.sm,
+    backgroundColor: "#FFFFFF",
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: "#DDE8C7",
-    padding: 8,
+    borderColor: "#E8E8E8",
+    padding: Spacing.sm,
   },
   filterOption: {
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
   },
   filterOptionActive: {
-    backgroundColor: "#EAF3DE",
+    backgroundColor: "#F0F0F0",
   },
   filterOptionText: {
-    color: "#365A14",
-    fontSize: 14,
-    fontWeight: "700",
+    color: "#1A1A1A",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.bold,
   },
   filterOptionTextActive: {
-    color: "#29440F",
+    color: "#1A1A1A",
   },
   bookingsSection: {
-    marginBottom: 18,
+    marginBottom: Spacing.lg,
   },
   bookingsSectionTitle: {
-    color: "#29440F",
-    fontSize: 22,
-    fontWeight: "800",
-    marginBottom: 6,
+    color: "#1A1A1A",
+    ...TypeScale.headingMd,
+    marginBottom: Spacing.xs,
   },
   bookingsSectionSubtitle: {
-    color: "#5F6E53",
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 12,
+    color: "#6B7280",
+    ...TypeScale.bodyMd,
+    marginBottom: Spacing.md,
   },
   bookingCard: {
-    backgroundColor: "#FFF8E7",
-    borderRadius: 24,
-    padding: 20,
-    marginBottom: 14,
+    backgroundColor: "#FFFBEB",
+    borderRadius: Radius["2xl"],
+    padding: Spacing.xl,
+    marginBottom: Spacing.md,
     borderWidth: 1,
-    borderColor: "#F1D7A5",
+    borderColor: "#FCD34D",
   },
   bookingTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: Spacing.md,
   },
   bookingPaidBadge: {
     backgroundColor: "#DFF1D0",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
   bookingPaidBadgeText: {
     color: "#1D6C4D",
-    fontSize: 12,
-    fontWeight: "800",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
   },
   bookingTotal: {
     color: "#4E3A19",
-    fontSize: 22,
-    fontWeight: "800",
-    marginBottom: 6,
+    ...TypeScale.headingMd,
+    marginBottom: Spacing.xs,
   },
   bookingPaymentMeta: {
-    color: "#8B5611",
-    fontSize: 13,
-    fontWeight: "700",
-    marginBottom: 10,
+    color: "#92400E",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.bold,
+    marginBottom: Spacing.sm,
   },
   bookingDetailBlock: {
-    marginBottom: 10,
+    marginBottom: Spacing.sm,
   },
   bookingDetailTitle: {
-    color: "#47642A",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#6B7280",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
-    marginBottom: 4,
+    marginBottom: Spacing.xs,
   },
   bookingDetailText: {
-    color: "#5A6E41",
-    fontSize: 14,
-    lineHeight: 20,
+    color: "#6B7280",
+    ...TypeScale.bodyMd,
   },
   bookingContactText: {
-    color: "#627254",
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 4,
+    color: "#9CA3AF",
+    ...TypeScale.bodySm,
+    marginTop: Spacing.xs,
   },
   tripCard: {
-    backgroundColor: "#F6F8EE",
-    borderRadius: 24,
-    padding: 20,
-    marginBottom: 16,
-    shadowColor: "#1E2A12",
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
+    backgroundColor: "#F8F8F8",
+    borderRadius: Radius["2xl"],
+    padding: Spacing.xl,
+    marginBottom: Spacing.lg,
+    ...shadow("md"),
   },
   cardTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
-    gap: 10,
+    marginBottom: Spacing.md,
+    gap: Spacing.sm,
   },
   cardTopRowRight: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: Spacing.sm,
   },
   sourceBadge: {
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
   discoverBadge: {
-    backgroundColor: "#FFF2DA",
+    backgroundColor: "#FFF7ED",
   },
   homeBadge: {
-    backgroundColor: "#E4EFD0",
+    backgroundColor: "#E5E7EB",
   },
   sourceBadgeText: {
-    fontSize: 12,
-    fontWeight: "800",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
   discoverBadgeText: {
-    color: "#8B5611",
+    color: "#92400E",
   },
   homeBadgeText: {
-    color: "#3B6D11",
+    color: "#2D6A4F",
   },
   dateText: {
     color: "#6B7A5D",
-    fontSize: 12,
-    fontWeight: "600",
+    ...TypeScale.labelMd,
   },
   tripTitle: {
-    color: "#29440F",
-    fontSize: 22,
-    fontWeight: "800",
-    marginBottom: 6,
+    color: "#1A1A1A",
+    ...TypeScale.headingMd,
+    marginBottom: Spacing.xs,
   },
   tripDestination: {
-    color: "#5A6E41",
-    fontSize: 15,
-    fontWeight: "700",
-    marginBottom: 10,
+    color: "#6B7280",
+    ...TypeScale.titleSm,
+    fontWeight: FontWeight.bold,
+    marginBottom: Spacing.sm,
   },
   previewGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 10,
-    marginBottom: 12,
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
   },
   previewGridPhone: {
-    gap: 8,
+    gap: Spacing.sm,
   },
   previewInfoCard: {
-    backgroundColor: "#EEF5DF",
-    borderColor: "#D7E4BD",
-    borderRadius: 16,
+    backgroundColor: "#F0F0F0",
+    borderColor: "#D1D5DB",
+    borderRadius: Radius.lg,
     borderWidth: 1,
     minWidth: 132,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
   previewInfoLabel: {
-    color: "#7A866A",
-    fontSize: 11,
-    fontWeight: "700",
+    color: "#9CA3AF",
+    ...TypeScale.labelSm,
+    fontWeight: FontWeight.bold,
     letterSpacing: 0.4,
-    marginBottom: 4,
+    marginBottom: Spacing.xs,
     textTransform: "uppercase",
   },
   previewInfoValue: {
-    color: "#29440F",
-    fontSize: 14,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
   },
   metaRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    marginBottom: 10,
+    marginBottom: Spacing.sm,
   },
   metaText: {
-    color: "#516244",
-    fontSize: 13,
-    fontWeight: "700",
-    marginRight: 12,
-    marginBottom: 4,
+    color: "#6B7280",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.bold,
+    marginRight: Spacing.md,
+    marginBottom: Spacing.xs,
   },
   summaryText: {
     color: "#3C4B30",
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: 10,
+    ...TypeScale.titleSm,
+    marginBottom: Spacing.sm,
   },
   previewPointsWrap: {
-    marginBottom: 10,
+    marginBottom: Spacing.sm,
   },
   previewPointText: {
-    color: "#516244",
-    fontSize: 14,
-    lineHeight: 21,
-    marginBottom: 4,
+    color: "#6B7280",
+    ...TypeScale.bodyMd,
+    marginBottom: Spacing.xs,
   },
   detailsText: {
-    color: "#46563A",
-    fontSize: 14,
-    lineHeight: 21,
+    color: "#6B7280",
+    ...TypeScale.bodyMd,
   },
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(16, 26, 8, 0.48)",
     alignItems: "center",
     justifyContent: "center",
-    padding: 20,
+    padding: Spacing.xl,
   },
   modalCard: {
     width: "100%",
-    maxWidth: 860,
+    maxWidth: Layout.modalMaxWidth + 380,
     maxHeight: "84%",
-    backgroundColor: "#FAFCF5",
-    borderColor: "#DDE8C7",
-    borderRadius: 28,
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius["3xl"],
     borderWidth: 1,
-    padding: 20,
+    padding: Spacing.xl,
   },
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
   },
   modalHeaderTextWrap: {
     flex: 1,
-    paddingRight: 12,
+    paddingRight: Spacing.md,
   },
   modalTitle: {
-    color: "#29440F",
-    fontSize: 28,
-    lineHeight: 34,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.displayMd,
   },
   modalDestination: {
     color: "#5D6F4D",
-    fontSize: 17,
-    fontWeight: "700",
-    marginTop: 6,
+    ...TypeScale.titleLg,
+    fontWeight: FontWeight.bold,
+    marginTop: Spacing.xs,
   },
   modalCloseButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    backgroundColor: "#EEF5DF",
+    width: Layout.touchTarget,
+    height: Layout.touchTarget,
+    borderRadius: Radius.md,
+    backgroundColor: "#F0F0F0",
     alignItems: "center",
     justifyContent: "center",
   },
   modalSummary: {
     color: "#3C4B30",
-    fontSize: 16,
-    lineHeight: 24,
-    marginBottom: 12,
+    ...TypeScale.bodyLg,
+    marginBottom: Spacing.md,
   },
   modalDetailsScroll: {
-    marginTop: 6,
+    marginTop: Spacing.xs,
   },
   modalDetailsContent: {
-    paddingBottom: 6,
+    paddingBottom: Spacing.xs,
   },
   modalDetailLine: {
-    color: "#46563A",
-    fontSize: 15,
-    lineHeight: 23,
-    marginBottom: 10,
+    color: "#6B7280",
+    ...TypeScale.titleSm,
+    marginBottom: Spacing.sm,
   },
 });

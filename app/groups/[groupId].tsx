@@ -35,6 +35,14 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { Image } from "expo-image";
 
 import { useAppTheme } from "../../components/app-theme-provider";
+import {
+  FontWeight,
+  Layout,
+  Radius,
+  Spacing,
+  TypeScale,
+  shadow,
+} from "../../constants/design-system";
 import { auth, db } from "../../firebase";
 import {
   buildGroupChatExpense,
@@ -466,8 +474,6 @@ export default function GroupChatScreen() {
   const [memberSearchQuery, setMemberSearchQuery] = useState("");
   const [settingsExpanded, setSettingsExpanded] = useState(false);
   const [updatingGroupPhoto, setUpdatingGroupPhoto] = useState(false);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [keyboardOpen, setKeyboardOpen] = useState(false);
 
   const readAssetDataUrl = async (asset: ImagePicker.ImagePickerAsset) => {
     const mimeType = asset.mimeType || "image/jpeg";
@@ -640,9 +646,7 @@ export default function GroupChatScreen() {
   const canReadMessages = !!group && (group.accessType === "public" || isMember);
   const canOpenSharePicker = !!group && (group.accessType === "public" || isMember);
   const canManageExpenses = !!group && (group.accessType === "public" || isMember);
-  const androidKeyboardOffset =
-    Platform.OS === "android" && keyboardOpen ? Math.max(0, keyboardHeight - 72) : 0;
-  const composerBottomInset = insets.bottom + 8 + androidKeyboardOffset;
+  const composerBottomInset = insets.bottom + 8;
   const expenseMessages = useMemo(
     () => messages.filter((message) => message.messageType === "expense" && !!message.expense),
     [messages]
@@ -717,24 +721,31 @@ export default function GroupChatScreen() {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
 
-    const showSubscription = Keyboard.addListener(showEvent, (event) => {
-      setKeyboardOpen(true);
-      setKeyboardHeight(event?.endCoordinates?.height ?? 0);
+    const showSubscription = Keyboard.addListener(showEvent, () => {
       requestAnimationFrame(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
       });
     });
 
-    const hideSubscription = Keyboard.addListener(hideEvent, () => {
-      setKeyboardOpen(false);
-      setKeyboardHeight(0);
-    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {});
 
     return () => {
       showSubscription.remove();
       hideSubscription.remove();
     };
   }, []);
+
+  useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => setError(""), 4000);
+    return () => clearTimeout(timer);
+  }, [error]);
+
+  useEffect(() => {
+    if (!infoMessage) return;
+    const timer = setTimeout(() => setInfoMessage(""), 4000);
+    return () => clearTimeout(timer);
+  }, [infoMessage]);
 
   const membersLabel = useMemo(() => {
     if (!group) {
@@ -1552,7 +1563,7 @@ export default function GroupChatScreen() {
         style={[styles.loader, { backgroundColor: colors.screenSoft }]}
         edges={["top", "left", "right"]}
       >
-        <ActivityIndicator size="large" color="#5C8C1F" />
+        <ActivityIndicator size="large" color="#2D6A4F" />
       </SafeAreaView>
     );
   }
@@ -1573,7 +1584,7 @@ export default function GroupChatScreen() {
             onPress={() => router.back()}
             style={styles.backButton}
           >
-            <MaterialIcons color="#29440F" name="arrow-back-ios-new" size={20} />
+            <MaterialIcons color="#1A1A1A" name="arrow-back-ios-new" size={20} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -1611,132 +1622,6 @@ export default function GroupChatScreen() {
           </TouchableOpacity>
         </View>
 
-        {group?.description ? (
-          <View
-            style={[
-              styles.descriptionCard,
-              {
-                backgroundColor: colors.warningBackground,
-                borderColor: colors.warningBorder,
-              },
-            ]}
-          >
-            <Text style={[styles.descriptionText, { color: colors.textSecondary }]}>
-              {group.description}
-            </Text>
-          </View>
-        ) : null}
-
-        {group?.accessType === "public" && !isMember ? (
-          <View style={styles.joinInfoCard}>
-            <View style={styles.joinInfoTextWrap}>
-              <Text style={styles.joinInfoTitle}>Public group</Text>
-              <Text style={styles.joinInfoText}>
-                Можеш да разглеждаш чата, а с `Join group` ще станеш member и ще можеш да пишеш.
-              </Text>
-            </View>
-            <TouchableOpacity
-              activeOpacity={0.9}
-              disabled={joining}
-              onPress={() => {
-                void handleJoinGroup();
-              }}
-              style={[styles.joinInfoButton, joining && styles.joinInfoButtonDisabled]}
-            >
-              <Text style={styles.joinInfoButtonText}>{joining ? "Joining..." : "Join group"}</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-
-        {(expenseMessages.length > 0 || isMember) && group ? (
-          <View
-            style={[
-              styles.expenseSummaryCard,
-              { backgroundColor: colors.card, borderColor: colors.border },
-            ]}
-          >
-            <View style={styles.expenseSummaryHeader}>
-              <View style={styles.expenseSummaryHeaderTextWrap}>
-                <Text style={[styles.expenseSummaryKicker, { color: colors.accent }]}>
-                  Expense split
-                </Text>
-                <Text style={[styles.expenseSummaryTitle, { color: colors.textPrimary }]}>
-                  {expenseSummary.expenseCount === 0
-                    ? "Start tracking shared costs"
-                    : formatExpenseAmount(expenseSummary.totalSpent)}
-                </Text>
-                <Text style={[styles.expenseSummaryText, { color: colors.textSecondary }]}>
-                  {expenseSummary.expenseCount === 0
-                    ? `Split equal costs with ${membersLabel.toLowerCase()} from inside the chat.`
-                    : expenseSummary.netBalance > 0
-                      ? `Others owe you ${formatExpenseAmount(expenseSummary.netBalance)}`
-                      : expenseSummary.netBalance < 0
-                        ? `You owe ${formatExpenseAmount(Math.abs(expenseSummary.netBalance))}`
-                        : "You are settled up right now."}
-                </Text>
-              </View>
-              <View
-                style={[
-                  styles.expenseSummaryCountBadge,
-                  { backgroundColor: colors.accentMuted, borderColor: colors.border },
-                ]}
-              >
-                <Text style={[styles.expenseSummaryCountText, { color: colors.textPrimary }]}>
-                  {expenseSummary.expenseCount} expense
-                  {expenseSummary.expenseCount === 1 ? "" : "s"}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.expenseSummaryChipsRow}>
-              <View
-                style={[
-                  styles.expenseSummaryChip,
-                  { backgroundColor: colors.cardAlt, borderColor: colors.border },
-                ]}
-              >
-                <MaterialIcons color={colors.textMuted} name="group" size={15} />
-                <Text style={[styles.expenseSummaryChipText, { color: colors.textPrimary }]}>
-                  {membersLabel}
-                </Text>
-              </View>
-              <View
-                style={[
-                  styles.expenseSummaryChip,
-                  { backgroundColor: colors.warningBackground, borderColor: colors.warningBorder },
-                ]}
-              >
-                <MaterialIcons color={colors.warningText} name="equalizer" size={15} />
-                <Text style={[styles.expenseSummaryChipText, { color: colors.textPrimary }]}>
-                  Equal split
-                </Text>
-              </View>
-            </View>
-          </View>
-        ) : null}
-
-        {error ? (
-          <View
-            style={[
-              styles.errorCard,
-              { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
-            ]}
-          >
-            <Text style={[styles.errorText, { color: colors.errorText }]}>{error}</Text>
-          </View>
-        ) : null}
-
-        {infoMessage ? (
-          <View
-            style={[
-              styles.infoCard,
-              { backgroundColor: colors.cardAlt, borderColor: colors.border },
-            ]}
-          >
-            <Text style={[styles.infoText, { color: colors.textSecondary }]}>{infoMessage}</Text>
-          </View>
-        ) : null}
-
         <ScrollView
           ref={scrollViewRef}
           contentContainerStyle={[
@@ -1748,6 +1633,110 @@ export default function GroupChatScreen() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         >
+          {group?.description ? (
+            <View
+              style={[
+                styles.descriptionCard,
+                {
+                  backgroundColor: colors.warningBackground,
+                  borderColor: colors.warningBorder,
+                },
+              ]}
+            >
+              <Text style={[styles.descriptionText, { color: colors.textSecondary }]}>
+                {group.description}
+              </Text>
+            </View>
+          ) : null}
+
+          {group?.accessType === "public" && !isMember ? (
+            <View style={styles.joinInfoCard}>
+              <View style={styles.joinInfoTextWrap}>
+                <Text style={styles.joinInfoTitle}>Public group</Text>
+                <Text style={styles.joinInfoText}>
+                  Можеш да разглеждаш чата, а с `Join group` ще станеш member и ще можеш да пишеш.
+                </Text>
+              </View>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                disabled={joining}
+                onPress={() => {
+                  void handleJoinGroup();
+                }}
+                style={[styles.joinInfoButton, joining && styles.joinInfoButtonDisabled]}
+              >
+                <Text style={styles.joinInfoButtonText}>{joining ? "Joining..." : "Join group"}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
+          {(expenseMessages.length > 0 || isMember) && group ? (
+            <View
+              style={[
+                styles.expenseSummaryCard,
+                { backgroundColor: colors.card, borderColor: colors.border },
+              ]}
+            >
+              <View style={styles.expenseSummaryHeader}>
+                <View style={styles.expenseSummaryHeaderTextWrap}>
+                  <Text style={[styles.expenseSummaryKicker, { color: colors.accent }]}>
+                    Expense split
+                  </Text>
+                  <Text style={[styles.expenseSummaryTitle, { color: colors.textPrimary }]}>
+                    {expenseSummary.expenseCount === 0
+                      ? "Start tracking shared costs"
+                      : formatExpenseAmount(expenseSummary.totalSpent)}
+                  </Text>
+                  <Text style={[styles.expenseSummaryText, { color: colors.textSecondary }]}>
+                    {expenseSummary.expenseCount === 0
+                      ? `Split equal costs with ${membersLabel.toLowerCase()} from inside the chat.`
+                      : expenseSummary.netBalance > 0
+                        ? `Others owe you ${formatExpenseAmount(expenseSummary.netBalance)}`
+                        : expenseSummary.netBalance < 0
+                          ? `You owe ${formatExpenseAmount(Math.abs(expenseSummary.netBalance))}`
+                          : "You are settled up right now."}
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.expenseSummaryCountBadge,
+                    { backgroundColor: colors.accentMuted, borderColor: colors.border },
+                  ]}
+                >
+                  <Text style={[styles.expenseSummaryCountText, { color: colors.textPrimary }]}>
+                    {expenseSummary.expenseCount} expense
+                    {expenseSummary.expenseCount === 1 ? "" : "s"}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.expenseSummaryChipsRow}>
+                <View
+                  style={[
+                    styles.expenseSummaryChip,
+                    { backgroundColor: colors.cardAlt, borderColor: colors.border },
+                  ]}
+                >
+                  <MaterialIcons color={colors.textMuted} name="group" size={15} />
+                  <Text style={[styles.expenseSummaryChipText, { color: colors.textPrimary }]}>
+                    {membersLabel}
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.expenseSummaryChip,
+                    { backgroundColor: colors.warningBackground, borderColor: colors.warningBorder },
+                  ]}
+                >
+                  <MaterialIcons color={colors.warningText} name="equalizer" size={15} />
+                  <Text style={[styles.expenseSummaryChipText, { color: colors.textPrimary }]}>
+                    Equal split
+                  </Text>
+                </View>
+              </View>
+            </View>
+          ) : null}
+
           {messages.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyTitle}>Няма съобщения още</Text>
@@ -2013,7 +2002,7 @@ export default function GroupChatScreen() {
                                           : styles.theirLinkedTransportPostedBadge,
                                       ]}
                                     >
-                                      <MaterialIcons color="#3B6D11" name="check-circle" size={15} />
+                                      <MaterialIcons color="#2D6A4F" name="check-circle" size={15} />
                                       <Text style={styles.linkedTransportPostedBadgeText}>
                                         Expense posted in chat
                                       </Text>
@@ -2030,7 +2019,7 @@ export default function GroupChatScreen() {
                                           isMine && styles.myLinkedTransportSecondaryButton,
                                         ]}
                                       >
-                                        <MaterialIcons color="#47642A" name="open-in-new" size={16} />
+                                        <MaterialIcons color="#6B7280" name="open-in-new" size={16} />
                                         <Text style={styles.linkedTransportSecondaryButtonText}>
                                           Open link
                                         </Text>
@@ -2184,7 +2173,7 @@ export default function GroupChatScreen() {
                               isMine ? styles.myLinkedExpenseOpenButton : styles.theirLinkedExpenseOpenButton,
                             ]}
                           >
-                            <MaterialIcons color="#47642A" name="confirmation-number" size={16} />
+                            <MaterialIcons color="#6B7280" name="confirmation-number" size={16} />
                             <Text style={styles.linkedExpenseOpenButtonText}>
                               Open planner ticket link
                             </Text>
@@ -2228,7 +2217,7 @@ export default function GroupChatScreen() {
                               isMine ? styles.myExpensePaidBadge : styles.theirExpensePaidBadge,
                             ]}
                           >
-                            <MaterialIcons color="#3B6D11" name="verified" size={15} />
+                            <MaterialIcons color="#2D6A4F" name="verified" size={15} />
                             <Text style={styles.expensePaidBadgeText}>
                               {isGroupPaymentExpense
                                 ? `Your share was paid via Stripe • ${myRepayment.amountLabel}`
@@ -2285,7 +2274,7 @@ export default function GroupChatScreen() {
               (!canOpenSharePicker || sending || joining) && styles.shareSavedButtonDisabled,
             ]}
           >
-            <MaterialIcons color="#5C8C1F" name="bookmark-added" size={20} />
+            <MaterialIcons color="#2D6A4F" name="bookmark-added" size={20} />
           </TouchableOpacity>
           <TouchableOpacity
             activeOpacity={0.9}
@@ -2297,7 +2286,7 @@ export default function GroupChatScreen() {
                 styles.shareSavedButtonDisabled,
             ]}
           >
-            <MaterialIcons color="#5C8C1F" name="receipt-long" size={20} />
+            <MaterialIcons color="#2D6A4F" name="receipt-long" size={20} />
           </TouchableOpacity>
           <TextInput
             multiline
@@ -2347,113 +2336,146 @@ export default function GroupChatScreen() {
         </View>
       </KeyboardAvoidingView>
 
+      {error ? (
+        <View style={styles.toastContainer} pointerEvents="box-none">
+          <View
+            style={[
+              styles.toast,
+              { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
+            ]}
+          >
+            <MaterialIcons name="error-outline" size={18} color={colors.errorText} />
+            <Text style={[styles.toastText, { color: colors.errorText }]} numberOfLines={3}>
+              {error}
+            </Text>
+            <TouchableOpacity onPress={() => setError("")} activeOpacity={0.7}>
+              <MaterialIcons name="close" size={16} color={colors.errorText} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
+
+      {infoMessage ? (
+        <View style={styles.toastContainer} pointerEvents="box-none">
+          <View
+            style={[
+              styles.toast,
+              { backgroundColor: colors.cardAlt, borderColor: colors.border },
+            ]}
+          >
+            <MaterialIcons name="info-outline" size={18} color={colors.textSecondary} />
+            <Text style={[styles.toastText, { color: colors.textSecondary }]} numberOfLines={3}>
+              {infoMessage}
+            </Text>
+            <TouchableOpacity onPress={() => setInfoMessage("")} activeOpacity={0.7}>
+              <MaterialIcons name="close" size={16} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
+
       <Modal
         animationType="slide"
         onRequestClose={() => setGroupDetailsVisible(false)}
-        transparent
         visible={groupDetailsVisible}
       >
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity
-            activeOpacity={1}
-            onPress={() => setGroupDetailsVisible(false)}
-            style={styles.modalBackdrop}
-          />
-          <View style={styles.groupDetailsCard}>
-            <ScrollView
-              contentContainerStyle={styles.groupDetailsContent}
-              showsVerticalScrollIndicator={false}
+        <SafeAreaView style={[styles.detailsScreen, { backgroundColor: colors.screenSoft }]} edges={["top"]}>
+          <View style={[styles.detailsTopBar, { borderBottomColor: colors.border }]}>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => setGroupDetailsVisible(false)}
+              style={styles.backButton}
             >
-              <View style={styles.groupDetailsHeader}>
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  onPress={() => setGroupDetailsVisible(false)}
-                  style={styles.backButton}
-                >
-                  <MaterialIcons color="#29440F" name="arrow-back-ios-new" size={20} />
-                </TouchableOpacity>
+              <MaterialIcons color={colors.textPrimary} name="close" size={22} />
+            </TouchableOpacity>
+            <Text style={[styles.detailsTopBarTitle, { color: colors.textPrimary }]}>Group info</Text>
+            <View style={{ width: 40 }} />
+          </View>
 
-                <TouchableOpacity
-                  activeOpacity={isCreator ? 0.92 : 1}
-                  disabled={!isCreator || updatingGroupPhoto}
-                  onPress={() => {
-                    void handlePickGroupPhoto();
-                  }}
-                  style={styles.groupDetailsPhotoWrap}
-                >
-                  {group?.photoUrl ? (
-                    <Image
-                      source={{ uri: group.photoUrl }}
-                      style={styles.groupDetailsPhoto}
-                      contentFit="cover"
-                    />
-                  ) : (
-                    <View
-                      style={[
-                        styles.groupDetailsPhotoFallback,
-                        { backgroundColor: getAvatarColor(group?.name ?? "Group") },
-                      ]}
-                    >
-                      <Text style={styles.groupDetailsPhotoFallbackText}>
-                        {getInitials(group?.name ?? "Group")}
-                      </Text>
-                    </View>
-                  )}
-                  {isCreator ? (
-                    <View style={styles.groupDetailsPhotoBadge}>
-                      <MaterialIcons
-                        color="#8B5611"
-                        name={group?.photoUrl ? "photo-camera" : "add-a-photo"}
-                        size={18}
-                      />
-                    </View>
-                  ) : null}
-                </TouchableOpacity>
-
-                <View style={styles.groupDetailsHeaderText}>
-                  <Text numberOfLines={2} style={styles.groupDetailsTitle}>
-                    {group?.name}
-                  </Text>
-                  <Text style={styles.groupDetailsMeta}>
-                    {group?.accessType === "private" ? "Private" : "Public"} • {membersLabel}
-                  </Text>
-                  {isCreator && group?.photoUrl ? (
-                    <TouchableOpacity
-                      activeOpacity={0.9}
-                      onPress={() => {
-                        void handleResetGroupPhoto();
-                      }}
-                      style={styles.groupDetailsSecondaryAction}
-                    >
-                      <Text style={styles.groupDetailsSecondaryActionText}>
-                        {updatingGroupPhoto ? "Updating..." : "Reset photo"}
-                      </Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              </View>
-
-              <View style={styles.descriptionCard}>
-                <Text style={styles.settingsTitle}>Description</Text>
-                <Text style={styles.descriptionText}>
-                  {group?.description && hasMeaningfulDescription(group.description)
-                    ? group.description
-                    : "This group does not have a description yet."}
-                </Text>
-              </View>
-
-              <View style={styles.membersCard}>
-                <View style={styles.membersHeaderRow}>
-                  <View>
-                    <Text style={styles.membersTitle}>Members</Text>
-                    <Text style={styles.membersSubtitle}>
-                      Everyone in the group can see who is inside.
+          <ScrollView
+            contentContainerStyle={styles.groupDetailsContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.detailsHeroSection}>
+              <TouchableOpacity
+                activeOpacity={isCreator ? 0.92 : 1}
+                disabled={!isCreator || updatingGroupPhoto}
+                onPress={() => {
+                  void handlePickGroupPhoto();
+                }}
+                style={styles.groupDetailsPhotoWrap}
+              >
+                {group?.photoUrl ? (
+                  <Image
+                    source={{ uri: group.photoUrl }}
+                    style={styles.groupDetailsPhoto}
+                    contentFit="cover"
+                  />
+                ) : (
+                  <View
+                    style={[
+                      styles.groupDetailsPhotoFallback,
+                      { backgroundColor: getAvatarColor(group?.name ?? "Group") },
+                    ]}
+                  >
+                    <Text style={styles.groupDetailsPhotoFallbackText}>
+                      {getInitials(group?.name ?? "Group")}
                     </Text>
                   </View>
-                  <View style={styles.membersCountBadge}>
-                    <Text style={styles.membersCountText}>{membersLabel}</Text>
+                )}
+                {isCreator ? (
+                  <View style={styles.groupDetailsPhotoBadge}>
+                    <MaterialIcons
+                      color="#8B5611"
+                      name={group?.photoUrl ? "photo-camera" : "add-a-photo"}
+                      size={16}
+                    />
                   </View>
+                ) : null}
+              </TouchableOpacity>
+
+              <Text numberOfLines={2} style={[styles.detailsHeroTitle, { color: colors.textPrimary }]}>
+                {group?.name}
+              </Text>
+              <Text style={[styles.detailsHeroMeta, { color: colors.textSecondary }]}>
+                {group?.accessType === "private" ? "Private" : "Public"} • {membersLabel}
+              </Text>
+              {isCreator && group?.photoUrl ? (
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    void handleResetGroupPhoto();
+                  }}
+                  style={styles.groupDetailsSecondaryAction}
+                >
+                  <Text style={[styles.groupDetailsSecondaryActionText, { color: colors.textMuted }]}>
+                    {updatingGroupPhoto ? "Updating..." : "Reset photo"}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+
+            {group?.description && hasMeaningfulDescription(group.description) ? (
+              <View style={[styles.detailsSection, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Text style={[styles.detailsSectionTitle, { color: colors.textMuted }]}>Description</Text>
+                <Text style={[styles.descriptionText, { color: colors.textPrimary }]}>
+                  {group.description}
+                </Text>
+              </View>
+            ) : null}
+
+            <View style={[styles.detailsSection, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.membersHeaderRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.detailsSectionTitle, { color: colors.textMuted }]}>Members</Text>
+                  <Text style={[styles.membersSubtitle, { color: colors.textSecondary }]}>
+                    Everyone in the group can see who is inside.
+                  </Text>
                 </View>
+                <View style={[styles.membersCountBadge, { backgroundColor: colors.cardAlt, borderColor: colors.border }]}>
+                  <Text style={[styles.membersCountText, { color: colors.textPrimary }]}>{membersLabel}</Text>
+                </View>
+              </View>
 
                 <View style={styles.membersSearchShell}>
                   <MaterialIcons color="#7B8A6D" name="search" size={18} />
@@ -2513,14 +2535,14 @@ export default function GroupChatScreen() {
                     </View>
                   ))
                 )}
-              </View>
+            </View>
 
-              {isCreator ? (
-                <View style={styles.settingsCard}>
-                  <Text style={styles.settingsTitle}>Group settings</Text>
-                  <Text style={styles.settingsSubtitle}>
-                    Rename the group and manage the private code if this is a private group.
-                  </Text>
+            {isCreator ? (
+              <View style={[styles.detailsSection, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Text style={[styles.detailsSectionTitle, { color: colors.textMuted }]}>Group settings</Text>
+                <Text style={[styles.settingsSubtitle, { color: colors.textSecondary }]}>
+                  Rename the group and manage the private code if this is a private group.
+                </Text>
 
                   <Text style={styles.settingsLabel}>Group name</Text>
                   <TextInput
@@ -2572,11 +2594,10 @@ export default function GroupChatScreen() {
                       {savingGroupSettings ? "Saving..." : "Save settings"}
                     </Text>
                   </TouchableOpacity>
-                </View>
-              ) : null}
-            </ScrollView>
-          </View>
-        </View>
+              </View>
+            ) : null}
+          </ScrollView>
+        </SafeAreaView>
       </Modal>
 
       <Modal
@@ -2604,7 +2625,7 @@ export default function GroupChatScreen() {
                 onPress={() => setShareSheetVisible(false)}
                 style={styles.sheetCloseButton}
               >
-                <MaterialIcons color="#29440F" name="close" size={20} />
+                <MaterialIcons color="#1A1A1A" name="close" size={20} />
               </TouchableOpacity>
             </View>
 
@@ -2716,7 +2737,7 @@ export default function GroupChatScreen() {
                 onPress={() => setPreviewTrip(null)}
                 style={styles.sheetCloseButton}
               >
-                <MaterialIcons color="#29440F" name="close" size={20} />
+                <MaterialIcons color="#1A1A1A" name="close" size={20} />
               </TouchableOpacity>
             </View>
 
@@ -2788,7 +2809,7 @@ export default function GroupChatScreen() {
                       }}
                       style={styles.previewLinkedTransportButton}
                     >
-                      <MaterialIcons color="#47642A" name="open-in-new" size={16} />
+                      <MaterialIcons color="#6B7280" name="open-in-new" size={16} />
                       <Text style={styles.previewLinkedTransportButtonText}>Open ticket link</Text>
                     </TouchableOpacity>
                   </View>
@@ -2855,7 +2876,7 @@ export default function GroupChatScreen() {
                 onPress={() => setExpenseSheetVisible(false)}
                 style={styles.sheetCloseButton}
               >
-                <MaterialIcons color="#29440F" name="close" size={20} />
+                <MaterialIcons color="#1A1A1A" name="close" size={20} />
               </TouchableOpacity>
             </View>
 
@@ -2916,23 +2937,23 @@ export default function GroupChatScreen() {
 
 const styles = StyleSheet.create({
   screen: {
-    backgroundColor: "#EAF3DE",
+    backgroundColor: "#F0F0F0",
     flex: 1,
   },
   loader: {
     alignItems: "center",
-    backgroundColor: "#EAF3DE",
+    backgroundColor: "#F0F0F0",
     flex: 1,
     justifyContent: "center",
   },
   header: {
     alignItems: "center",
-    backgroundColor: "#FAFCF5",
-    borderBottomColor: "#DDE8C7",
+    backgroundColor: "#FFFFFF",
+    borderBottomColor: "#E8E8E8",
     borderBottomWidth: 1,
     flexDirection: "row",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
   },
   headerMainPressable: {
     alignItems: "center",
@@ -2941,266 +2962,270 @@ const styles = StyleSheet.create({
   },
   backButton: {
     alignItems: "center",
-    backgroundColor: "#EEF4E5",
-    borderRadius: 16,
+    backgroundColor: "#F5F5F5",
+    borderRadius: Radius.lg,
     height: 38,
     justifyContent: "center",
     width: 38,
   },
   headerAvatar: {
-    marginLeft: 12,
+    marginLeft: Spacing.md,
   },
   headerAvatarImage: {
-    borderRadius: 22,
+    borderRadius: Radius.xl,
     height: 44,
     width: 44,
   },
   headerAvatarCircle: {
     alignItems: "center",
-    borderRadius: 22,
+    borderRadius: Radius.xl,
     height: 44,
     justifyContent: "center",
     width: 44,
   },
   headerAvatarText: {
     color: "#FFFFFF",
-    fontSize: 18,
-    fontWeight: "800",
+    ...TypeScale.titleLg,
+    fontWeight: FontWeight.extrabold,
   },
   headerTextWrap: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: Spacing.md,
   },
   headerTitle: {
-    color: "#29440F",
-    fontSize: 18,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.titleLg,
+    fontWeight: FontWeight.extrabold,
     flexShrink: 1,
   },
   headerMeta: {
-    color: "#5F6E53",
-    fontSize: 13,
-    marginTop: 4,
+    color: "#6B7280",
+    ...TypeScale.bodySm,
+    marginTop: Spacing.xs,
     flexShrink: 1,
   },
-  groupDetailsCard: {
-    backgroundColor: "#FAFCF5",
-    borderColor: "#DDE8C7",
-    borderRadius: 28,
-    borderWidth: 1,
-    maxHeight: "90%",
-    width: "92%",
+  detailsScreen: {
+    flex: 1,
+  },
+  detailsTopBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: 1,
+  },
+  detailsTopBarTitle: {
+    ...TypeScale.titleMd,
+    fontWeight: FontWeight.bold,
   },
   groupDetailsContent: {
-    padding: 18,
-    paddingBottom: 24,
+    paddingBottom: Spacing["4xl"],
   },
-  groupDetailsHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    marginBottom: 18,
+  detailsHeroSection: {
+    alignItems: "center",
+    paddingVertical: Spacing.xl,
+    paddingHorizontal: Spacing.lg,
+  },
+  detailsSection: {
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
+    padding: Spacing.lg,
+  },
+  detailsSectionTitle: {
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.bold,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: Spacing.sm,
   },
   groupDetailsPhotoWrap: {
-    marginLeft: 12,
     position: "relative",
+    marginBottom: Spacing.md,
   },
   groupDetailsPhoto: {
-    borderRadius: 18,
-    height: 96,
-    width: 96,
+    borderRadius: Radius.xl,
+    height: 80,
+    width: 80,
   },
   groupDetailsPhotoFallback: {
     alignItems: "center",
-    borderRadius: 18,
-    height: 96,
+    borderRadius: Radius.xl,
+    height: 80,
     justifyContent: "center",
-    width: 96,
+    width: 80,
   },
   groupDetailsPhotoFallbackText: {
     color: "#FFFFFF",
-    fontSize: 34,
-    fontWeight: "800",
+    ...TypeScale.headingLg,
+    fontWeight: FontWeight.extrabold,
   },
   groupDetailsPhotoBadge: {
     alignItems: "center",
     backgroundColor: "#FFF2DA",
-    borderColor: "#DDE8C7",
-    borderRadius: 999,
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.full,
     borderWidth: 1,
-    bottom: 6,
+    bottom: Spacing.xs,
     height: 30,
     justifyContent: "center",
     position: "absolute",
-    right: 6,
+    right: Spacing.xs,
     width: 30,
   },
-  groupDetailsHeaderText: {
-    flex: 1,
-    marginLeft: 14,
-    paddingTop: 4,
+  detailsHeroTitle: {
+    ...TypeScale.headingLg,
+    fontWeight: FontWeight.extrabold,
+    textAlign: "center",
+    marginBottom: Spacing.xs,
   },
-  groupDetailsTitle: {
-    color: "#29440F",
-    fontSize: 26,
-    fontWeight: "800",
-    lineHeight: 32,
-  },
-  groupDetailsMeta: {
-    color: "#5F6E53",
-    fontSize: 15,
-    marginTop: 6,
+  detailsHeroMeta: {
+    ...TypeScale.bodyMd,
+    textAlign: "center",
   },
   groupDetailsSecondaryAction: {
-    alignSelf: "flex-start",
-    backgroundColor: "#EEF4E5",
-    borderRadius: 14,
-    marginTop: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    alignSelf: "center",
+    marginTop: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
   },
   groupDetailsSecondaryActionText: {
-    color: "#47642A",
-    fontSize: 13,
-    fontWeight: "800",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.semibold,
   },
   descriptionCard: {
     backgroundColor: "#FFF8E7",
     borderColor: "#F1D7A5",
-    borderRadius: 18,
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    marginHorizontal: 16,
-    marginTop: 14,
-    padding: 14,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
+    padding: Spacing.md,
   },
   descriptionText: {
     color: "#5A6E41",
-    fontSize: 14,
-    lineHeight: 20,
+    ...TypeScale.bodyMd,
   },
   membersCard: {
-    backgroundColor: "#FAFCF5",
-    borderColor: "#DDE8C7",
-    borderRadius: 20,
+    borderRadius: Radius.xl,
     borderWidth: 1,
-    marginHorizontal: 16,
-    marginTop: 14,
-    padding: 14,
+    padding: Spacing.md,
   },
   membersHeaderRow: {
     alignItems: "flex-start",
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 12,
+    marginBottom: Spacing.md,
   },
   membersSearchShell: {
     alignItems: "center",
-    backgroundColor: "#FAFCF5",
-    borderColor: "#DDE8C7",
-    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.lg,
     borderWidth: 1,
     flexDirection: "row",
     marginBottom: 2,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
   membersSearchInput: {
-    color: "#29440F",
+    color: "#1A1A1A",
     flex: 1,
-    fontSize: 14,
-    marginLeft: 10,
+    ...TypeScale.bodyMd,
+    marginLeft: Spacing.sm,
     paddingVertical: 0,
   },
   membersTitle: {
-    color: "#29440F",
-    fontSize: 18,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.titleLg,
+    fontWeight: FontWeight.extrabold,
   },
   membersSubtitle: {
-    color: "#5F6E53",
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 4,
+    color: "#6B7280",
+    ...TypeScale.bodySm,
+    marginTop: Spacing.xs,
   },
   membersCountBadge: {
-    backgroundColor: "#EEF4E5",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    backgroundColor: "#F5F5F5",
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
   membersCountText: {
-    color: "#47642A",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#6B7280",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
   },
   membersEmptyText: {
     color: "#6B7C5D",
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 12,
+    ...TypeScale.bodySm,
+    marginTop: Spacing.md,
   },
   memberRow: {
     alignItems: "center",
     flexDirection: "row",
-    marginTop: 10,
+    marginTop: Spacing.sm,
   },
   memberAvatarCircle: {
     alignItems: "center",
-    backgroundColor: "#5C8C1F",
-    borderRadius: 999,
+    backgroundColor: "#2D6A4F",
+    borderRadius: Radius.full,
     height: 42,
     justifyContent: "center",
     width: 42,
   },
   memberAvatarImage: {
-    borderRadius: 999,
+    borderRadius: Radius.full,
     height: 42,
     width: 42,
   },
   memberAvatarText: {
     color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "800",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
   },
   memberTextWrap: {
     flex: 1,
-    marginLeft: 10,
-    paddingRight: 10,
+    marginLeft: Spacing.sm,
+    paddingRight: Spacing.sm,
   },
   memberName: {
-    color: "#29440F",
-    fontSize: 14,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
     flexShrink: 1,
   },
   memberMeta: {
     color: "#6B7A5D",
-    fontSize: 12,
-    marginTop: 3,
+    ...TypeScale.labelMd,
+    marginTop: Spacing.xs,
   },
   memberActionButton: {
     backgroundColor: "#FFF1EF",
     borderColor: "#F0C7C1",
-    borderRadius: 12,
+    borderRadius: Radius.md,
     borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
   memberActionButtonDisabled: {
     opacity: 0.6,
   },
   memberActionButtonText: {
     color: "#8A3D35",
-    fontSize: 12,
-    fontWeight: "800",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
   },
   settingsCard: {
-    backgroundColor: "#F6F8EE",
-    borderColor: "#DDE8C7",
-    borderRadius: 20,
+    backgroundColor: "#F8F8F8",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.xl,
     borderWidth: 1,
-    marginHorizontal: 16,
-    marginTop: 14,
-    padding: 14,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
+    padding: Spacing.md,
   },
   settingsToggleButton: {
     alignItems: "center",
@@ -3209,135 +3234,130 @@ const styles = StyleSheet.create({
   },
   settingsToggleTextWrap: {
     flex: 1,
-    paddingRight: 12,
+    paddingRight: Spacing.md,
   },
   settingsTitle: {
-    color: "#29440F",
-    fontSize: 18,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.titleLg,
+    fontWeight: FontWeight.extrabold,
   },
   settingsSubtitle: {
-    color: "#5F6E53",
-    fontSize: 13,
-    lineHeight: 19,
-    marginBottom: 12,
-    marginTop: 4,
+    color: "#6B7280",
+    ...TypeScale.bodySm,
+    marginBottom: Spacing.md,
+    marginTop: Spacing.xs,
   },
   settingsLabel: {
-    color: "#47642A",
-    fontSize: 12,
-    fontWeight: "800",
-    marginBottom: 8,
-    marginTop: 8,
+    color: "#6B7280",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
+    marginBottom: Spacing.sm,
+    marginTop: Spacing.sm,
     textTransform: "uppercase",
   },
   settingsInput: {
     backgroundColor: "#FFFFFF",
-    borderColor: "#DDE8C7",
-    borderRadius: 16,
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    color: "#29440F",
-    fontSize: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    color: "#1A1A1A",
+    ...TypeScale.bodyMd,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
   },
   groupDescriptionInput: {
     minHeight: 100,
   },
   settingsSaveButton: {
     alignItems: "center",
-    backgroundColor: "#5C8C1F",
-    borderRadius: 16,
-    marginTop: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    backgroundColor: "#2D6A4F",
+    borderRadius: Radius.lg,
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
   },
   settingsSaveButtonDisabled: {
     opacity: 0.6,
   },
   settingsSaveButtonText: {
     color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "800",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
   },
   joinInfoCard: {
     alignItems: "center",
-    backgroundColor: "#F6F8EE",
-    borderColor: "#DDE8C7",
-    borderRadius: 18,
+    backgroundColor: "#F8F8F8",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.lg,
     borderWidth: 1,
     flexDirection: "row",
     justifyContent: "space-between",
-    marginHorizontal: 16,
-    marginTop: 14,
-    padding: 14,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
+    padding: Spacing.md,
   },
   joinInfoTextWrap: {
     flex: 1,
-    paddingRight: 12,
+    paddingRight: Spacing.md,
   },
   joinInfoTitle: {
-    color: "#29440F",
-    fontSize: 15,
-    fontWeight: "800",
-    marginBottom: 4,
+    color: "#1A1A1A",
+    ...TypeScale.titleSm,
+    fontWeight: FontWeight.extrabold,
+    marginBottom: Spacing.xs,
   },
   joinInfoText: {
-    color: "#5F6E53",
-    fontSize: 13,
-    lineHeight: 19,
+    color: "#6B7280",
+    ...TypeScale.bodySm,
   },
   joinInfoButton: {
     alignItems: "center",
-    backgroundColor: "#5C8C1F",
-    borderRadius: 14,
+    backgroundColor: "#2D6A4F",
+    borderRadius: Radius.md,
     justifyContent: "center",
     minWidth: 104,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
   joinInfoButtonDisabled: {
     opacity: 0.6,
   },
   joinInfoButtonText: {
     color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "800",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.extrabold,
   },
-  errorCard: {
-    backgroundColor: "#FFF1EF",
-    borderColor: "#F0B6AE",
-    borderRadius: 18,
+  toastContainer: {
+    position: "absolute",
+    bottom: 100,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 50,
+  },
+  toast: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: Radius.xl,
     borderWidth: 1,
-    marginHorizontal: 16,
-    marginTop: 14,
-    padding: 14,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    marginHorizontal: Spacing.lg,
+    maxWidth: 420,
+    ...shadow("lg"),
   },
-  errorText: {
-    color: "#8A3D35",
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  infoCard: {
-    backgroundColor: "#EEF4E5",
-    borderColor: "#DDE8C7",
-    borderRadius: 18,
-    borderWidth: 1,
-    marginHorizontal: 16,
-    marginTop: 14,
-    padding: 14,
-  },
-  infoText: {
-    color: "#4F6240",
-    fontSize: 14,
-    lineHeight: 20,
+  toastText: {
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.semibold,
+    flex: 1,
+    marginHorizontal: Spacing.sm,
   },
   expenseSummaryCard: {
-    borderRadius: 22,
+    borderRadius: Radius.xl,
     borderWidth: 1,
-    marginHorizontal: 16,
-    marginTop: 14,
-    padding: 16,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
+    padding: Spacing.lg,
   },
   expenseSummaryHeader: {
     alignItems: "flex-start",
@@ -3346,96 +3366,94 @@ const styles = StyleSheet.create({
   },
   expenseSummaryHeaderTextWrap: {
     flex: 1,
-    paddingRight: 12,
+    paddingRight: Spacing.md,
   },
   expenseSummaryKicker: {
-    fontSize: 12,
-    fontWeight: "800",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
     letterSpacing: 0.7,
     textTransform: "uppercase",
   },
   expenseSummaryTitle: {
-    fontSize: 24,
-    fontWeight: "800",
-    marginTop: 6,
+    ...TypeScale.headingLg,
+    fontWeight: FontWeight.extrabold,
+    marginTop: Spacing.xs,
   },
   expenseSummaryText: {
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 8,
+    ...TypeScale.bodyMd,
+    marginTop: Spacing.sm,
   },
   expenseSummaryCountBadge: {
-    borderRadius: 999,
+    borderRadius: Radius.full,
     borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
   expenseSummaryCountText: {
-    fontSize: 12,
-    fontWeight: "800",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
   },
   expenseSummaryChipsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginTop: 14,
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
   },
   expenseSummaryChip: {
     alignItems: "center",
-    borderRadius: 999,
+    borderRadius: Radius.full,
     borderWidth: 1,
     flexDirection: "row",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.sm,
   },
   expenseSummaryChipText: {
-    fontSize: 12,
-    fontWeight: "700",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.bold,
   },
   messagesScroll: {
     flex: 1,
-    marginTop: 10,
+    marginTop: Spacing.sm,
   },
   messagesContent: {
-    paddingBottom: 20,
-    paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingBottom: Spacing.xl,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.sm,
   },
   emptyState: {
     alignItems: "center",
-    backgroundColor: "#F6F8EE",
-    borderColor: "#DDE8C7",
-    borderRadius: 24,
+    backgroundColor: "#F8F8F8",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius["2xl"],
     borderWidth: 1,
-    marginTop: 18,
-    paddingHorizontal: 22,
-    paddingVertical: 28,
+    marginTop: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing["3xl"],
   },
   emptyTitle: {
-    color: "#29440F",
-    fontSize: 20,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.headingSm,
+    fontWeight: FontWeight.extrabold,
     textAlign: "center",
   },
   emptyText: {
-    color: "#5F6E53",
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 8,
+    color: "#6B7280",
+    ...TypeScale.bodyMd,
+    marginTop: Spacing.sm,
     textAlign: "center",
   },
   messageBubble: {
-    borderRadius: 22,
+    borderRadius: Radius.xl,
     maxWidth: "82%",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
   },
   messageRow: {
     alignItems: "flex-end",
     flexDirection: "row",
-    gap: 10,
-    marginTop: 12,
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
   },
   theirMessageRow: {
     justifyContent: "flex-start",
@@ -3446,130 +3464,129 @@ const styles = StyleSheet.create({
   messageAvatarWrap: {
     width: 34,
     height: 34,
-    borderRadius: 17,
+    borderRadius: Radius.full,
     overflow: "hidden",
   },
   messageAvatarImage: {
     width: "100%",
     height: "100%",
-    borderRadius: 17,
-    backgroundColor: "#DDE8C7",
+    borderRadius: Radius.full,
+    backgroundColor: "#E8E8E8",
   },
   messageAvatarFallback: {
     alignItems: "center",
-    borderRadius: 17,
+    borderRadius: Radius.full,
     height: "100%",
     justifyContent: "center",
     width: "100%",
   },
   messageAvatarFallbackText: {
     color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "800",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.extrabold,
   },
   myMessageBubble: {
     alignSelf: "flex-end",
-    backgroundColor: "#5C8C1F",
+    backgroundColor: "#2D6A4F",
   },
   theirMessageBubble: {
     alignSelf: "flex-start",
-    backgroundColor: "#FAFCF5",
-    borderColor: "#DDE8C7",
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E8E8E8",
     borderWidth: 1,
   },
   messageSender: {
-    fontSize: 12,
-    fontWeight: "800",
-    marginBottom: 6,
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
+    marginBottom: Spacing.xs,
     textTransform: "uppercase",
     flexShrink: 1,
   },
   myMessageSender: {
-    color: "#EAF3DE",
+    color: "#F0F0F0",
   },
   theirMessageSender: {
-    color: "#47642A",
+    color: "#6B7280",
   },
   messageText: {
-    color: "#29440F",
-    fontSize: 15,
-    lineHeight: 21,
+    color: "#1A1A1A",
+    ...TypeScale.titleSm,
   },
   myMessageText: {
     color: "#FFFFFF",
   },
   messageTime: {
     color: "#7A8870",
-    fontSize: 12,
-    marginTop: 8,
+    ...TypeScale.labelMd,
+    marginTop: Spacing.sm,
     textAlign: "right",
   },
   myMessageTime: {
     color: "#D9E8C7",
   },
   sharedTripCard: {
-    borderRadius: 18,
+    borderRadius: Radius.lg,
     borderWidth: 1,
     marginTop: 2,
-    padding: 14,
+    padding: Spacing.md,
   },
   mySharedTripCard: {
     backgroundColor: "#F7FAF1",
-    borderColor: "#DDE8C7",
+    borderColor: "#E8E8E8",
   },
   theirSharedTripCard: {
     backgroundColor: "#FFFFFF",
-    borderColor: "#DDE8C7",
+    borderColor: "#E8E8E8",
   },
   sharedTripTopRow: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 10,
+    marginBottom: Spacing.sm,
   },
   sharedTripKicker: {
-    color: "#47642A",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#6B7280",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
   },
   mySharedTripKicker: {
-    color: "#47642A",
+    color: "#6B7280",
   },
   sharedTripSourceBadge: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
   },
   sharedTripHomeBadge: {
-    backgroundColor: "#E4EFD0",
+    backgroundColor: "#E5E7EB",
   },
   sharedTripDiscoverBadge: {
     backgroundColor: "#FFF2DA",
   },
   sharedTripSourceBadgeText: {
-    fontSize: 11,
-    fontWeight: "800",
+    ...TypeScale.labelSm,
+    fontWeight: FontWeight.extrabold,
   },
   sharedTripHomeBadgeText: {
-    color: "#3B6D11",
+    color: "#2D6A4F",
   },
   sharedTripDiscoverBadgeText: {
     color: "#8B5611",
   },
   sharedTripTitle: {
-    color: "#29440F",
-    fontSize: 18,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.titleLg,
+    fontWeight: FontWeight.extrabold,
   },
   mySharedTripTitle: {
-    color: "#29440F",
+    color: "#1A1A1A",
   },
   sharedTripDestination: {
     color: "#5A6E41",
-    fontSize: 14,
-    fontWeight: "700",
-    marginTop: 4,
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.bold,
+    marginTop: Spacing.xs,
   },
   mySharedTripDestination: {
     color: "#5A6E41",
@@ -3577,71 +3594,69 @@ const styles = StyleSheet.create({
   sharedTripMetaRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    marginTop: 10,
+    marginTop: Spacing.sm,
   },
   sharedTripMetaText: {
     color: "#627254",
-    fontSize: 13,
-    fontWeight: "700",
-    marginBottom: 4,
-    marginRight: 10,
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.bold,
+    marginBottom: Spacing.xs,
+    marginRight: Spacing.sm,
   },
   mySharedTripMetaText: {
     color: "#627254",
   },
   sharedTripSummary: {
     color: "#435238",
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 8,
+    ...TypeScale.bodyMd,
+    marginTop: Spacing.sm,
   },
   mySharedTripSummary: {
     color: "#435238",
   },
   sharedTripDetailsPreview: {
     color: "#57684A",
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 10,
+    ...TypeScale.bodySm,
+    marginTop: Spacing.sm,
   },
   mySharedTripDetailsPreview: {
     color: "#57684A",
   },
   sharedTripHint: {
     color: "#7A8870",
-    fontSize: 12,
-    fontWeight: "700",
-    marginTop: 10,
+    ...TypeScale.labelMd,
+    fontWeight: FontWeight.bold,
+    marginTop: Spacing.sm,
   },
   mySharedTripHint: {
     color: "#7A8870",
   },
   linkedTransportSection: {
-    marginTop: 14,
+    marginTop: Spacing.md,
   },
   linkedTransportSectionTitle: {
-    color: "#47642A",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#6B7280",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
     letterSpacing: 0.5,
     textTransform: "uppercase",
   },
   myLinkedTransportSectionTitle: {
-    color: "#47642A",
+    color: "#6B7280",
   },
   linkedTransportCard: {
-    borderRadius: 16,
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    marginTop: 10,
-    padding: 12,
+    marginTop: Spacing.sm,
+    padding: Spacing.md,
   },
   myLinkedTransportCard: {
     backgroundColor: "#FFFFFF",
-    borderColor: "#DDE8C7",
+    borderColor: "#E8E8E8",
   },
   theirLinkedTransportCard: {
-    backgroundColor: "#F6F8EE",
-    borderColor: "#DDE8C7",
+    backgroundColor: "#F8F8F8",
+    borderColor: "#E8E8E8",
   },
   linkedTransportTopRow: {
     alignItems: "flex-start",
@@ -3650,135 +3665,134 @@ const styles = StyleSheet.create({
   },
   linkedTransportTextWrap: {
     flex: 1,
-    paddingRight: 10,
+    paddingRight: Spacing.sm,
   },
   linkedTransportTitle: {
-    color: "#29440F",
-    fontSize: 15,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.titleSm,
+    fontWeight: FontWeight.extrabold,
   },
   myLinkedTransportTitle: {
-    color: "#29440F",
+    color: "#1A1A1A",
   },
   linkedTransportRoute: {
     color: "#5A6E41",
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 4,
+    ...TypeScale.bodySm,
+    marginTop: Spacing.xs,
   },
   myLinkedTransportRoute: {
     color: "#5A6E41",
   },
   linkedTransportAmount: {
-    color: "#29440F",
-    fontSize: 14,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
   },
   myLinkedTransportAmount: {
-    color: "#29440F",
+    color: "#1A1A1A",
   },
   linkedTransportMetaRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginTop: 10,
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
   },
   linkedTransportMetaText: {
     color: "#627254",
-    fontSize: 12,
-    fontWeight: "700",
+    ...TypeScale.labelMd,
+    fontWeight: FontWeight.bold,
   },
   myLinkedTransportMetaText: {
     color: "#627254",
   },
   linkedTransportActionsRow: {
     flexDirection: "row",
-    gap: 8,
-    marginTop: 12,
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
   },
   linkedTransportSecondaryButton: {
     alignItems: "center",
-    backgroundColor: "#EEF4E5",
-    borderColor: "#DDE8C7",
-    borderRadius: 14,
+    backgroundColor: "#F5F5F5",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.md,
     borderWidth: 1,
     flex: 1,
     flexDirection: "row",
-    gap: 6,
+    gap: Spacing.xs,
     justifyContent: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 11,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.sm,
   },
   myLinkedTransportSecondaryButton: {
-    backgroundColor: "#EEF4E5",
-    borderColor: "#DDE8C7",
+    backgroundColor: "#F5F5F5",
+    borderColor: "#E8E8E8",
   },
   linkedTransportSecondaryButtonText: {
-    color: "#47642A",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#6B7280",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
   },
   linkedTransportPrimaryButton: {
     alignItems: "center",
-    backgroundColor: "#5C8C1F",
-    borderRadius: 14,
+    backgroundColor: "#2D6A4F",
+    borderRadius: Radius.md,
     flex: 1,
     flexDirection: "row",
-    gap: 6,
+    gap: Spacing.xs,
     justifyContent: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 11,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.sm,
   },
   linkedTransportPrimaryButtonDisabled: {
     opacity: 0.6,
   },
   linkedTransportPrimaryButtonText: {
     color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "800",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
   },
   linkedTransportPostedBadge: {
     alignItems: "center",
-    borderRadius: 14,
+    borderRadius: Radius.md,
     flexDirection: "row",
-    gap: 8,
-    marginTop: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
   myLinkedTransportPostedBadge: {
     backgroundColor: "#E6F1DA",
   },
   theirLinkedTransportPostedBadge: {
-    backgroundColor: "#EEF4E5",
+    backgroundColor: "#F5F5F5",
   },
   linkedTransportPostedBadgeText: {
-    color: "#3B6D11",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#2D6A4F",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
   },
   linkedTransportMoreHint: {
     color: "#7A8870",
-    fontSize: 12,
-    fontWeight: "700",
-    marginTop: 10,
+    ...TypeScale.labelMd,
+    fontWeight: FontWeight.bold,
+    marginTop: Spacing.sm,
   },
   myLinkedTransportMoreHint: {
     color: "#7A8870",
   },
   expenseCard: {
-    borderRadius: 18,
+    borderRadius: Radius.lg,
     borderWidth: 1,
     marginTop: 2,
-    padding: 14,
+    padding: Spacing.md,
   },
   myExpenseCard: {
     backgroundColor: "#F7FAF1",
-    borderColor: "#DDE8C7",
+    borderColor: "#E8E8E8",
   },
   theirExpenseCard: {
     backgroundColor: "#FFFFFF",
-    borderColor: "#DDE8C7",
+    borderColor: "#E8E8E8",
   },
   expenseCardTopRow: {
     alignItems: "center",
@@ -3786,35 +3800,35 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   expenseCardKicker: {
-    color: "#47642A",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#6B7280",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
   },
   myExpenseCardKicker: {
-    color: "#47642A",
+    color: "#6B7280",
   },
   expenseCardAmount: {
-    color: "#29440F",
-    fontSize: 16,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.titleMd,
+    fontWeight: FontWeight.extrabold,
   },
   myExpenseCardAmount: {
-    color: "#29440F",
+    color: "#1A1A1A",
   },
   expenseCardTitle: {
-    color: "#29440F",
-    fontSize: 18,
-    fontWeight: "800",
-    marginTop: 10,
+    color: "#1A1A1A",
+    ...TypeScale.titleLg,
+    fontWeight: FontWeight.extrabold,
+    marginTop: Spacing.sm,
   },
   myExpenseCardTitle: {
-    color: "#29440F",
+    color: "#1A1A1A",
   },
   expenseCardMeta: {
     color: "#5A6E41",
-    fontSize: 14,
-    marginTop: 6,
+    ...TypeScale.bodyMd,
+    marginTop: Spacing.xs,
   },
   myExpenseCardMeta: {
     color: "#5A6E41",
@@ -3822,36 +3836,35 @@ const styles = StyleSheet.create({
   expenseCardChipsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginTop: 12,
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
   },
   expenseCardChip: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.sm,
   },
   myExpenseCardChip: {
     backgroundColor: "#E6F1DA",
   },
   theirExpenseCardChip: {
-    backgroundColor: "#EEF4E5",
+    backgroundColor: "#F5F5F5",
   },
   expenseCardChipText: {
-    color: "#47642A",
-    fontSize: 12,
-    fontWeight: "700",
+    color: "#6B7280",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.bold,
   },
   myExpenseCardChipText: {
-    color: "#47642A",
+    color: "#6B7280",
   },
   expenseRepaymentStatusRow: {
-    marginTop: 14,
+    marginTop: Spacing.md,
   },
   expenseRepaymentStatusText: {
     color: "#5A6E41",
-    fontSize: 13,
-    fontWeight: "700",
-    lineHeight: 19,
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.bold,
   },
   myExpenseRepaymentStatusText: {
     color: "#5A6E41",
@@ -3859,109 +3872,109 @@ const styles = StyleSheet.create({
   linkedExpenseOpenButton: {
     alignItems: "center",
     alignSelf: "flex-start",
-    borderRadius: 14,
+    borderRadius: Radius.md,
     flexDirection: "row",
-    gap: 8,
-    marginTop: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
   myLinkedExpenseOpenButton: {
     backgroundColor: "#E6F1DA",
   },
   theirLinkedExpenseOpenButton: {
-    backgroundColor: "#EEF4E5",
+    backgroundColor: "#F5F5F5",
   },
   linkedExpenseOpenButtonText: {
-    color: "#47642A",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#6B7280",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
   },
   expensePayButton: {
     alignItems: "center",
-    backgroundColor: "#5C8C1F",
-    borderRadius: 16,
+    backgroundColor: "#2D6A4F",
+    borderRadius: Radius.lg,
     flexDirection: "row",
-    gap: 8,
+    gap: Spacing.sm,
     justifyContent: "center",
-    marginTop: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
   },
   expensePayButtonDisabled: {
     opacity: 0.6,
   },
   expensePayButtonText: {
     color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "800",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.extrabold,
   },
   expensePaidBadge: {
     alignItems: "center",
-    borderRadius: 14,
+    borderRadius: Radius.md,
     flexDirection: "row",
-    gap: 8,
-    marginTop: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
   myExpensePaidBadge: {
     backgroundColor: "#E6F1DA",
   },
   theirExpensePaidBadge: {
-    backgroundColor: "#EEF4E5",
+    backgroundColor: "#F5F5F5",
   },
   expensePaidBadgeText: {
-    color: "#3B6D11",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#2D6A4F",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
   },
   composerBar: {
     alignItems: "flex-end",
-    backgroundColor: "#FAFCF5",
-    borderTopColor: "#DDE8C7",
+    backgroundColor: "#FFFFFF",
+    borderTopColor: "#E8E8E8",
     borderTopWidth: 1,
     flexDirection: "row",
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 12,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.md,
   },
   shareSavedButton: {
     alignItems: "center",
     backgroundColor: "#F4F8EC",
-    borderColor: "#DDE8C7",
-    borderRadius: 20,
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.xl,
     borderWidth: 1,
-    height: 48,
+    height: Layout.touchTarget,
     justifyContent: "center",
-    marginRight: 10,
-    width: 48,
+    marginRight: Spacing.sm,
+    width: Layout.touchTarget,
   },
   shareSavedButtonDisabled: {
     opacity: 0.55,
   },
   composerInput: {
     backgroundColor: "#FFFFFF",
-    borderColor: "#DDE8C7",
-    borderRadius: 20,
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.xl,
     borderWidth: 1,
-    color: "#29440F",
+    color: "#1A1A1A",
     flex: 1,
-    fontSize: 15,
+    ...TypeScale.titleSm,
     maxHeight: 120,
-    minHeight: 48,
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingVertical: 12,
+    minHeight: Layout.touchTarget,
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.md,
+    paddingVertical: Spacing.md,
   },
   sendButton: {
     alignItems: "center",
-    backgroundColor: "#5C8C1F",
-    borderRadius: 20,
-    height: 48,
+    backgroundColor: "#2D6A4F",
+    borderRadius: Radius.xl,
+    height: Layout.touchTarget,
     justifyContent: "center",
-    marginLeft: 10,
-    width: 48,
+    marginLeft: Spacing.sm,
+    width: Layout.touchTarget,
   },
   sendButtonDisabled: {
     opacity: 0.55,
@@ -3970,174 +3983,171 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(19, 29, 11, 0.26)",
     flex: 1,
     justifyContent: "flex-end",
-    padding: 16,
+    padding: Spacing.lg,
   },
   modalBackdrop: {
     ...StyleSheet.absoluteFillObject,
   },
   sheetCard: {
-    backgroundColor: "#FAFCF5",
-    borderColor: "#DDE8C7",
-    borderRadius: 28,
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius["3xl"],
     borderWidth: 1,
     maxHeight: "76%",
-    padding: 18,
+    padding: Spacing.lg,
   },
   sheetHeader: {
     alignItems: "flex-start",
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 14,
+    marginBottom: Spacing.md,
   },
   sheetHeaderTextWrap: {
     flex: 1,
-    paddingRight: 12,
+    paddingRight: Spacing.md,
   },
   sheetTitle: {
-    color: "#29440F",
-    fontSize: 20,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.headingSm,
+    fontWeight: FontWeight.extrabold,
   },
   sheetSubtitle: {
-    color: "#5F6E53",
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 6,
+    color: "#6B7280",
+    ...TypeScale.bodyMd,
+    marginTop: Spacing.xs,
   },
   sheetCloseButton: {
     alignItems: "center",
-    backgroundColor: "#EEF4E5",
-    borderRadius: 14,
+    backgroundColor: "#F5F5F5",
+    borderRadius: Radius.md,
     height: 34,
     justifyContent: "center",
     width: 34,
   },
   sheetEmptyState: {
     alignItems: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 20,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xl,
   },
   sheetEmptyTitle: {
-    color: "#29440F",
-    fontSize: 18,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.titleLg,
+    fontWeight: FontWeight.extrabold,
     textAlign: "center",
   },
   sheetEmptyText: {
-    color: "#5F6E53",
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 8,
+    color: "#6B7280",
+    ...TypeScale.bodyMd,
+    marginTop: Spacing.sm,
     textAlign: "center",
   },
   sheetPrimaryButton: {
     alignItems: "center",
-    backgroundColor: "#5C8C1F",
-    borderRadius: 16,
-    marginTop: 16,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
+    backgroundColor: "#2D6A4F",
+    borderRadius: Radius.lg,
+    marginTop: Spacing.lg,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
   },
   sheetPrimaryButtonText: {
     color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "800",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
   },
   sheetTextInput: {
     backgroundColor: "#FFFFFF",
-    borderColor: "#DDE8C7",
-    borderRadius: 16,
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    color: "#29440F",
-    fontSize: 15,
-    marginTop: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    color: "#1A1A1A",
+    ...TypeScale.titleSm,
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
   },
   sheetTripsContent: {
-    paddingBottom: 6,
+    paddingBottom: Spacing.xs,
   },
   sheetTripCard: {
-    backgroundColor: "#F6F8EE",
-    borderColor: "#DDE8C7",
-    borderRadius: 20,
+    backgroundColor: "#F8F8F8",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.xl,
     borderWidth: 1,
-    marginBottom: 12,
-    padding: 16,
+    marginBottom: Spacing.md,
+    padding: Spacing.lg,
   },
   sheetTripTopRow: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 10,
+    marginBottom: Spacing.sm,
   },
   sheetTripSourceBadge: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
   },
   sheetTripSourceBadgeText: {
-    fontSize: 11,
-    fontWeight: "800",
+    ...TypeScale.labelSm,
+    fontWeight: FontWeight.extrabold,
   },
   sheetTripDate: {
     color: "#6B7A5D",
-    fontSize: 12,
-    fontWeight: "700",
+    ...TypeScale.labelMd,
+    fontWeight: FontWeight.bold,
   },
   sheetTripTitle: {
-    color: "#29440F",
-    fontSize: 17,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.titleLg,
+    fontWeight: FontWeight.extrabold,
   },
   sheetTripDestination: {
     color: "#5A6E41",
-    fontSize: 14,
-    fontWeight: "700",
-    marginTop: 4,
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.bold,
+    marginTop: Spacing.xs,
   },
   sheetTripMetaRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    marginTop: 8,
+    marginTop: Spacing.sm,
   },
   sheetTripMetaText: {
     color: "#627254",
-    fontSize: 13,
-    fontWeight: "700",
-    marginBottom: 4,
-    marginRight: 10,
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.bold,
+    marginBottom: Spacing.xs,
+    marginRight: Spacing.sm,
   },
   sheetTripSummary: {
     color: "#4C5D3F",
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 8,
+    ...TypeScale.bodySm,
+    marginTop: Spacing.sm,
   },
   sheetShareButton: {
     alignItems: "center",
-    backgroundColor: "#5C8C1F",
-    borderRadius: 14,
-    marginTop: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
+    backgroundColor: "#2D6A4F",
+    borderRadius: Radius.md,
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
   sheetShareButtonDisabled: {
     opacity: 0.6,
   },
   sheetShareButtonText: {
     color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "800",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.extrabold,
   },
   previewCard: {
-    backgroundColor: "#FAFCF5",
-    borderColor: "#DDE8C7",
-    borderRadius: 28,
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius["3xl"],
     borderWidth: 1,
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
     maxHeight: "82%",
-    padding: 18,
+    padding: Spacing.lg,
   },
   previewHeader: {
     alignItems: "flex-start",
@@ -4146,55 +4156,54 @@ const styles = StyleSheet.create({
   },
   previewHeaderTextWrap: {
     flex: 1,
-    paddingRight: 12,
+    paddingRight: Spacing.md,
   },
   previewTitle: {
-    color: "#29440F",
-    fontSize: 21,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.headingMd,
+    fontWeight: FontWeight.extrabold,
   },
   previewDestination: {
     color: "#5A6E41",
-    fontSize: 14,
-    fontWeight: "700",
-    marginTop: 6,
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.bold,
+    marginTop: Spacing.xs,
   },
   previewMetaRow: {
     alignItems: "center",
     flexDirection: "row",
     flexWrap: "wrap",
-    marginTop: 14,
+    marginTop: Spacing.md,
   },
   previewMetaText: {
     color: "#627254",
-    fontSize: 13,
-    fontWeight: "700",
-    marginBottom: 4,
-    marginLeft: 10,
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.bold,
+    marginBottom: Spacing.xs,
+    marginLeft: Spacing.sm,
   },
   previewSummary: {
     color: "#435238",
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 14,
+    ...TypeScale.bodyMd,
+    marginTop: Spacing.md,
   },
   previewLinkedTransportSection: {
-    marginTop: 16,
+    marginTop: Spacing.lg,
   },
   previewLinkedTransportTitle: {
-    color: "#47642A",
-    fontSize: 13,
-    fontWeight: "800",
+    color: "#6B7280",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.extrabold,
     letterSpacing: 0.5,
     textTransform: "uppercase",
   },
   previewLinkedTransportCard: {
-    backgroundColor: "#F6F8EE",
-    borderColor: "#DDE8C7",
-    borderRadius: 18,
+    backgroundColor: "#F8F8F8",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    marginTop: 10,
-    padding: 14,
+    marginTop: Spacing.sm,
+    padding: Spacing.md,
   },
   previewLinkedTransportTopRow: {
     alignItems: "flex-start",
@@ -4203,124 +4212,122 @@ const styles = StyleSheet.create({
   },
   previewLinkedTransportTextWrap: {
     flex: 1,
-    paddingRight: 10,
+    paddingRight: Spacing.sm,
   },
   previewLinkedTransportCardTitle: {
-    color: "#29440F",
-    fontSize: 15,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.titleSm,
+    fontWeight: FontWeight.extrabold,
   },
   previewLinkedTransportRoute: {
     color: "#5A6E41",
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 4,
+    ...TypeScale.bodySm,
+    marginTop: Spacing.xs,
   },
   previewLinkedTransportAmount: {
-    color: "#29440F",
-    fontSize: 14,
-    fontWeight: "800",
+    color: "#1A1A1A",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
   },
   previewLinkedTransportMetaRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginTop: 10,
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
   },
   previewLinkedTransportMetaText: {
     color: "#627254",
-    fontSize: 12,
-    fontWeight: "700",
+    ...TypeScale.labelMd,
+    fontWeight: FontWeight.bold,
   },
   previewLinkedTransportButton: {
     alignItems: "center",
     alignSelf: "flex-start",
-    backgroundColor: "#EEF4E5",
-    borderColor: "#DDE8C7",
-    borderRadius: 14,
+    backgroundColor: "#F5F5F5",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.md,
     borderWidth: 1,
     flexDirection: "row",
-    gap: 6,
+    gap: Spacing.xs,
     justifyContent: "center",
-    marginTop: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
   previewLinkedTransportButtonText: {
-    color: "#47642A",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#6B7280",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
   },
   previewDetailsScroll: {
-    marginTop: 14,
+    marginTop: Spacing.md,
   },
   previewDetailsContent: {
-    paddingBottom: 6,
+    paddingBottom: Spacing.xs,
   },
   previewDetailsText: {
     color: "#46563A",
-    fontSize: 14,
-    lineHeight: 22,
+    ...TypeScale.bodyMd,
   },
   expensePreviewCard: {
-    backgroundColor: "#F6F8EE",
-    borderColor: "#DDE8C7",
-    borderRadius: 20,
+    backgroundColor: "#F8F8F8",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.xl,
     borderWidth: 1,
-    marginTop: 16,
-    padding: 16,
+    marginTop: Spacing.lg,
+    padding: Spacing.lg,
   },
   expensePreviewKicker: {
-    color: "#5C8C1F",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#2D6A4F",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
     letterSpacing: 0.6,
     textTransform: "uppercase",
   },
   expensePreviewTitle: {
-    color: "#29440F",
-    fontSize: 20,
-    fontWeight: "800",
-    marginTop: 6,
+    color: "#1A1A1A",
+    ...TypeScale.headingSm,
+    fontWeight: FontWeight.extrabold,
+    marginTop: Spacing.xs,
   },
   expensePreviewMeta: {
     color: "#5A6E41",
-    fontSize: 14,
-    marginTop: 8,
+    ...TypeScale.bodyMd,
+    marginTop: Spacing.sm,
   },
   expensePreviewPills: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginTop: 14,
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
   },
   expensePreviewPill: {
     backgroundColor: "#FFFFFF",
-    borderColor: "#DDE8C7",
-    borderRadius: 999,
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.full,
     borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.sm,
   },
   expensePreviewPillText: {
     color: "#4E6630",
-    fontSize: 12,
-    fontWeight: "700",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.bold,
   },
   previewSaveButton: {
     alignItems: "center",
-    backgroundColor: "#5C8C1F",
-    borderRadius: 16,
-    marginTop: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    backgroundColor: "#2D6A4F",
+    borderRadius: Radius.lg,
+    marginTop: Spacing.lg,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
   },
   previewSaveButtonDisabled: {
     opacity: 0.6,
   },
   previewSaveButtonText: {
     color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "800",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
   },
 });
