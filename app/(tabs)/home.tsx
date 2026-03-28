@@ -157,6 +157,7 @@ export default function HomeTabScreen() {
   const homeFocusHandledRef = useRef(false);
   const [typingMessageId, setTypingMessageId] = useState<string | null>(null);
   const [typingVisibleText, setTypingVisibleText] = useState("");
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
   const isKeyboardOpenRef = useRef(false);
   const keyboardHeightRef = useRef(0);
 
@@ -193,6 +194,25 @@ export default function HomeTabScreen() {
     currentChat?.state ?? createEmptyPlannerState(buildInitialAssistantMessage(profileName));
   const latestPlan = currentPlannerState.latestPlan;
   const followUpMessages = currentPlannerState.followUpMessages ?? [];
+  const plannerContextChips = useMemo(
+    () =>
+      [
+        currentPlannerState.budget,
+        currentPlannerState.days,
+        currentPlannerState.travelers,
+        currentPlannerState.transportPreference,
+        currentPlannerState.timing,
+        currentPlannerState.destination,
+      ].map((value) => value.trim()).filter(Boolean),
+    [
+      currentPlannerState.budget,
+      currentPlannerState.days,
+      currentPlannerState.destination,
+      currentPlannerState.timing,
+      currentPlannerState.transportPreference,
+      currentPlannerState.travelers,
+    ]
+  );
   const messagesScrollRef = useRef<ScrollView | null>(null);
   const selectedTransport =
     selectedTransportIndex !== null
@@ -300,11 +320,13 @@ export default function HomeTabScreen() {
 
     const showSubscription = Keyboard.addListener(showEvent, (event) => {
       isKeyboardOpenRef.current = true;
+      setIsKeyboardOpen(true);
       keyboardHeightRef.current = event?.endCoordinates?.height ?? 0;
       scrollMessagesToBottom(true);
     });
     const hideSubscription = Keyboard.addListener(hideEvent, () => {
       isKeyboardOpenRef.current = false;
+      setIsKeyboardOpen(false);
       keyboardHeightRef.current = 0;
     });
 
@@ -1362,7 +1384,7 @@ export default function HomeTabScreen() {
       <KeyboardAvoidingView
         style={styles.flex1}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 8 : 0}
+        keyboardVerticalOffset={0}
       >
       <View style={styles.chatShell}>
             <View
@@ -1407,58 +1429,20 @@ export default function HomeTabScreen() {
             </View>
 
             <View style={styles.chatArea}>
-              {[currentPlannerState.budget,
-                currentPlannerState.days,
-                currentPlannerState.travelers,
-                currentPlannerState.transportPreference,
-                currentPlannerState.timing,
-                currentPlannerState.destination,
-              ].filter(Boolean).length > 0 ? (
+              {plannerContextChips.length > 0 ? (
                 <View style={[styles.contextStrip, { backgroundColor: colors.cardAlt, borderColor: colors.border }]}>
                   <Text style={[styles.contextStripTitle, { color: colors.textMuted }]}>Current plan</Text>
                   <View style={styles.profileMetaRow}>
-                    {currentPlannerState.budget ? (
-                      <View style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
+                    {plannerContextChips.map((chip, index) => (
+                      <View
+                        key={`${chip}-${index}`}
+                        style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}
+                      >
                         <Text style={[styles.profileMetaChipText, { color: colors.textPrimary }]}>
-                          {currentPlannerState.budget}
+                          {chip}
                         </Text>
                       </View>
-                    ) : null}
-                    {currentPlannerState.days ? (
-                      <View style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
-                        <Text style={[styles.profileMetaChipText, { color: colors.textPrimary }]}>
-                          {currentPlannerState.days}
-                        </Text>
-                      </View>
-                    ) : null}
-                    {currentPlannerState.travelers ? (
-                      <View style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
-                        <Text style={[styles.profileMetaChipText, { color: colors.textPrimary }]}>
-                          {currentPlannerState.travelers}
-                        </Text>
-                      </View>
-                    ) : null}
-                    {currentPlannerState.transportPreference ? (
-                      <View style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
-                        <Text style={[styles.profileMetaChipText, { color: colors.textPrimary }]}>
-                          {currentPlannerState.transportPreference}
-                        </Text>
-                      </View>
-                    ) : null}
-                    {currentPlannerState.timing ? (
-                      <View style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
-                        <Text style={[styles.profileMetaChipText, { color: colors.textPrimary }]}>
-                          {currentPlannerState.timing}
-                        </Text>
-                      </View>
-                    ) : null}
-                    {currentPlannerState.destination ? (
-                      <View style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
-                        <Text style={[styles.profileMetaChipText, { color: colors.textPrimary }]}>
-                          {currentPlannerState.destination}
-                        </Text>
-                      </View>
-                    ) : null}
+                    ))}
                   </View>
                 </View>
               ) : null}
@@ -1561,7 +1545,7 @@ export default function HomeTabScreen() {
                 planning={planning}
                 step={currentPlannerState.step}
                 colors={colors}
-                insetBottom={insets.bottom}
+                insetBottom={isKeyboardOpen ? 0 : insets.bottom}
                 onChangeText={setChatInput}
                 onSend={() => { void sendPlannerMessage(chatInput); }}
                 onReset={() => { void resetConversation(); }}
