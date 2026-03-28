@@ -15,7 +15,9 @@ import {
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -23,9 +25,18 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAppTheme } from "../../components/app-theme-provider";
+import { DismissKeyboard } from "../../components/dismiss-keyboard";
+import {
+  FontWeight,
+  Layout,
+  Radius,
+  Spacing,
+  TypeScale,
+  shadow,
+} from "../../constants/design-system";
 import { auth, db } from "../../firebase";
 import {
   createSuggestedGroupKey,
@@ -36,7 +47,7 @@ import {
   type GroupAccessType,
   type TravelGroup,
 } from "../../utils/groups";
-import { getProfileDisplayName } from "../../utils/profile-info";
+import { extractPersonalProfile, getProfileDisplayName } from "../../utils/profile-info";
 import {
   parsePublicProfile,
   type PublicProfile,
@@ -48,6 +59,7 @@ import {
 } from "../../utils/trip-requests";
 
 type AvatarProps = {
+  imageUri?: string;
   label: string;
   photoUrl?: string;
   size?: number;
@@ -238,7 +250,7 @@ function GroupRow({
       onPress={onPress}
       style={styles.groupRow}
     >
-      <Avatar label={avatarLabel} size={58} />
+      <Avatar imageUri={group.photoUrl} label={avatarLabel} size={58} />
       <View style={styles.groupRowTextWrap}>
         <View style={styles.groupRowTitleRow}>
           <Text numberOfLines={1} style={styles.groupRowTitle}>
@@ -254,7 +266,7 @@ function GroupRow({
         <View style={styles.groupRowMetaRow}>
           <View style={[styles.groupTypeBadge, isPrivate && styles.groupTypeBadgePrivate]}>
             <MaterialIcons
-              color={isPrivate ? "#F5C979" : "#9FD7FF"}
+              color={isPrivate ? "#FCD34D" : "#9FD7FF"}
               name={isPrivate ? "lock-outline" : "public"}
               size={14}
             />
@@ -306,7 +318,7 @@ function TripRequestCard({
         {
           backgroundColor: colors.card,
           borderColor: colors.border,
-          shadowColor: isDark ? "#000000" : "#1E2A12",
+          shadowColor: isDark ? "#000000" : "#1A1A1A",
         },
       ]}
     >
@@ -456,6 +468,7 @@ function TripRequestCard({
 export default function GroupsTabScreen() {
   const router = useRouter();
   const { colors } = useAppTheme();
+  const insets = useSafeAreaInsets();
 
   const [user, setUser] = useState<User | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -470,6 +483,7 @@ export default function GroupsTabScreen() {
   const [updatingTripRequestId, setUpdatingTripRequestId] = useState<string | null>(null);
 
   const [profileName, setProfileName] = useState("Traveler");
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState("");
   const [username, setUsername] = useState("");
   const [groups, setGroups] = useState<TravelGroup[]>([]);
   const [publicProfiles, setPublicProfiles] = useState<PublicProfile[]>([]);
@@ -555,6 +569,14 @@ export default function GroupsTabScreen() {
                   : undefined,
               username: typeof profileData.username === "string" ? profileData.username : null,
             })
+          );
+          setProfileAvatarUrl(
+            extractPersonalProfile({
+              profileInfo:
+                profileData.profileInfo && typeof profileData.profileInfo === "object"
+                  ? (profileData.profileInfo as Record<string, unknown>)
+                  : undefined,
+            }).avatarUrl
           );
           setUsername(typeof profileData.username === "string" ? profileData.username : "");
           setLoadingProfile(false);
@@ -780,7 +802,10 @@ export default function GroupsTabScreen() {
 
         transaction.update(groupRef, {
           memberCount: nextMemberIds.length,
+          [`memberAvatarUrlsById.${user.uid}`]: profileAvatarUrl,
           memberIds: nextMemberIds,
+          [`memberLabelsById.${user.uid}`]: profileName,
+          [`memberUsernamesById.${user.uid}`]: username,
           updatedAt: serverTimestamp(),
         });
       });
@@ -867,8 +892,18 @@ export default function GroupsTabScreen() {
         invitedUserIds: dedupedInviteIds,
         joinKeyNormalized: normalizedKey,
         memberCount: 1,
+        memberAvatarUrlsById: {
+          [user.uid]: profileAvatarUrl,
+        },
         memberIds: [user.uid],
+        memberLabelsById: {
+          [user.uid]: profileName,
+        },
+        memberUsernamesById: {
+          [user.uid]: username,
+        },
         name: trimmedName,
+        photoUrl: "",
         updatedAt: serverTimestamp(),
       });
 
@@ -1096,7 +1131,7 @@ export default function GroupsTabScreen() {
         style={[styles.loader, { backgroundColor: colors.screenSoft }]}
         edges={["top", "left", "right"]}
       >
-        <ActivityIndicator size="large" color="#5C8C1F" />
+        <ActivityIndicator size="large" color="#2D6A4F" />
       </SafeAreaView>
     );
   }
@@ -1106,7 +1141,18 @@ export default function GroupsTabScreen() {
       style={[styles.screen, { backgroundColor: colors.screenSoft }]}
       edges={["top", "left", "right"]}
     >
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <DismissKeyboard>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior="padding"
+        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 8 : 0}
+      >
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+      >
         <View style={styles.topBar}>
           <View style={styles.topBarTextWrap}>
             <Text style={[styles.pageTitle, { color: colors.textPrimary }]}>Groups</Text>
@@ -1407,6 +1453,8 @@ export default function GroupsTabScreen() {
           </View>
         ) : null}
       </ScrollView>
+      </KeyboardAvoidingView>
+      </DismissKeyboard>
 
       <Modal
         animationType="fade"
@@ -1506,7 +1554,7 @@ export default function GroupsTabScreen() {
                 }}
                 style={styles.modalClose}
               >
-                <MaterialIcons color="#3E5B21" name="close" size={22} />
+                <MaterialIcons color="#374151" name="close" size={22} />
               </TouchableOpacity>
             </View>
 
@@ -1557,7 +1605,7 @@ export default function GroupsTabScreen() {
                 onPress={() => setJoinKeyModalVisible(false)}
                 style={styles.modalClose}
               >
-                <MaterialIcons color="#3E5B21" name="close" size={22} />
+                <MaterialIcons color="#374151" name="close" size={22} />
               </TouchableOpacity>
             </View>
 
@@ -1568,7 +1616,7 @@ export default function GroupsTabScreen() {
                 clearFeedback();
               }}
               placeholder="Enter private key"
-              placeholderTextColor="#809071"
+              placeholderTextColor="#9CA3AF"
               style={styles.modalInput}
               value={joinKeyValue}
             />
@@ -1607,15 +1655,18 @@ export default function GroupsTabScreen() {
                 onPress={() => setComposerVisible(false)}
                 style={styles.modalClose}
               >
-                <MaterialIcons color="#3E5B21" name="close" size={22} />
+                <MaterialIcons color="#374151" name="close" size={22} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
               <TextInput
                 onChangeText={setGroupName}
                 placeholder="Group name"
-                placeholderTextColor="#809071"
+                placeholderTextColor="#9CA3AF"
                 style={styles.modalInput}
                 value={groupName}
               />
@@ -1625,7 +1676,7 @@ export default function GroupsTabScreen() {
                 numberOfLines={4}
                 onChangeText={setGroupDescription}
                 placeholder="What is this group about?"
-                placeholderTextColor="#809071"
+                placeholderTextColor="#9CA3AF"
                 style={[styles.modalInput, styles.modalTextarea]}
                 textAlignVertical="top"
                 value={groupDescription}
@@ -1644,7 +1695,7 @@ export default function GroupsTabScreen() {
                   ]}
                 >
                   <MaterialIcons
-                    color={groupAccess === "public" ? "#FFFFFF" : "#6C7D58"}
+                    color={groupAccess === "public" ? "#FFFFFF" : "#6B7280"}
                     name="public"
                     size={16}
                   />
@@ -1672,7 +1723,7 @@ export default function GroupsTabScreen() {
                   ]}
                 >
                   <MaterialIcons
-                    color={groupAccess === "private" ? "#FFFFFF" : "#6C7D58"}
+                    color={groupAccess === "private" ? "#FFFFFF" : "#6B7280"}
                     name="lock-outline"
                     size={16}
                   />
@@ -1702,7 +1753,7 @@ export default function GroupsTabScreen() {
                     autoCapitalize="characters"
                     onChangeText={(value) => setGroupJoinKey(normalizeGroupJoinKey(value))}
                     placeholder="TEAM2026"
-                    placeholderTextColor="#809071"
+                    placeholderTextColor="#9CA3AF"
                     style={styles.modalInput}
                     value={groupJoinKey}
                   />
@@ -1739,7 +1790,7 @@ export default function GroupsTabScreen() {
                         <Text style={styles.selectedInviteText}>
                           {invitedProfile.username || invitedProfile.displayName}
                         </Text>
-                        <MaterialIcons color="#6C7D58" name="close" size={16} />
+                        <MaterialIcons color="#6B7280" name="close" size={16} />
                       </TouchableOpacity>
                     );
                   })}
@@ -1749,7 +1800,7 @@ export default function GroupsTabScreen() {
               <TextInput
                 onChangeText={setInviteSearchQuery}
                 placeholder="Search public users"
-                placeholderTextColor="#809071"
+                placeholderTextColor="#9CA3AF"
                 style={styles.modalInput}
                 value={inviteSearchQuery}
               />
@@ -1807,7 +1858,7 @@ export default function GroupsTabScreen() {
                 onPress={() => setRequestComposerVisible(false)}
                 style={styles.modalClose}
               >
-                <MaterialIcons color="#3E5B21" name="close" size={22} />
+                <MaterialIcons color="#374151" name="close" size={22} />
               </TouchableOpacity>
             </View>
 
@@ -1839,7 +1890,7 @@ export default function GroupsTabScreen() {
               <TextInput
                 onChangeText={setRequestDestination}
                 placeholder="Destination"
-                placeholderTextColor="#809071"
+                placeholderTextColor="#9CA3AF"
                 style={styles.modalInput}
                 value={requestDestination}
               />
@@ -1848,14 +1899,14 @@ export default function GroupsTabScreen() {
                 <TextInput
                   onChangeText={setRequestBudget}
                   placeholder="Budget"
-                  placeholderTextColor="#809071"
+                  placeholderTextColor="#9CA3AF"
                   style={[styles.modalInput, styles.requestGridInput]}
                   value={requestBudget}
                 />
                 <TextInput
                   onChangeText={setRequestTiming}
                   placeholder="When"
-                  placeholderTextColor="#809071"
+                  placeholderTextColor="#9CA3AF"
                   style={[styles.modalInput, styles.requestGridInput]}
                   value={requestTiming}
                 />
@@ -1864,7 +1915,7 @@ export default function GroupsTabScreen() {
               <TextInput
                 onChangeText={setRequestTravelers}
                 placeholder="How many people"
-                placeholderTextColor="#809071"
+                placeholderTextColor="#9CA3AF"
                 style={styles.modalInput}
                 value={requestTravelers}
               />
@@ -1874,7 +1925,7 @@ export default function GroupsTabScreen() {
                 numberOfLines={4}
                 onChangeText={setRequestNote}
                 placeholder="What kind of trip is it? Food, beaches, budget vibe, roadtrip energy..."
-                placeholderTextColor="#809071"
+                placeholderTextColor="#9CA3AF"
                 style={[styles.modalInput, styles.modalTextarea]}
                 textAlignVertical="top"
                 value={requestNote}
@@ -1928,12 +1979,12 @@ export default function GroupsTabScreen() {
 
 const styles = StyleSheet.create({
   screen: {
-    backgroundColor: "#EAF3DE",
+    backgroundColor: "#F0F0F0",
     flex: 1,
   },
   loader: {
     alignItems: "center",
-    backgroundColor: "#EAF3DE",
+    backgroundColor: "#F0F0F0",
     flex: 1,
     justifyContent: "center",
   },
@@ -1941,96 +1992,89 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     maxWidth: 980,
     paddingBottom: 128,
-    paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.md,
     width: "100%",
   },
   topBar: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 14,
+    marginBottom: Spacing.md,
     minHeight: 56,
+    borderRadius: Radius.lg,
   },
   topBarTextWrap: {
     flex: 1,
-    paddingRight: 16,
+    paddingRight: Spacing.lg,
   },
   pageTitle: {
-    color: "#29440F",
-    fontSize: 30,
-    fontWeight: "800",
-    lineHeight: 36,
+    color: "#1A1A1A",
+    ...TypeScale.displayMd,
   },
   pageSubtitle: {
-    color: "#5F6E53",
-    fontSize: 14,
-    lineHeight: 20,
+    ...TypeScale.bodyMd,
+    color: "#6B7280",
     marginTop: 6,
   },
   topBarCircleButton: {
     alignItems: "center",
-    backgroundColor: "#5C8C1F",
-    borderColor: "#D6E8AE",
-    borderRadius: 28,
+    backgroundColor: "#2D6A4F",
+    borderColor: "#D1D5DB",
+    borderRadius: Radius["3xl"],
     borderWidth: 3,
     height: 56,
     justifyContent: "center",
-    shadowColor: "#1E2A12",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.12,
-    shadowRadius: 14,
+    ...shadow("lg"),
     width: 56,
   },
   searchShell: {
     alignItems: "center",
-    backgroundColor: "#FAFCF5",
-    borderColor: "#DDE8C7",
-    borderRadius: 18,
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.lg,
     borderWidth: 1,
     flexDirection: "row",
-    marginBottom: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    marginBottom: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
   },
   searchInput: {
-    color: "#29440F",
+    color: "#1A1A1A",
     flex: 1,
-    fontSize: 16,
-    marginLeft: 12,
+    ...TypeScale.bodyLg,
+    marginLeft: Spacing.md,
   },
   feedbackCardError: {
     backgroundColor: "#FFF1EF",
     borderColor: "#F0B6AE",
-    borderRadius: 16,
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    marginBottom: 12,
-    padding: 12,
+    marginBottom: Spacing.md,
+    padding: Spacing.md,
   },
   feedbackTextError: {
-    color: "#8A3D35",
-    fontSize: 14,
-    lineHeight: 20,
+    ...TypeScale.bodyMd,
+    color: "#991B1B",
   },
   feedbackCardSuccess: {
-    backgroundColor: "#F3F9E6",
-    borderColor: "#C9DF98",
-    borderRadius: 16,
+    backgroundColor: "#F0FFF4",
+    borderColor: "#A7F3D0",
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    marginBottom: 12,
-    padding: 12,
+    marginBottom: Spacing.md,
+    padding: Spacing.md,
   },
   feedbackTextSuccess: {
-    color: "#3B6D11",
-    fontSize: 14,
-    lineHeight: 20,
+    ...TypeScale.bodyMd,
+    color: "#2D6A4F",
   },
   storiesRow: {
-    marginBottom: 18,
+    marginBottom: Spacing.lg,
   },
   storiesContent: {
-    gap: 14,
-    paddingRight: 12,
+    gap: Spacing.md,
+    paddingRight: Spacing.md,
   },
   storyButton: {
     alignItems: "center",
@@ -2039,74 +2083,73 @@ const styles = StyleSheet.create({
   avatarWrap: {
     alignItems: "center",
   },
+  avatarImage: {
+    backgroundColor: "#F5F5F5",
+    height: "100%",
+    width: "100%",
+  },
   avatarCircle: {
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
   },
-  avatarImage: {
-    height: "100%",
-    width: "100%",
-  },
   avatarText: {
     color: "#FFFFFF",
-    fontWeight: "800",
+    fontWeight: FontWeight.extrabold,
   },
   avatarSubtitle: {
-    color: "#6E7C61",
-    fontSize: 12,
-    marginTop: 4,
+    ...TypeScale.labelLg,
+    color: "#9CA3AF",
+    marginTop: Spacing.xs,
   },
   storyLabel: {
-    color: "#29440F",
-    fontSize: 14,
-    fontWeight: "700",
-    marginTop: 10,
+    ...TypeScale.bodyMd,
+    color: "#1A1A1A",
+    fontWeight: FontWeight.bold,
+    marginTop: Spacing.sm,
     textAlign: "center",
   },
   storyHint: {
-    color: "#6E7C61",
-    fontSize: 12,
-    marginTop: 4,
+    ...TypeScale.labelLg,
+    color: "#9CA3AF",
+    marginTop: Spacing.xs,
     textAlign: "center",
   },
   sectionBlock: {
-    marginTop: 12,
+    marginTop: Spacing.md,
   },
   sectionHeader: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 10,
-    marginTop: 8,
+    marginBottom: Spacing.sm,
+    marginTop: Spacing.sm,
+    borderRadius: 1,
   },
   sectionTitle: {
-    color: "#29440F",
-    fontSize: 22,
-    fontWeight: "800",
+    ...TypeScale.headingMd,
+    color: "#1A1A1A",
+    fontWeight: FontWeight.extrabold,
   },
   sectionMeta: {
-    color: "#5F6E53",
-    fontSize: 14,
-    fontWeight: "700",
+    ...TypeScale.bodyMd,
+    color: "#6B7280",
+    fontWeight: FontWeight.bold,
   },
   sectionSupportText: {
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 4,
+    ...TypeScale.bodyMd,
+    marginBottom: Spacing.xs,
   },
   requestCardsContent: {
-    paddingRight: 20,
+    paddingRight: Spacing.xl,
   },
   requestCard: {
-    borderRadius: 28,
+    borderRadius: Radius["3xl"],
     borderWidth: 1,
-    marginRight: 14,
+    marginRight: Spacing.md,
     minHeight: 252,
-    padding: 18,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.1,
-    shadowRadius: 18,
+    padding: Spacing.lg,
+    ...shadow("lg"),
     width: 300,
   },
   requestCardTopRow: {
@@ -2116,266 +2159,255 @@ const styles = StyleSheet.create({
   },
   requestCardTitleWrap: {
     flex: 1,
-    paddingRight: 12,
+    paddingRight: Spacing.md,
   },
   requestCardEyebrow: {
-    fontSize: 12,
-    fontWeight: "800",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
     letterSpacing: 0.7,
     textTransform: "uppercase",
   },
   requestCardTitle: {
-    fontSize: 24,
-    fontWeight: "800",
-    lineHeight: 28,
+    ...TypeScale.headingLg,
+    fontWeight: FontWeight.extrabold,
     marginTop: 6,
   },
   requestCardCreator: {
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 8,
+    ...TypeScale.bodyMd,
+    marginTop: Spacing.sm,
   },
   requestCountBadge: {
     alignItems: "center",
-    borderRadius: 999,
+    borderRadius: Radius.full,
     borderWidth: 1,
     flexDirection: "row",
     gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.sm,
   },
   requestCountText: {
-    fontSize: 13,
-    fontWeight: "800",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.extrabold,
   },
   requestChipsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginTop: 14,
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
   },
   requestChip: {
     alignItems: "center",
-    borderRadius: 999,
+    borderRadius: Radius.full,
     borderWidth: 1,
     flexDirection: "row",
     gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.sm,
   },
   requestChipText: {
-    fontSize: 12,
-    fontWeight: "700",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.bold,
   },
   requestCardNote: {
     flex: 1,
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 14,
+    ...TypeScale.bodyMd,
+    marginTop: Spacing.md,
   },
   requestCardFooter: {
-    marginTop: 16,
+    marginTop: Spacing.lg,
   },
   requestFooterText: {
-    fontSize: 13,
-    lineHeight: 18,
+    ...TypeScale.bodySm,
   },
   requestActionsRow: {
     flexDirection: "row",
-    gap: 10,
-    marginTop: 12,
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
   },
   requestPrimaryButton: {
     alignItems: "center",
-    borderRadius: 16,
+    borderRadius: Radius.lg,
     justifyContent: "center",
     minHeight: 46,
-    paddingHorizontal: 14,
+    paddingHorizontal: Spacing.md,
   },
   requestPrimaryButtonText: {
+    ...TypeScale.bodyMd,
     color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "800",
+    fontWeight: FontWeight.extrabold,
   },
   requestSecondaryButton: {
     alignItems: "center",
-    borderRadius: 16,
+    borderRadius: Radius.lg,
     borderWidth: 1,
     justifyContent: "center",
     minHeight: 46,
-    paddingHorizontal: 14,
+    paddingHorizontal: Spacing.md,
   },
   requestSecondaryButtonText: {
-    fontSize: 14,
-    fontWeight: "800",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
   },
   requestButtonDisabled: {
     opacity: 0.65,
   },
   requestEmptyState: {
     alignItems: "center",
-    borderRadius: 28,
+    borderRadius: Radius["3xl"],
     borderWidth: 1,
-    paddingHorizontal: 20,
-    paddingVertical: 24,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing["2xl"],
   },
   requestEmptyIcon: {
     alignItems: "center",
-    borderRadius: 22,
+    borderRadius: Radius.xl,
     borderWidth: 1,
     height: 62,
     justifyContent: "center",
     width: 62,
   },
   requestEmptyTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    marginTop: 14,
+    ...TypeScale.headingSm,
+    fontWeight: FontWeight.extrabold,
+    marginTop: Spacing.md,
     textAlign: "center",
   },
   requestEmptyText: {
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 8,
+    ...TypeScale.bodyMd,
+    marginTop: Spacing.sm,
     textAlign: "center",
   },
   inlineCreateRequestButton: {
     alignItems: "center",
-    borderRadius: 16,
+    borderRadius: Radius.lg,
     flexDirection: "row",
-    gap: 8,
-    marginTop: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    gap: Spacing.sm,
+    marginTop: Spacing.lg,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
   },
   inlineCreateRequestButtonText: {
+    ...TypeScale.bodyMd,
     color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "800",
+    fontWeight: FontWeight.extrabold,
   },
   groupRow: {
     alignItems: "center",
-    backgroundColor: "#FAFCF5",
-    borderColor: "#DDE8C7",
-    borderRadius: 24,
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius["2xl"],
     borderWidth: 1,
-    elevation: 3,
     flexDirection: "row",
-    marginTop: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    shadowColor: "#1E2A12",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.06,
-    shadowRadius: 16,
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    ...shadow("sm"),
   },
   groupRowTextWrap: {
     flex: 1,
-    marginLeft: 14,
+    marginLeft: Spacing.md,
   },
   groupRowTitleRow: {
     alignItems: "center",
     flexDirection: "row",
   },
   groupRowTitle: {
-    color: "#29440F",
+    ...TypeScale.titleLg,
+    color: "#1A1A1A",
     flex: 1,
-    fontSize: 17,
-    fontWeight: "800",
-    marginRight: 12,
+    fontWeight: FontWeight.extrabold,
+    marginRight: Spacing.md,
   },
   groupRowTime: {
-    color: "#7A8870",
-    fontSize: 13,
+    ...TypeScale.bodySm,
+    color: "#9CA3AF",
   },
   groupRowPreview: {
-    color: "#5F6E53",
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 5,
+    ...TypeScale.bodyMd,
+    color: "#6B7280",
+    marginTop: Spacing.xs,
   },
   groupRowMetaRow: {
     alignItems: "center",
     flexDirection: "row",
-    gap: 8,
-    marginTop: 8,
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
   },
   groupTypeBadge: {
     alignItems: "center",
-    backgroundColor: "#E6F1DA",
-    borderRadius: 999,
+    backgroundColor: "#F0F0F0",
+    borderRadius: Radius.full,
     flexDirection: "row",
     gap: 6,
-    paddingHorizontal: 10,
+    paddingHorizontal: Spacing.sm,
     paddingVertical: 6,
   },
   groupTypeBadgePrivate: {
-    backgroundColor: "#FFF2DA",
+    backgroundColor: "#FFF7ED",
   },
   groupTypeBadgeText: {
-    color: "#356014",
-    fontSize: 12,
-    fontWeight: "800",
+    ...TypeScale.labelLg,
+    color: "#2D6A4F",
+    fontWeight: FontWeight.extrabold,
   },
   groupTypeBadgeTextPrivate: {
-    color: "#8B5611",
+    color: "#92400E",
   },
   groupMembersText: {
-    color: "#667458",
-    fontSize: 12,
-    fontWeight: "700",
+    ...TypeScale.labelLg,
+    color: "#6B7280",
+    fontWeight: FontWeight.bold,
   },
   rowActionButton: {
     alignItems: "center",
-    backgroundColor: "#5C8C1F",
-    borderRadius: 14,
+    backgroundColor: "#2D6A4F",
+    borderRadius: Radius.md,
     justifyContent: "center",
-    marginLeft: 10,
+    marginLeft: Spacing.sm,
     minWidth: 66,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
   rowActionButtonDanger: {
     backgroundColor: "#B84B3A",
   },
   rowActionText: {
+    ...TypeScale.bodySm,
     color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "800",
+    fontWeight: FontWeight.extrabold,
   },
   emptyState: {
     alignItems: "center",
-    backgroundColor: "#F6F8EE",
-    borderColor: "#DDE8C7",
-    borderRadius: 24,
+    backgroundColor: "#F8F8F8",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius["2xl"],
     borderWidth: 1,
-    marginTop: 14,
-    paddingHorizontal: 18,
-    paddingVertical: 24,
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing["2xl"],
   },
   emptyStateTitle: {
-    color: "#29440F",
-    fontSize: 18,
-    fontWeight: "800",
+    ...TypeScale.titleLg,
+    color: "#1A1A1A",
+    fontWeight: FontWeight.extrabold,
     textAlign: "center",
   },
   emptyStateText: {
-    color: "#5F6E53",
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 8,
+    ...TypeScale.bodyMd,
+    color: "#6B7280",
+    marginTop: Spacing.sm,
     textAlign: "center",
   },
   modalBackdrop: {
-    backgroundColor: "rgba(34,56,20,0.28)",
+    backgroundColor: "rgba(0,0,0,0.25)",
     flex: 1,
     justifyContent: "flex-end",
   },
   actionMenuBackdrop: {
-    backgroundColor: "rgba(34,56,20,0.18)",
+    backgroundColor: "rgba(0,0,0,0.15)",
     flex: 1,
     justifyContent: "flex-start",
-    paddingHorizontal: 20,
+    paddingHorizontal: Spacing.xl,
     paddingTop: 80,
   },
   actionMenuDismissArea: {
@@ -2383,31 +2415,28 @@ const styles = StyleSheet.create({
   },
   actionMenuCard: {
     alignSelf: "flex-end",
-    backgroundColor: "#FAFCF5",
-    borderColor: "#DDE8C7",
-    borderRadius: 22,
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.xl,
     borderWidth: 1,
     minWidth: 300,
-    padding: 12,
-    shadowColor: "#1E2A12",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.12,
-    shadowRadius: 20,
+    padding: Spacing.md,
+    ...shadow("lg"),
   },
   actionMenuItem: {
     alignItems: "center",
-    borderRadius: 16,
+    borderRadius: Radius.lg,
     flexDirection: "row",
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.sm,
   },
   actionMenuIconWrap: {
     alignItems: "center",
-    backgroundColor: "#5C8C1F",
-    borderRadius: 16,
-    height: 32,
+    backgroundColor: "#2D6A4F",
+    borderRadius: Radius.lg,
+    height: Spacing["3xl"],
     justifyContent: "center",
-    width: 32,
+    width: Spacing["3xl"],
   },
   actionMenuIconWrapAlt: {
     backgroundColor: "#BA7517",
@@ -2417,184 +2446,180 @@ const styles = StyleSheet.create({
   },
   actionMenuTextWrap: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: Spacing.md,
   },
   actionMenuTitle: {
-    color: "#29440F",
-    fontSize: 15,
-    fontWeight: "800",
+    ...TypeScale.titleSm,
+    color: "#1A1A1A",
+    fontWeight: FontWeight.extrabold,
   },
   actionMenuSubtitle: {
-    color: "#5F6E53",
-    fontSize: 13,
-    lineHeight: 18,
+    ...TypeScale.bodySm,
+    color: "#6B7280",
     marginTop: 3,
   },
   modalSheet: {
-    backgroundColor: "#FAFCF5",
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: Radius["3xl"],
+    borderTopRightRadius: Radius["3xl"],
     maxHeight: "88%",
-    paddingBottom: 28,
-    paddingHorizontal: 18,
-    paddingTop: 18,
+    paddingBottom: Radius["3xl"],
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.lg,
   },
   joinKeyModalSheet: {
-    backgroundColor: "#FAFCF5",
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingBottom: 28,
-    paddingHorizontal: 18,
-    paddingTop: 18,
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: Radius["3xl"],
+    borderTopRightRadius: Radius["3xl"],
+    paddingBottom: Radius["3xl"],
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.lg,
   },
   deleteSummaryCard: {
     backgroundColor: "#FFF1EF",
     borderColor: "#F0B6AE",
-    borderRadius: 18,
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    marginTop: 8,
-    padding: 14,
+    marginTop: Spacing.sm,
+    padding: Spacing.md,
   },
   deleteSummaryTitle: {
-    color: "#8A3D35",
-    fontSize: 17,
-    fontWeight: "800",
+    ...TypeScale.titleLg,
+    color: "#991B1B",
+    fontWeight: FontWeight.extrabold,
   },
   deleteSummaryText: {
-    color: "#8A3D35",
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 8,
+    ...TypeScale.bodyMd,
+    color: "#991B1B",
+    marginTop: Spacing.sm,
   },
   modalHeader: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
   },
   modalTitle: {
-    color: "#29440F",
-    fontSize: 24,
-    fontWeight: "800",
+    ...TypeScale.headingLg,
+    color: "#1A1A1A",
+    fontWeight: FontWeight.extrabold,
   },
   modalSubtitle: {
-    color: "#5F6E53",
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 4,
+    ...TypeScale.bodyMd,
+    color: "#6B7280",
+    marginTop: Spacing.xs,
   },
   modalClose: {
     alignItems: "center",
-    backgroundColor: "#EEF4E5",
-    borderRadius: 999,
+    backgroundColor: "#F5F5F5",
+    borderRadius: Radius.full,
     height: 38,
     justifyContent: "center",
     width: 38,
   },
   modalInput: {
     backgroundColor: "#FFFFFF",
-    borderColor: "#DDE8C7",
-    borderRadius: 16,
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    color: "#29440F",
-    fontSize: 15,
-    marginTop: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    color: "#1A1A1A",
+    ...TypeScale.titleSm,
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
   },
   modalTextarea: {
     minHeight: 94,
   },
   requestInputGrid: {
     flexDirection: "row",
-    gap: 10,
+    gap: Spacing.sm,
   },
   requestGridInput: {
     flex: 1,
   },
   requestPreviewCard: {
-    backgroundColor: "#F6F8EE",
-    borderColor: "#DDE8C7",
-    borderRadius: 22,
+    backgroundColor: "#F8F8F8",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.xl,
     borderWidth: 1,
-    marginTop: 16,
-    padding: 16,
+    marginTop: Spacing.lg,
+    padding: Spacing.lg,
   },
   requestPreviewKicker: {
-    color: "#5C8C1F",
-    fontSize: 12,
-    fontWeight: "800",
+    ...TypeScale.labelLg,
+    color: "#2D6A4F",
+    fontWeight: FontWeight.extrabold,
     letterSpacing: 0.6,
     textTransform: "uppercase",
   },
   requestPreviewTitle: {
-    color: "#29440F",
-    fontSize: 22,
-    fontWeight: "800",
+    ...TypeScale.headingMd,
+    color: "#1A1A1A",
+    fontWeight: FontWeight.extrabold,
     marginTop: 6,
   },
   requestPreviewChips: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginTop: 14,
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
   },
   requestPreviewChip: {
     backgroundColor: "#FFFFFF",
-    borderColor: "#DDE8C7",
-    borderRadius: 999,
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.full,
     borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.sm,
   },
   requestPreviewChipText: {
-    color: "#4E6630",
-    fontSize: 12,
-    fontWeight: "700",
+    ...TypeScale.labelLg,
+    color: "#6B7280",
+    fontWeight: FontWeight.bold,
   },
   requestPreviewNote: {
-    color: "#5F6E53",
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 14,
+    ...TypeScale.bodyMd,
+    color: "#6B7280",
+    marginTop: Spacing.md,
   },
   accessRow: {
     flexDirection: "row",
-    gap: 10,
-    marginTop: 14,
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
   },
   accessChip: {
     alignItems: "center",
-    backgroundColor: "#EEF4E5",
-    borderRadius: 999,
+    backgroundColor: "#F5F5F5",
+    borderRadius: Radius.full,
     flex: 1,
     flexDirection: "row",
-    gap: 8,
+    gap: Spacing.sm,
     justifyContent: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
   },
   accessChipSelected: {
-    backgroundColor: "#5C8C1F",
+    backgroundColor: "#2D6A4F",
   },
   accessChipSelectedPrivate: {
     backgroundColor: "#BA7517",
   },
   accessChipText: {
-    color: "#4E6630",
-    fontSize: 14,
-    fontWeight: "700",
+    ...TypeScale.bodyMd,
+    color: "#6B7280",
+    fontWeight: FontWeight.bold,
   },
   accessChipTextSelected: {
     color: "#FFFFFF",
   },
   privateKeyComposerCard: {
-    backgroundColor: "#FFF8E7",
-    borderColor: "#F1D7A5",
-    borderRadius: 18,
+    backgroundColor: "#FFFBEB",
+    borderColor: "#FCD34D",
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    marginTop: 14,
-    padding: 14,
+    marginTop: Spacing.md,
+    padding: Spacing.md,
   },
   privateKeyRow: {
     alignItems: "center",
@@ -2602,107 +2627,106 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   privateKeyLabel: {
-    color: "#8B5611",
-    fontSize: 14,
-    fontWeight: "800",
+    ...TypeScale.bodyMd,
+    color: "#92400E",
+    fontWeight: FontWeight.extrabold,
   },
   privateKeyGenerate: {
-    color: "#5C8C1F",
-    fontSize: 13,
-    fontWeight: "700",
+    ...TypeScale.bodySm,
+    color: "#2D6A4F",
+    fontWeight: FontWeight.bold,
   },
   inviteTitle: {
-    color: "#29440F",
-    fontSize: 16,
-    fontWeight: "800",
-    marginTop: 18,
+    ...TypeScale.titleMd,
+    color: "#1A1A1A",
+    fontWeight: FontWeight.extrabold,
+    marginTop: Spacing.lg,
   },
   selectedInvitesRow: {
-    marginTop: 12,
+    marginTop: Spacing.md,
     maxHeight: 62,
   },
   selectedInviteChip: {
     alignItems: "center",
-    backgroundColor: "#EEF4E5",
-    borderRadius: 999,
+    backgroundColor: "#F5F5F5",
+    borderRadius: Radius.full,
     flexDirection: "row",
-    gap: 8,
-    marginRight: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    gap: Spacing.sm,
+    marginRight: Spacing.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.sm,
   },
   selectedInviteText: {
-    color: "#29440F",
-    fontSize: 13,
-    fontWeight: "700",
+    ...TypeScale.bodySm,
+    color: "#1A1A1A",
+    fontWeight: FontWeight.bold,
   },
   composerUserRow: {
     alignItems: "center",
-    backgroundColor: "#F6F8EE",
-    borderColor: "#DDE8C7",
-    borderRadius: 18,
+    backgroundColor: "#F8F8F8",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.lg,
     borderWidth: 1,
     flexDirection: "row",
-    marginTop: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
   },
   composerUserTextWrap: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: Spacing.md,
   },
   composerUserName: {
-    color: "#29440F",
-    fontSize: 16,
-    fontWeight: "800",
+    ...TypeScale.titleMd,
+    color: "#1A1A1A",
+    fontWeight: FontWeight.extrabold,
   },
   composerUserMeta: {
-    color: "#5F6E53",
-    fontSize: 13,
-    marginTop: 4,
+    ...TypeScale.bodySm,
+    color: "#6B7280",
+    marginTop: Spacing.xs,
   },
   selectBubble: {
-    borderColor: "#C9D9B7",
-    borderRadius: 12,
+    borderColor: "#D1D5DB",
+    borderRadius: Radius.md,
     borderWidth: 1,
-    height: 24,
-    width: 24,
+    height: Spacing["2xl"],
+    width: Spacing["2xl"],
   },
   selectBubbleSelected: {
     alignItems: "center",
-    backgroundColor: "#5C8C1F",
-    borderColor: "#5C8C1F",
+    backgroundColor: "#2D6A4F",
+    borderColor: "#2D6A4F",
     justifyContent: "center",
   },
   modalEmptyState: {
     alignItems: "center",
-    backgroundColor: "#F6F8EE",
-    borderColor: "#DDE8C7",
-    borderRadius: 18,
+    backgroundColor: "#F8F8F8",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    marginTop: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 22,
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.xl,
   },
   modalEmptyStateTitle: {
-    color: "#29440F",
-    fontSize: 16,
-    fontWeight: "800",
+    ...TypeScale.titleMd,
+    color: "#1A1A1A",
+    fontWeight: FontWeight.extrabold,
     textAlign: "center",
   },
   modalEmptyStateText: {
-    color: "#5F6E53",
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 8,
+    ...TypeScale.bodyMd,
+    color: "#6B7280",
+    marginTop: Spacing.sm,
     textAlign: "center",
   },
   createButton: {
     alignItems: "center",
-    backgroundColor: "#5C8C1F",
-    borderRadius: 18,
+    backgroundColor: "#2D6A4F",
+    borderRadius: Radius.lg,
     justifyContent: "center",
-    marginTop: 18,
+    marginTop: Spacing.lg,
     minHeight: 54,
   },
   createButtonDisabled: {
@@ -2712,8 +2736,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#B84B3A",
   },
   createButtonText: {
+    ...TypeScale.titleSm,
     color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "800",
+    fontWeight: FontWeight.extrabold,
   },
 });

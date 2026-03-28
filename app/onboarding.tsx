@@ -1,9 +1,11 @@
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,13 +13,19 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { auth, db } from "../firebase";
+import { DismissKeyboard } from "../components/dismiss-keyboard";
 import { getFirestoreUserMessage } from "../utils/firestore-errors";
 import React from "react";
 
+const NO_INTERESTS_OPTION = "X - Nothing specific";
+const NO_ASSISTANCE_OPTION = "X - No special needs";
+const NO_SKILLS_OPTION = "X - No specific skills";
+
 const INTEREST_OPTIONS = [
+  NO_INTERESTS_OPTION,
   "🌿 Природа и планини",
   "🏛️ История и култура",
   "🍷 Храна и вино",
@@ -29,16 +37,17 @@ const INTEREST_OPTIONS = [
 ];
 
 const ASSISTANCE_OPTIONS = [
+  NO_ASSISTANCE_OPTION,
   "♿ Достъпна среда (рампи, широки врати)",
   "👁️ Зрителни затруднения",
   "🦻 Слухови затруднения",
   "💊 Хронично заболяване (нужда от лекар/аптека)",
   "🍽️ Хранителни алергии",
   "🧠 Сензорна чувствителност (тихи места)",
-  "❌ Нямам специални нужди",
 ];
 
 const SKILLS_OPTIONS = [
+  NO_SKILLS_OPTION,
   "🌱 Градинарство / земеделска работа",
   "🔨 Строителство / ремонт",
   "📚 Преподаване / работа с деца",
@@ -49,13 +58,19 @@ const SKILLS_OPTIONS = [
   "🙌 Просто имам желание, без специални умения",
 ];
 
-const NO_ASSISTANCE_OPTION = "❌ Нямам специални нужди";
-
 type OnboardingErrors = {
   interests?: string;
   assistance?: string;
   skills?: string;
   form?: string;
+};
+
+type MultiSelectField = "interests" | "assistance" | "skills";
+
+const EXCLUSIVE_NONE_OPTIONS: Record<MultiSelectField, string> = {
+  interests: NO_INTERESTS_OPTION,
+  assistance: NO_ASSISTANCE_OPTION,
+  skills: NO_SKILLS_OPTION,
 };
 
 type ChoiceChipProps = {
@@ -80,6 +95,8 @@ function ChoiceChip({ label, selected, onPress }: ChoiceChipProps) {
 
 export default function OnboardingScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ returnTo?: string }>();
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -91,6 +108,7 @@ export default function OnboardingScreen() {
   const [skills, setSkills] = useState<string[]>([]);
   const [skillsNote, setSkillsNote] = useState("");
   const [errors, setErrors] = useState<OnboardingErrors>({});
+  const returnTo = typeof params.returnTo === "string" ? params.returnTo : null;
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (nextUser) => {
@@ -171,27 +189,21 @@ export default function OnboardingScreen() {
   const toggleMultiValue = (
     value: string,
     setter: Dispatch<SetStateAction<string[]>>,
-    field: keyof Omit<OnboardingErrors, "form">
+    field: MultiSelectField
   ) => {
     setter((currentValues) => {
       const hasValue = currentValues.includes(value);
+      const exclusiveNoneOption = EXCLUSIVE_NONE_OPTIONS[field];
 
       if (hasValue) {
         return currentValues.filter((item) => item !== value);
       }
 
-      if (field === "assistance" && value === NO_ASSISTANCE_OPTION) {
-        return [NO_ASSISTANCE_OPTION];
+      if (value === exclusiveNoneOption) {
+        return [exclusiveNoneOption];
       }
 
-      if (field === "assistance") {
-        return [
-          ...currentValues.filter((item) => item !== NO_ASSISTANCE_OPTION),
-          value,
-        ];
-      }
-
-      return [...currentValues, value];
+      return [...currentValues.filter((item) => item !== exclusiveNoneOption), value];
     });
 
     clearError(field);
@@ -203,17 +215,20 @@ export default function OnboardingScreen() {
     }
 
     const nextErrors: OnboardingErrors = {};
+    const trimmedInterestsNote = interestsNote.trim();
+    const trimmedAssistanceNote = assistanceNote.trim();
+    const trimmedSkillsNote = skillsNote.trim();
 
-    if (interests.length === 0) {
+    if (interests.length === 0 && !trimmedInterestsNote) {
       nextErrors.interests = "Избери поне едно нещо, което те вълнува.";
     }
 
-    if (assistance.length === 0) {
+    if (assistance.length === 0 && !trimmedAssistanceNote) {
       nextErrors.assistance =
         "Избери поне една опция за помощ или посочи, че нямаш специални нужди.";
     }
 
-    if (skills.length === 0) {
+    if (skills.length === 0 && !trimmedSkillsNote) {
       nextErrors.skills = "Избери поне една опция за умения или желание за помощ.";
     }
 
@@ -238,15 +253,15 @@ export default function OnboardingScreen() {
             onboarding: {
               interests: {
                 selectedOptions: interests,
-                note: interestsNote.trim(),
+                note: trimmedInterestsNote,
               },
               assistance: {
                 selectedOptions: assistance,
-                note: assistanceNote.trim(),
+                note: trimmedAssistanceNote,
               },
               skills: {
                 selectedOptions: skills,
-                note: skillsNote.trim(),
+                note: trimmedSkillsNote,
               },
             },
           },
@@ -254,7 +269,7 @@ export default function OnboardingScreen() {
         { merge: true }
       );
 
-      router.replace("/");
+      router.replace(returnTo ?? "/profile");
     } catch (error) {
       setErrors({
         form: getFirestoreUserMessage(error, "write"),
@@ -267,16 +282,24 @@ export default function OnboardingScreen() {
   if (loading || user === undefined || user === null) {
     return (
       <SafeAreaView style={styles.loader} edges={["top", "bottom", "left", "right"]}>
-        <ActivityIndicator size="large" color="#639922" />
+        <ActivityIndicator size="large" color="#2D6A4F" />
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.screen} edges={["top", "bottom", "left", "right"]}>
+      <DismissKeyboard>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior="padding"
+        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 8 : 0}
+      >
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
         <View style={styles.hero}>
           <Text style={styles.kicker}>Нека те опознаем</Text>
@@ -305,7 +328,10 @@ export default function OnboardingScreen() {
           placeholder="Напиши какво най-много търсиш или какво искаш да избегнеш..."
           placeholderTextColor="#7B8870"
           value={interestsNote}
-          onChangeText={setInterestsNote}
+          onChangeText={(value) => {
+            setInterestsNote(value);
+            clearError("interests");
+          }}
           multiline
           textAlignVertical="top"
         />
@@ -335,7 +361,10 @@ export default function OnboardingScreen() {
           placeholder="Напиши детайли, които ще помогнат за по-подходящи предложения..."
           placeholderTextColor="#7B8870"
           value={assistanceNote}
-          onChangeText={setAssistanceNote}
+          onChangeText={(value) => {
+            setAssistanceNote(value);
+            clearError("assistance");
+          }}
           multiline
           textAlignVertical="top"
         />
@@ -365,7 +394,10 @@ export default function OnboardingScreen() {
           placeholder="Добави конкретни умения, опит или предпочитан тип помощ..."
           placeholderTextColor="#7B8870"
           value={skillsNote}
-          onChangeText={setSkillsNote}
+          onChangeText={(value) => {
+            setSkillsNote(value);
+            clearError("skills");
+          }}
           multiline
           textAlignVertical="top"
         />
@@ -383,10 +415,16 @@ export default function OnboardingScreen() {
           disabled={saving}
         >
           <Text style={styles.primaryButtonText}>
-            {saving ? "Запазване..." : "Запази и продължи"}
+            {saving
+              ? "Запазване..."
+              : returnTo
+                ? "Save changes"
+                : "Запази и продължи"}
           </Text>
         </TouchableOpacity>
       </ScrollView>
+      </KeyboardAvoidingView>
+      </DismissKeyboard>
     </SafeAreaView>
   );
 }
@@ -394,7 +432,7 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#EAF3DE",
+    backgroundColor: "#F0F0F0",
   },
   content: {
     padding: 20,
@@ -402,18 +440,18 @@ const styles = StyleSheet.create({
   },
   loader: {
     flex: 1,
-    backgroundColor: "#EAF3DE",
+    backgroundColor: "#F0F0F0",
     alignItems: "center",
     justifyContent: "center",
   },
   hero: {
-    backgroundColor: "#2F4F14",
+    backgroundColor: "#2D2D2D",
     borderRadius: 24,
     padding: 24,
     marginBottom: 18,
   },
   kicker: {
-    color: "#CFE7A4",
+    color: "#9CA3AF",
     fontSize: 13,
     fontWeight: "700",
     letterSpacing: 0.8,
@@ -428,7 +466,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   subtitle: {
-    color: "#EAF3DE",
+    color: "#F0F0F0",
     fontSize: 15,
     lineHeight: 22,
   },
@@ -447,13 +485,13 @@ const styles = StyleSheet.create({
     fontSize: 19,
     lineHeight: 26,
     fontWeight: "700",
-    color: "#29440F",
+    color: "#1A1A1A",
     marginBottom: 6,
   },
   questionSubtitle: {
     fontSize: 14,
     lineHeight: 20,
-    color: "#5F6E53",
+    color: "#6B7280",
     marginBottom: 14,
   },
   chipWrap: {
@@ -461,18 +499,18 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
   },
   chip: {
-    backgroundColor: "#F6F8EE",
+    backgroundColor: "#F8F8F8",
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginRight: 10,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#D8E3C2",
+    borderColor: "#E0E0E0",
   },
   chipSelected: {
-    backgroundColor: "#639922",
-    borderColor: "#639922",
+    backgroundColor: "#2D6A4F",
+    borderColor: "#2D6A4F",
   },
   chipText: {
     color: "#39521C",
@@ -493,11 +531,11 @@ const styles = StyleSheet.create({
     minHeight: 92,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#D8E3C2",
-    backgroundColor: "#F9FBF4",
+    borderColor: "#E0E0E0",
+    backgroundColor: "#F5F5F5",
     paddingHorizontal: 14,
     paddingVertical: 12,
-    color: "#29440F",
+    color: "#1A1A1A",
     fontSize: 14,
     lineHeight: 20,
   },
@@ -513,7 +551,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   primaryButton: {
-    backgroundColor: "#639922",
+    backgroundColor: "#2D6A4F",
     borderRadius: 16,
     paddingVertical: 17,
     alignItems: "center",

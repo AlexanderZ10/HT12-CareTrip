@@ -43,6 +43,7 @@ export type GroupChatMessage = {
   expense: GroupChatExpense | null;
   id: string;
   messageType: "expense" | "text" | "shared-trip";
+  senderAvatarUrl: string;
   senderId: string;
   senderLabel: string;
   sharedTrip: GroupChatSharedTrip | null;
@@ -258,6 +259,7 @@ export function parseGroupChatMessage(
     expense,
     id,
     messageType,
+    senderAvatarUrl: sanitizeString(data?.senderAvatarUrl),
     senderId: sanitizeString(data?.senderId),
     senderLabel: sanitizeString(data?.senderLabel, "Traveler"),
     sharedTrip,

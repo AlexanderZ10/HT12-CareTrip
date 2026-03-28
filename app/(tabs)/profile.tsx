@@ -2,27 +2,41 @@ import { MaterialIcons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { onAuthStateChanged, sendPasswordResetEmail, signOut } from "firebase/auth";
 import {
+  deleteDoc,
   doc,
   onSnapshot,
   serverTimestamp,
   setDoc,
   writeBatch,
 } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  Easing,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { DismissKeyboard } from "../../components/dismiss-keyboard";
 import { auth, db } from "../../firebase";
 import {
   useAppTheme,
@@ -42,43 +56,184 @@ import {
   type ProfileVisibility,
 } from "../../utils/public-profiles";
 import { extractDiscoverProfile } from "../../utils/trip-recommendations";
+import {
+  Radius,
+  Spacing,
+  TypeScale,
+  FontWeight,
+  shadow,
+  ZIndex,
+} from "../../constants/design-system";
+
+// ── Types ──────────────────────────────────────────────────────────────────
 
 type ProfileFormState = PersonalProfileInfo;
 
-type ChoicePillProps = {
+type FloatingNotice = {
+  accentColor: string;
+  id: number;
+  message: string;
+  textColor: string;
+};
+
+// ── Animation config ───────────────────────────────────────────────────────
+
+const SPRING_BTN = { damping: 18, stiffness: 220 };
+const SPRING_TOAST = { damping: 16, stiffness: 200 };
+const TIMING_ENTRANCE = { duration: 340, easing: Easing.out(Easing.cubic) };
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function SectionHeader({
+  title,
+  color,
+}: {
+  title: string;
+  color: string;
+}) {
+  return (
+    <Text
+      style={[
+        staticStyles.sectionHeader,
+        { color },
+      ]}
+    >
+      {title}
+    </Text>
+  );
+}
+
+function SettingsRow({
+  icon,
+  label,
+  onPress,
+  colors,
+  loading: isLoading,
+  destructive,
+  trailing,
+}: {
+  icon: keyof typeof MaterialIcons.glyphMap;
+  label: string;
+  onPress: () => void;
+  colors: { textPrimary: string; border: string; accent: string; textMuted: string; errorText: string };
+  loading?: boolean;
+  destructive?: boolean;
+  trailing?: string;
+}) {
+  const color = destructive ? colors.errorText : colors.textPrimary;
+  return (
+    <Pressable
+      style={[staticStyles.settingsRow, { borderBottomColor: colors.border }]}
+      onPress={onPress}
+      disabled={isLoading}
+    >
+      <MaterialIcons name={icon} size={20} color={color} />
+      <Text style={[staticStyles.settingsRowLabel, { color }]}>{label}</Text>
+      {isLoading ? (
+        <ActivityIndicator size="small" color={colors.accent} />
+      ) : trailing ? (
+        <Text style={[staticStyles.settingsRowTrailing, { color: colors.textMuted }]}>
+          {trailing}
+        </Text>
+      ) : (
+        <MaterialIcons name="chevron-right" size={20} color={colors.textMuted} />
+      )}
+    </Pressable>
+  );
+}
+
+function ChoicePill({
+  label,
+  onPress,
+  selected,
+  accentColor,
+  cardBg,
+  cardBorder,
+  textColor,
+  selectedTextColor,
+}: {
   label: string;
   onPress: () => void;
   selected: boolean;
-};
-
-function ChoicePill({ label, onPress, selected }: ChoicePillProps) {
-  const { colors } = useAppTheme();
-
+  accentColor: string;
+  cardBg: string;
+  cardBorder: string;
+  textColor: string;
+  selectedTextColor: string;
+}) {
   return (
-    <TouchableOpacity
-      style={[
-        styles.pill,
-        {
-          backgroundColor: colors.accentMuted,
-          borderColor: colors.border,
-        },
-        selected && [styles.pillSelected, { backgroundColor: colors.accent, borderColor: colors.accent }],
-      ]}
+    <Pressable
       onPress={onPress}
-      activeOpacity={0.9}
+      style={[
+        staticStyles.pill,
+        {
+          backgroundColor: selected ? accentColor : cardBg,
+          borderColor: selected ? accentColor : cardBorder,
+        },
+      ]}
     >
       <Text
         style={[
-          styles.pillText,
-          { color: colors.textPrimary },
-          selected && styles.pillTextSelected,
+          staticStyles.pillText,
+          { color: selected ? selectedTextColor : textColor },
         ]}
       >
         {label}
       </Text>
-    </TouchableOpacity>
+    </Pressable>
   );
 }
+
+function MiniToggle({
+  icon,
+  label,
+  active,
+  onPress,
+  accentColor,
+  cardBg,
+  cardBorder,
+  textColor,
+  activeTextColor,
+}: {
+  icon: keyof typeof MaterialIcons.glyphMap;
+  label: string;
+  active: boolean;
+  onPress: () => void;
+  accentColor: string;
+  cardBg: string;
+  cardBorder: string;
+  textColor: string;
+  activeTextColor: string;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[
+        staticStyles.miniToggle,
+        {
+          backgroundColor: active ? accentColor : cardBg,
+          borderColor: active ? accentColor : cardBorder,
+        },
+      ]}
+    >
+      <MaterialIcons
+        name={icon}
+        size={18}
+        color={active ? activeTextColor : textColor}
+      />
+      <Text
+        style={[
+          staticStyles.miniToggleLabel,
+          { color: active ? activeTextColor : textColor },
+        ]}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+// ── Constants ──────────────────────────────────────────────────────────────
 
 const EMPTY_FORM: ProfileFormState = {
   aboutMe: "",
@@ -91,10 +246,14 @@ const EMPTY_FORM: ProfileFormState = {
 
 const PROFILE_PHOTO_MAX_LENGTH = 850000;
 
+// ── Main component ─────────────────────────────────────────────────────────
+
 export default function ProfileTabScreen() {
   const router = useRouter();
-  const { colors, isDark, setThemePreference, themePreference } = useAppTheme();
+  const { colors, setThemePreference, themePreference } = useAppTheme();
+  const insets = useSafeAreaInsets();
 
+  // ── State ──────────────────────────────────────────────────────────────
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [profileName, setProfileName] = useState("Traveler");
@@ -107,6 +266,10 @@ export default function ProfileTabScreen() {
   const [error, setError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState("");
   const [updatingPhoto, setUpdatingPhoto] = useState(false);
+  const [sendingReset, setSendingReset] = useState(false);
+  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
+  const [avatarSheetVisible, setAvatarSheetVisible] = useState(false);
+  const [floatingNotice, setFloatingNotice] = useState<FloatingNotice | null>(null);
   const [onboardingSummary, setOnboardingSummary] = useState<{
     assistance: string[];
     interests: string[];
@@ -116,6 +279,134 @@ export default function ProfileTabScreen() {
     interests: [],
     skills: [],
   });
+
+  const floatingNoticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Entrance animations (staggered) ────────────────────────────────────
+  const avatarScale = useSharedValue(0.5);
+  const avatarOp = useSharedValue(0);
+  const sec1Op = useSharedValue(0);
+  const sec1Y = useSharedValue(24);
+  const sec2Op = useSharedValue(0);
+  const sec2Y = useSharedValue(24);
+  const sec3Op = useSharedValue(0);
+  const sec3Y = useSharedValue(24);
+  const sec4Op = useSharedValue(0);
+  const sec4Y = useSharedValue(24);
+
+  const triggerEntrance = useCallback(() => {
+    avatarScale.value = withSpring(1, { damping: 14, stiffness: 160 });
+    avatarOp.value = withTiming(1, { duration: 300 });
+    sec1Op.value = withDelay(80, withTiming(1, TIMING_ENTRANCE));
+    sec1Y.value = withDelay(80, withTiming(0, TIMING_ENTRANCE));
+    sec2Op.value = withDelay(160, withTiming(1, TIMING_ENTRANCE));
+    sec2Y.value = withDelay(160, withTiming(0, TIMING_ENTRANCE));
+    sec3Op.value = withDelay(240, withTiming(1, TIMING_ENTRANCE));
+    sec3Y.value = withDelay(240, withTiming(0, TIMING_ENTRANCE));
+    sec4Op.value = withDelay(320, withTiming(1, TIMING_ENTRANCE));
+    sec4Y.value = withDelay(320, withTiming(0, TIMING_ENTRANCE));
+  }, []);
+
+  const avatarAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: avatarScale.value }],
+    opacity: avatarOp.value,
+  }));
+  const sec1Style = useAnimatedStyle(() => ({
+    opacity: sec1Op.value,
+    transform: [{ translateY: sec1Y.value }],
+  }));
+  const sec2Style = useAnimatedStyle(() => ({
+    opacity: sec2Op.value,
+    transform: [{ translateY: sec2Y.value }],
+  }));
+  const sec3Style = useAnimatedStyle(() => ({
+    opacity: sec3Op.value,
+    transform: [{ translateY: sec3Y.value }],
+  }));
+  const sec4Style = useAnimatedStyle(() => ({
+    opacity: sec4Op.value,
+    transform: [{ translateY: sec4Y.value }],
+  }));
+
+  // ── Floating notice (Reanimated + Gesture Handler) ─────────────────────
+  const noticeTranslateY = useSharedValue(-120);
+  const noticeOpacity = useSharedValue(0);
+  const noticeAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: noticeTranslateY.value }],
+    opacity: noticeOpacity.value,
+  }));
+
+  const clearNoticeState = useCallback(() => {
+    if (floatingNoticeTimeoutRef.current) {
+      clearTimeout(floatingNoticeTimeoutRef.current);
+      floatingNoticeTimeoutRef.current = null;
+    }
+    setFloatingNotice(null);
+  }, []);
+
+  const dismissNotice = useCallback(() => {
+    if (floatingNoticeTimeoutRef.current) {
+      clearTimeout(floatingNoticeTimeoutRef.current);
+      floatingNoticeTimeoutRef.current = null;
+    }
+    noticeTranslateY.value = withTiming(-120, { duration: 180 });
+    noticeOpacity.value = withTiming(0, { duration: 180 }, (finished) => {
+      if (finished) runOnJS(clearNoticeState)();
+    });
+  }, [clearNoticeState]);
+
+  const noticePanGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .onUpdate((e) => {
+          if (e.translationY < 0) noticeTranslateY.value = e.translationY;
+        })
+        .onEnd((e) => {
+          if (e.translationY < -36 || e.velocityY < -550) {
+            noticeTranslateY.value = withTiming(-120, { duration: 180 });
+            noticeOpacity.value = withTiming(0, { duration: 180 }, (finished) => {
+              if (finished) runOnJS(clearNoticeState)();
+            });
+          } else {
+            noticeTranslateY.value = withSpring(0, SPRING_TOAST);
+          }
+        }),
+    [clearNoticeState]
+  );
+
+  const showFloatingNotice = useCallback(
+    (message: string, accentColor: string, textColor: string) => {
+      if (floatingNoticeTimeoutRef.current) {
+        clearTimeout(floatingNoticeTimeoutRef.current);
+        floatingNoticeTimeoutRef.current = null;
+      }
+      setFloatingNotice({ accentColor, id: Date.now(), message, textColor });
+      noticeTranslateY.value = -120;
+      noticeOpacity.value = 0;
+      noticeTranslateY.value = withSpring(0, SPRING_TOAST);
+      noticeOpacity.value = withTiming(1, { duration: 200 });
+      floatingNoticeTimeoutRef.current = setTimeout(dismissNotice, 3000);
+    },
+    [dismissNotice]
+  );
+
+  // ── Save button press ──────────────────────────────────────────────────
+  const saveBtnScale = useSharedValue(1);
+  const saveBtnAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: saveBtnScale.value }],
+  }));
+
+  // ── Effects ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    setAvatarLoadFailed(false);
+  }, [profilePhotoUrl]);
+
+  useEffect(
+    () => () => {
+      if (floatingNoticeTimeoutRef.current) clearTimeout(floatingNoticeTimeoutRef.current);
+    },
+    []
+  );
 
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
@@ -136,50 +427,51 @@ export default function ProfileTabScreen() {
 
       unsubscribeProfile = onSnapshot(
         doc(db, "profiles", nextUser.uid),
-        (profileSnapshot) => {
-          if (!profileSnapshot.exists()) {
+        (snap) => {
+          if (!snap.exists()) {
             setLoading(false);
             router.replace("/onboarding");
             return;
           }
 
-          const profileData = profileSnapshot.data() as Record<string, unknown>;
-          const personalProfile = extractPersonalProfile({
+          const d = snap.data() as Record<string, unknown>;
+          const personal = extractPersonalProfile({
             profileInfo:
-              profileData.profileInfo && typeof profileData.profileInfo === "object"
-                ? (profileData.profileInfo as Record<string, unknown>)
+              d.profileInfo && typeof d.profileInfo === "object"
+                ? (d.profileInfo as Record<string, unknown>)
                 : undefined,
           });
-          const onboardingProfile = extractDiscoverProfile(profileData);
+          const onboarding = extractDiscoverProfile(d);
 
           setProfileName(
             getProfileDisplayName({
               email: nextUser.email,
               profileInfo:
-                profileData.profileInfo && typeof profileData.profileInfo === "object"
-                  ? (profileData.profileInfo as Record<string, unknown>)
+                d.profileInfo && typeof d.profileInfo === "object"
+                  ? (d.profileInfo as Record<string, unknown>)
                   : undefined,
-              username: typeof profileData.username === "string" ? profileData.username : null,
+              username: typeof d.username === "string" ? d.username : null,
             })
           );
           setEmail(nextUser.email ?? "");
           setProfilePhotoUrl(
-            typeof profileData.profilePhotoUrl === "string" ? profileData.profilePhotoUrl : ""
+            typeof d.profilePhotoUrl === "string" ? d.profilePhotoUrl : ""
           );
           setUsername(
-            typeof profileData.username === "string" ? profileData.username : ""
+            typeof d.username === "string" ? d.username : ""
           );
-          setProfileVisibility(getProfileVisibility(profileData.profileVisibility));
-          setForm(personalProfile);
+          setProfileVisibility(getProfileVisibility(d.profileVisibility));
+          setForm(personal);
           setOnboardingSummary({
-            assistance: onboardingProfile?.assistance.selectedOptions ?? [],
-            interests: onboardingProfile?.interests.selectedOptions ?? [],
-            skills: onboardingProfile?.skills.selectedOptions ?? [],
+            assistance: onboarding?.assistance.selectedOptions ?? [],
+            interests: onboarding?.interests.selectedOptions ?? [],
+            skills: onboarding?.skills.selectedOptions ?? [],
           });
           setLoading(false);
+          triggerEntrance();
         },
-        (nextError) => {
-          setError(getFirestoreUserMessage(nextError, "read"));
+        (err) => {
+          setError(getFirestoreUserMessage(err, "read"));
           setLoading(false);
         }
       );
@@ -189,24 +481,31 @@ export default function ProfileTabScreen() {
       unsubscribeProfile?.();
       unsubscribeAuth();
     };
-  }, [router]);
+  }, [router, triggerEntrance]);
 
+  // ── Handlers ───────────────────────────────────────────────────────────
   const updateField = (field: keyof ProfileFormState, value: string) => {
-    setForm((currentForm) => ({
-      ...currentForm,
-      [field]: value,
-    }));
+    setForm((prev) => ({ ...prev, [field]: value }));
     setError("");
     setSaveSuccess("");
   };
 
+  const readAssetDataUrl = async (asset: ImagePicker.ImagePickerAsset) => {
+    const mimeType = asset.mimeType || "image/jpeg";
+    if (asset.base64) return `data:${mimeType};base64,${asset.base64}`;
+    const response = await fetch(asset.uri);
+    const blob = await response.blob();
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => (typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Could not convert photo.")));
+      reader.onerror = () => reject(new Error("Could not read photo."));
+      reader.readAsDataURL(blob);
+    });
+  };
+
   const handleSave = async () => {
     const currentUser = auth.currentUser;
-
-    if (!currentUser) {
-      return;
-    }
-
+    if (!currentUser) return;
     try {
       setSaving(true);
       setError("");
@@ -253,11 +552,7 @@ export default function ProfileTabScreen() {
 
       await batch.commit();
 
-      setSaveSuccess(
-        profileVisibility === "public"
-          ? "Профилът е обновен и вече може да бъде намиран от други users."
-          : "Профилът е обновен и вече е private за останалите users."
-      );
+      setSaveSuccess("Profile saved.");
     } catch (nextError) {
       setError(getFirestoreUserMessage(nextError, "write"));
     } finally {
@@ -288,10 +583,10 @@ export default function ProfileTabScreen() {
         { merge: true }
       );
 
-      setSaveSuccess(
-        nextThemePreference === "dark"
-          ? "Dark mode е включен."
-          : "Light mode е включен."
+      showFloatingNotice(
+        nextThemePreference === "dark" ? "Dark mode enabled." : "Light mode enabled.",
+        colors.accent,
+        "#FFFFFF"
       );
     } catch (nextError) {
       setThemePreference(previousThemePreference);
@@ -299,10 +594,68 @@ export default function ProfileTabScreen() {
     }
   };
 
+  const handleVisibilityChange = async (next: ProfileVisibility) => {
+    if (saving || next === profileVisibility) return;
+    try {
+      setSaving(true);
+      setError("");
+      setSaveSuccess("");
+
+      const currentUser = auth.currentUser;
+      if (!currentUser) return;
+
+      const nextProfileInfo = {
+        aboutMe: form.aboutMe.trim(),
+        dreamDestinations: form.dreamDestinations.trim(),
+        fullName: form.fullName.trim(),
+        homeBase: form.homeBase.trim(),
+        stayStyle: form.stayStyle.trim(),
+        travelPace: form.travelPace.trim(),
+      };
+
+      await setDoc(
+        doc(db, "profiles", currentUser.uid),
+        {
+          profileInfo: nextProfileInfo,
+          profileVisibility: next,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      if (next === "public") {
+        await setDoc(
+          doc(db, "publicProfiles", currentUser.uid),
+          buildPublicProfilePayload({
+            email: currentUser.email,
+            profilePhotoUrl,
+            profileInfo: nextProfileInfo,
+            uid: currentUser.uid,
+            username,
+          }),
+          { merge: true }
+        );
+      } else {
+        await deleteDoc(doc(db, "publicProfiles", currentUser.uid));
+      }
+
+      setProfileVisibility(next);
+      showFloatingNotice(
+        next === "public" ? "Profile is now public." : "Profile is now private.",
+        colors.accent,
+        "#FFFFFF"
+      );
+    } catch (nextError) {
+      setError(getFirestoreUserMessage(nextError, "write"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handlePickProfilePhoto = async () => {
     const currentUser = auth.currentUser;
 
-    if (!currentUser) {
+    if (!currentUser || updatingPhoto) {
       return;
     }
 
@@ -311,14 +664,10 @@ export default function ProfileTabScreen() {
       setError("");
       setSaveSuccess("");
 
-      const permissionResponse = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const perm = Platform.OS === "web" ? { granted: true } : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) { setError("Allow gallery access to choose a profile photo."); return; }
 
-      if (!permissionResponse.granted) {
-        setError("Разреши достъп до снимките, за да избереш профилна снимка.");
-        return;
-      }
-
-      const pickerResult = await ImagePicker.launchImageLibraryAsync({
+      const result = await ImagePicker.launchImageLibraryAsync({
         allowsEditing: true,
         aspect: [1, 1],
         base64: true,
@@ -326,22 +675,14 @@ export default function ProfileTabScreen() {
         quality: 0.35,
       });
 
-      if (pickerResult.canceled || !pickerResult.assets?.length) {
+      if (result.canceled || !result.assets?.length) {
         return;
       }
 
-      const asset = pickerResult.assets[0];
-      const encodedImage = asset.base64
-        ? `data:${asset.mimeType || "image/jpeg"};base64,${asset.base64}`
-        : asset.uri;
+      const url = await readAssetDataUrl(result.assets[0]);
 
-      if (!encodedImage) {
-        setError("Не успяхме да подготвим снимката. Опитай отново.");
-        return;
-      }
-
-      if (encodedImage.length > PROFILE_PHOTO_MAX_LENGTH) {
-        setError("Снимката е твърде голяма. Избери по-лека или по-силно crop-ната снимка.");
+      if (url.length > PROFILE_PHOTO_MAX_LENGTH) {
+        setError("Photo too large. Choose a smaller image.");
         return;
       }
 
@@ -352,7 +693,7 @@ export default function ProfileTabScreen() {
       batch.set(
         profileRef,
         {
-          profilePhotoUrl: encodedImage,
+          profilePhotoUrl: url,
           updatedAt: serverTimestamp(),
         },
         { merge: true }
@@ -363,7 +704,7 @@ export default function ProfileTabScreen() {
           publicProfileRef,
           buildPublicProfilePayload({
             email: currentUser.email,
-            profilePhotoUrl: encodedImage,
+            profilePhotoUrl: url,
             profileInfo: form,
             uid: currentUser.uid,
             username,
@@ -373,8 +714,9 @@ export default function ProfileTabScreen() {
 
       await batch.commit();
 
-      setProfilePhotoUrl(encodedImage);
-      setSaveSuccess("Профилната снимка е обновена.");
+      setProfilePhotoUrl(url);
+      setAvatarSheetVisible(false);
+      setSaveSuccess("Photo updated.");
     } catch (nextError) {
       setError(getFirestoreUserMessage(nextError, "write"));
     } finally {
@@ -385,7 +727,7 @@ export default function ProfileTabScreen() {
   const handleRemoveProfilePhoto = async () => {
     const currentUser = auth.currentUser;
 
-    if (!currentUser || !profilePhotoUrl) {
+    if (!currentUser || !profilePhotoUrl || updatingPhoto) {
       return;
     }
 
@@ -423,7 +765,8 @@ export default function ProfileTabScreen() {
       await batch.commit();
 
       setProfilePhotoUrl("");
-      setSaveSuccess("Профилната снимка е махната.");
+      setAvatarSheetVisible(false);
+      setSaveSuccess("Photo removed.");
     } catch (nextError) {
       setError(getFirestoreUserMessage(nextError, "write"));
     } finally {
@@ -432,643 +775,695 @@ export default function ProfileTabScreen() {
   };
 
   const handleLogout = async () => {
+    try { await signOut(auth); router.replace("/login"); } catch (e) { setError(getFirestoreUserMessage(e, "write")); }
+  };
+
+  const handleResetPassword = async () => {
+    const currentUser = auth.currentUser;
+
+    if (!currentUser?.email || sendingReset) {
+      return;
+    }
+
     try {
-      await signOut(auth);
-      router.replace("/login");
+      setSendingReset(true);
+      setError("");
+      setSaveSuccess("");
+      await sendPasswordResetEmail(auth, currentUser.email);
+      setSaveSuccess(`Password reset email sent to ${currentUser.email}.`);
     } catch (nextError) {
       setError(getFirestoreUserMessage(nextError, "write"));
+    } finally {
+      setSendingReset(false);
     }
   };
 
+  // ── Loading ────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <SafeAreaView
-        style={[styles.loader, { backgroundColor: colors.screen }]}
+        style={[staticStyles.screen, { backgroundColor: colors.screen }]}
         edges={["top", "left", "right"]}
       >
-        <ActivityIndicator size="large" color="#5C8C1F" />
+        <View style={staticStyles.loaderWrap}>
+          <ActivityIndicator size="large" color={colors.accent} />
+        </View>
       </SafeAreaView>
     );
   }
 
+  const avatarUri = profilePhotoUrl.trim();
+  const showAvatar = !!avatarUri && !avatarLoadFailed;
+
+  // ── Render ─────────────────────────────────────────────────────────────
   return (
     <SafeAreaView
-      style={[styles.screen, { backgroundColor: colors.screen }]}
+      style={[staticStyles.screen, { backgroundColor: colors.screen }]}
       edges={["top", "left", "right"]}
     >
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
+      <DismissKeyboard>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior="padding"
+        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 8 : 0}
       >
-        <View style={[styles.hero, { backgroundColor: colors.hero }]}>
-          <View style={styles.heroTopRow}>
-            <View style={styles.heroIdentity}>
-              <Text style={[styles.kicker, { color: isDark ? "#B7E07C" : "#C8E08E" }]}>Profile</Text>
-              <Text style={styles.heroTitle}>{profileName}</Text>
-            </View>
-            <View style={styles.heroActions}>
-              <View
-                style={[
-                  styles.themeSwitchCard,
-                  {
-                    backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.08)",
-                    borderColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.12)",
-                  },
-                ]}
-              >
-                <View style={styles.themeSwitchTextWrap}>
-                  <Text style={styles.themeSwitchTitle}>Dark mode</Text>
-                  <Text style={styles.themeSwitchSubtitle}>
-                    {themePreference === "dark" ? "On" : "Off"}
-                  </Text>
-                </View>
-                <Switch
-                  value={themePreference === "dark"}
-                  onValueChange={(value) => {
-                    void handleThemePreferenceChange(value ? "dark" : "light");
-                  }}
-                  trackColor={{ false: "rgba(220,234,192,0.38)", true: "#A6D65A" }}
-                  thumbColor={themePreference === "dark" ? "#FFFFFF" : "#F6FAEF"}
-                  ios_backgroundColor="rgba(220,234,192,0.24)"
-                />
-              </View>
-
-              <View style={styles.heroPhotoWrap}>
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  disabled={updatingPhoto}
-                  onPress={() => {
-                    void handlePickProfilePhoto();
-                  }}
-                  style={[
-                    styles.heroPhotoButton,
-                    {
-                      backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.08)",
-                      borderColor: isDark ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.12)",
-                    },
-                  ]}
-                >
-                  {profilePhotoUrl ? (
-                    <Image
-                      contentFit="cover"
-                      source={{ uri: profilePhotoUrl }}
-                      style={styles.heroPhotoImage}
-                    />
-                  ) : (
-                    <MaterialIcons name="person-outline" size={28} color="#E8F1D4" />
-                  )}
-                  <View style={styles.heroPhotoBadge}>
-                    <MaterialIcons name="photo-camera" size={14} color="#29440F" />
-                  </View>
-                </TouchableOpacity>
-
-                <View style={styles.heroPhotoActions}>
-                  <Text style={styles.heroPhotoHint}>
-                    {updatingPhoto ? "Updating..." : profilePhotoUrl ? "Change photo" : "Add photo"}
-                  </Text>
-                  {profilePhotoUrl ? (
-                    <TouchableOpacity
-                      activeOpacity={0.9}
-                      disabled={updatingPhoto}
-                      onPress={() => {
-                        void handleRemoveProfilePhoto();
-                      }}
-                    >
-                      <Text style={styles.heroPhotoRemove}>Remove</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              </View>
-            </View>
-          </View>
-
-        {email ? <Text style={styles.heroMeta}>{email}</Text> : null}
-        {username ? <Text style={styles.heroMeta}>@{username}</Text> : null}
-        <Text style={styles.heroMeta}>
-          Visibility: {profileVisibility === "public" ? "Public" : "Private"}
-        </Text>
-
-        <Text style={styles.heroDescription}>
-          Тук управляваш личната информация, която Gemini използва заедно с
-          onboarding отговорите ти, за да персонализира предложенията.
-        </Text>
-      </View>
-
-      {error ? (
-        <View
-          style={[
-            styles.errorCard,
-            { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
-          ]}
-        >
-          <Text style={[styles.errorText, { color: colors.errorText }]}>{error}</Text>
-        </View>
-      ) : null}
-
-      {saveSuccess ? (
-        <View
-          style={[
-            styles.successCard,
-            { backgroundColor: colors.successBackground, borderColor: colors.successBorder },
-          ]}
-        >
-          <Text style={[styles.successText, { color: colors.successText }]}>{saveSuccess}</Text>
-        </View>
-      ) : null}
-
-      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Информация за теб</Text>
-
-        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Видимост на профила</Text>
-        <Text style={[styles.visibilityText, { color: colors.textSecondary }]}>
-          Public профилите могат да бъдат виждани и канени в групи. Private профилите
-          остават скрити от discover и invite списъците.
-        </Text>
-        <View style={styles.pillsRow}>
-          <ChoicePill
-            label="Private"
-            selected={profileVisibility === "private"}
-            onPress={() => setProfileVisibility("private")}
-          />
-          <ChoicePill
-            label="Public"
-            selected={profileVisibility === "public"}
-            onPress={() => setProfileVisibility("public")}
-          />
-        </View>
-
-        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Име</Text>
-        <TextInput
-          style={[
-            styles.input,
-            {
-              backgroundColor: colors.inputBackground,
-              borderColor: colors.inputBorder,
-              color: colors.textPrimary,
-            },
-          ]}
-          placeholder="Например Martin"
-          placeholderTextColor={colors.inputPlaceholder}
-          value={form.fullName}
-          onChangeText={(value) => updateField("fullName", value)}
-        />
-
-        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Откъде си</Text>
-        <TextInput
-          style={[
-            styles.input,
-            {
-              backgroundColor: colors.inputBackground,
-              borderColor: colors.inputBorder,
-              color: colors.textPrimary,
-            },
-          ]}
-          placeholder="Град / държава"
-          placeholderTextColor={colors.inputPlaceholder}
-          value={form.homeBase}
-          onChangeText={(value) => updateField("homeBase", value)}
-        />
-
-        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Как обичаш да пътуваш</Text>
-        <View style={styles.pillsRow}>
-          {TRAVEL_PACE_OPTIONS.map((option) => (
-            <ChoicePill
-              key={option}
-              label={option}
-              selected={form.travelPace === option}
-              onPress={() => updateField("travelPace", option)}
-            />
-          ))}
-        </View>
-
-        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Любим тип настаняване</Text>
-        <View style={styles.pillsRow}>
-          {STAY_STYLE_OPTIONS.map((option) => (
-            <ChoicePill
-              key={option}
-              label={option}
-              selected={form.stayStyle === option}
-              onPress={() => updateField("stayStyle", option)}
-            />
-          ))}
-        </View>
-
-        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Кратко за теб</Text>
-        <TextInput
-          style={[
-            styles.input,
-            styles.multilineInput,
-            {
-              backgroundColor: colors.inputBackground,
-              borderColor: colors.inputBorder,
-              color: colors.textPrimary,
-            },
-          ]}
-          placeholder="Какъв човек си, какво търсиш в пътуването, какъв вайб обичаш..."
-          placeholderTextColor={colors.inputPlaceholder}
-          value={form.aboutMe}
-          onChangeText={(value) => updateField("aboutMe", value)}
-          multiline
-        />
-
-        <TouchableOpacity
-          style={[styles.primaryButton, saving && styles.buttonDisabled]}
-          onPress={() => {
-            void handleSave();
-          }}
-          disabled={saving}
-          activeOpacity={0.9}
-        >
-          <Text style={styles.primaryButtonText}>
-            {saving ? "Запазване..." : "Запази профила"}
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Onboarding профил</Text>
-        <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
-          Това вече е записано във Firebase и също участва в AI препоръките.
-        </Text>
-
-        <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Интереси</Text>
-        <View style={styles.summaryRow}>
-          {onboardingSummary.interests.map((item) => (
-            <View
-              key={item}
-              style={[styles.summaryChip, { backgroundColor: colors.accentMuted }]}
-            >
-              <Text style={[styles.summaryChipText, { color: colors.textPrimary }]}>{item}</Text>
-            </View>
-          ))}
-        </View>
-
-        <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Нужди и достъпност</Text>
-        <View style={styles.summaryRow}>
-          {onboardingSummary.assistance.map((item) => (
-            <View
-              key={item}
-              style={[styles.summaryChip, { backgroundColor: colors.accentMuted }]}
-            >
-              <Text style={[styles.summaryChipText, { color: colors.textPrimary }]}>{item}</Text>
-            </View>
-          ))}
-        </View>
-
-        <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Умения</Text>
-        <View style={styles.summaryRow}>
-          {onboardingSummary.skills.map((item) => (
-            <View
-              key={item}
-              style={[styles.summaryChip, { backgroundColor: colors.accentMuted }]}
-            >
-              <Text style={[styles.summaryChipText, { color: colors.textPrimary }]}>{item}</Text>
-            </View>
-          ))}
-        </View>
-
-        <TouchableOpacity
-          style={[
-            styles.secondaryButton,
-            {
-              backgroundColor: isDark ? "#2F2617" : "#FFF2DA",
-            },
-          ]}
-          onPress={() => router.push("/onboarding")}
-          activeOpacity={0.9}
-        >
-          <Text
+      <ScrollView
+        contentContainerStyle={staticStyles.scroll}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+      >
+        {/* ───────── 1. Avatar + identity ───────── */}
+        <Animated.View style={[staticStyles.profileHeader, avatarAnimStyle]}>
+          <Pressable
             style={[
-              styles.secondaryButtonText,
-              { color: isDark ? colors.warningText : "#8B5611" },
+              staticStyles.avatarRingBase,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.accent,
+                ...shadow("md"),
+              },
+            ]}
+            onPress={() => !updatingPhoto && setAvatarSheetVisible(true)}
+          >
+            {showAvatar ? (
+              <Image
+                source={{ uri: avatarUri }}
+                style={staticStyles.avatarImage}
+                contentFit="cover"
+                onError={() => setAvatarLoadFailed(true)}
+              />
+            ) : (
+              <MaterialIcons name="person" size={48} color={colors.textMuted} />
+            )}
+            <View style={[staticStyles.avatarBadgeBase, { backgroundColor: colors.accent, borderColor: colors.card }]}>
+              {updatingPhoto ? (
+                <ActivityIndicator size={12} color="#FFFFFF" />
+              ) : (
+                <MaterialIcons name="camera-alt" size={14} color="#FFFFFF" />
+              )}
+            </View>
+          </Pressable>
+          <Text style={[staticStyles.profileNameText, { color: colors.textPrimary }]}>
+            {profileName}
+          </Text>
+          {username ? (
+            <Text style={[staticStyles.profileEmailText, { color: colors.textMuted }]}>
+              @{username}
+            </Text>
+          ) : null}
+          <Text style={[staticStyles.profileEmailText, { color: colors.textMuted }]}>
+            {email || "No email"}
+          </Text>
+        </Animated.View>
+
+        {/* ───────── Feedback banners ───────── */}
+        {error ? (
+          <View
+            style={[
+              staticStyles.banner,
+              { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
             ]}
           >
-            Редактирай onboarding
-          </Text>
-        </TouchableOpacity>
-      </View>
+            <MaterialIcons name="error-outline" size={16} color={colors.errorText} />
+            <Text style={[staticStyles.bannerText, { color: colors.errorText }]}>{error}</Text>
+          </View>
+        ) : null}
+        {saveSuccess ? (
+          <View
+            style={[
+              staticStyles.banner,
+              { backgroundColor: colors.successBackground, borderColor: colors.successBorder },
+            ]}
+          >
+            <MaterialIcons name="check-circle-outline" size={16} color={colors.successText} />
+            <Text style={[staticStyles.bannerText, { color: colors.successText }]}>{saveSuccess}</Text>
+          </View>
+        ) : null}
 
-        <TouchableOpacity
-          style={[
-            styles.logoutButton,
-            {
-              backgroundColor: colors.card,
-              borderColor: isDark ? "#5A2922" : "#E4D4CF",
-            },
-          ]}
-          onPress={() => {
-            void handleLogout();
-          }}
-          activeOpacity={0.9}
-        >
-          <Text style={[styles.logoutButtonText, { color: isDark ? "#FFB8AE" : "#A34A38" }]}>
-            Logout
-          </Text>
-        </TouchableOpacity>
+        {/* ───────── 2. Appearance & privacy ───────── */}
+        <Animated.View style={sec1Style}>
+          <SectionHeader title="Appearance" color={colors.textMuted} />
+          <View style={[staticStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[staticStyles.miniLabel, { color: colors.textSecondary }]}>Theme</Text>
+            <View style={staticStyles.toggleRow}>
+              <MiniToggle
+                icon="light-mode"
+                label="Light"
+                active={themePreference === "light"}
+                onPress={() => void handleThemePreferenceChange("light")}
+                accentColor={colors.accent}
+                cardBg={colors.card}
+                cardBorder={colors.border}
+                textColor={colors.textSecondary}
+                activeTextColor="#FFFFFF"
+              />
+              <MiniToggle
+                icon="dark-mode"
+                label="Dark"
+                active={themePreference === "dark"}
+                onPress={() => void handleThemePreferenceChange("dark")}
+                accentColor={colors.accent}
+                cardBg={colors.card}
+                cardBorder={colors.border}
+                textColor={colors.textSecondary}
+                activeTextColor="#FFFFFF"
+              />
+            </View>
+            <View style={[staticStyles.divider, { backgroundColor: colors.border }]} />
+            <Text style={[staticStyles.miniLabel, { color: colors.textSecondary }]}>Visibility</Text>
+            <View style={staticStyles.toggleRow}>
+              <MiniToggle
+                icon="public"
+                label="Public"
+                active={profileVisibility === "public"}
+                onPress={() => void handleVisibilityChange("public")}
+                accentColor={colors.accent}
+                cardBg={colors.card}
+                cardBorder={colors.border}
+                textColor={colors.textSecondary}
+                activeTextColor="#FFFFFF"
+              />
+              <MiniToggle
+                icon="lock-outline"
+                label="Private"
+                active={profileVisibility === "private"}
+                onPress={() => void handleVisibilityChange("private")}
+                accentColor={colors.accent}
+                cardBg={colors.card}
+                cardBorder={colors.border}
+                textColor={colors.textSecondary}
+                activeTextColor="#FFFFFF"
+              />
+            </View>
+          </View>
+        </Animated.View>
+
+        {/* ───────── 3. About you ───────── */}
+        <Animated.View style={sec2Style}>
+          <SectionHeader title="About you" color={colors.textMuted} />
+          <View style={[staticStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>Home base</Text>
+            <TextInput
+              style={[
+                staticStyles.input,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.inputBorder,
+                  color: colors.textPrimary,
+                },
+              ]}
+              placeholder="City or country"
+              placeholderTextColor={colors.inputPlaceholder}
+              value={form.homeBase}
+              onChangeText={(v) => updateField("homeBase", v)}
+            />
+
+            <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>Travel pace</Text>
+            <View style={staticStyles.pillsRow}>
+              {TRAVEL_PACE_OPTIONS.map((o) => (
+                <ChoicePill
+                  key={o}
+                  label={o}
+                  selected={form.travelPace === o}
+                  onPress={() => updateField("travelPace", o)}
+                  accentColor={colors.accent}
+                  cardBg={colors.card}
+                  cardBorder={colors.border}
+                  textColor={colors.textSecondary}
+                  selectedTextColor="#FFFFFF"
+                />
+              ))}
+            </View>
+
+            <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>Stay style</Text>
+            <View style={staticStyles.pillsRow}>
+              {STAY_STYLE_OPTIONS.map((o) => (
+                <ChoicePill
+                  key={o}
+                  label={o}
+                  selected={form.stayStyle === o}
+                  onPress={() => updateField("stayStyle", o)}
+                  accentColor={colors.accent}
+                  cardBg={colors.card}
+                  cardBorder={colors.border}
+                  textColor={colors.textSecondary}
+                  selectedTextColor="#FFFFFF"
+                />
+              ))}
+            </View>
+
+            <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>Bio</Text>
+            <TextInput
+              style={[
+                staticStyles.input,
+                staticStyles.textArea,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.inputBorder,
+                  color: colors.textPrimary,
+                },
+              ]}
+              placeholder="What kind of trips do you enjoy?"
+              placeholderTextColor={colors.inputPlaceholder}
+              value={form.aboutMe}
+              onChangeText={(v) => updateField("aboutMe", v)}
+              multiline
+            />
+
+            <Animated.View style={saveBtnAnimStyle}>
+              <Pressable
+                style={[
+                  staticStyles.primaryBtn,
+                  { backgroundColor: colors.accent },
+                  saving && staticStyles.disabled,
+                ]}
+                onPress={() => void handleSave()}
+                onPressIn={() => { saveBtnScale.value = withSpring(0.96, SPRING_BTN); }}
+                onPressOut={() => { saveBtnScale.value = withSpring(1, SPRING_BTN); }}
+                disabled={saving}
+              >
+                {saving ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={staticStyles.primaryBtnText}>Save changes</Text>
+                )}
+              </Pressable>
+            </Animated.View>
+          </View>
+        </Animated.View>
+
+        {/* ───────── 4. Travel preferences (onboarding) ───────── */}
+        <Animated.View style={sec3Style}>
+          <SectionHeader title="Travel preferences" color={colors.textMuted} />
+          <View style={[staticStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            {([
+              ["Interests", onboardingSummary.interests],
+              ["Accessibility", onboardingSummary.assistance],
+              ["Skills", onboardingSummary.skills],
+            ] as const).map(([label, items]) => (
+              <View key={label} style={staticStyles.prefBlock}>
+                <Text style={[staticStyles.prefTitle, { color: colors.textPrimary }]}>{label}</Text>
+                <View style={staticStyles.chipsRow}>
+                  {items.length === 0 ? (
+                    <Text style={[staticStyles.prefEmpty, { color: colors.textMuted }]}>None selected</Text>
+                  ) : (
+                    items.map((item) => (
+                      <View key={item} style={[staticStyles.readChip, { backgroundColor: colors.accentMuted }]}>
+                        <Text style={[staticStyles.readChipText, { color: colors.textPrimary }]}>{item}</Text>
+                      </View>
+                    ))
+                  )}
+                </View>
+              </View>
+            ))}
+
+            <Pressable
+              style={[staticStyles.outlineBtn, { borderColor: colors.accent }]}
+              onPress={() => router.push("/onboarding")}
+            >
+              <MaterialIcons name="edit" size={16} color={colors.accent} />
+              <Text style={[staticStyles.outlineBtnText, { color: colors.accent }]}>Edit preferences</Text>
+            </Pressable>
+          </View>
+        </Animated.View>
+
+        {/* ───────── 5. Account actions ───────── */}
+        <Animated.View style={sec4Style}>
+          <SectionHeader title="Account" color={colors.textMuted} />
+          <View style={[staticStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <SettingsRow
+              icon="lock-reset"
+              label="Change password"
+              onPress={() => void handleResetPassword()}
+              colors={colors}
+              loading={sendingReset}
+            />
+            <SettingsRow
+              icon="logout"
+              label="Sign out"
+              onPress={() => void handleLogout()}
+              colors={colors}
+              destructive
+            />
+          </View>
+        </Animated.View>
+
+        <View style={staticStyles.footer} />
       </ScrollView>
+      </KeyboardAvoidingView>
+      </DismissKeyboard>
+
+      {/* ───────── Floating notice ───────── */}
+      {floatingNotice ? (
+        <GestureDetector gesture={noticePanGesture}>
+          <Animated.View
+            style={[
+              staticStyles.toast,
+              { backgroundColor: floatingNotice.accentColor },
+              noticeAnimStyle,
+            ]}
+          >
+            <Text style={[staticStyles.toastText, { color: floatingNotice.textColor }]}>
+              {floatingNotice.message}
+            </Text>
+          </Animated.View>
+        </GestureDetector>
+      ) : null}
+
+      {/* ───────── Avatar sheet ───────── */}
+      <Modal transparent animationType="fade" visible={avatarSheetVisible} onRequestClose={() => setAvatarSheetVisible(false)}>
+        <View style={[staticStyles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
+          <Pressable onPress={() => setAvatarSheetVisible(false)} style={StyleSheet.absoluteFillObject} />
+          <View style={[staticStyles.sheet, { backgroundColor: colors.card }]}>
+            <View style={[staticStyles.sheetHandle, { backgroundColor: colors.border }]} />
+            <Text style={[staticStyles.sheetTitle, { color: colors.textPrimary }]}>Profile photo</Text>
+            <Text style={[staticStyles.sheetSubtitle, { color: colors.textSecondary }]}>Choose from gallery or reset to default.</Text>
+            <Pressable style={[staticStyles.sheetPrimaryBtn, { backgroundColor: colors.accent }]} onPress={() => void handlePickProfilePhoto()}>
+              <MaterialIcons name="photo-library" size={18} color="#FFFFFF" />
+              <Text style={staticStyles.sheetPrimaryBtnText}>
+                {showAvatar ? "Choose new photo" : "Choose photo"}
+              </Text>
+            </Pressable>
+            {showAvatar ? (
+              <Pressable style={[staticStyles.sheetSecondaryBtn, { borderColor: colors.border }]} onPress={() => void handleRemoveProfilePhoto()}>
+                <MaterialIcons name="delete-outline" size={18} color={colors.errorText} />
+                <Text style={[staticStyles.sheetSecondaryBtnText, { color: colors.errorText }]}>Remove photo</Text>
+              </Pressable>
+            ) : null}
+            <Pressable style={staticStyles.sheetCancel} onPress={() => setAvatarSheetVisible(false)}>
+              <Text style={[staticStyles.sheetCancelText, { color: colors.textMuted }]}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+// ── Static styles ──────────────────────────────────────────────────────────
+
+const staticStyles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#EEF4E5",
   },
-  content: {
-    width: "100%",
-    maxWidth: 980,
-    alignSelf: "center",
-    padding: 20,
-    paddingBottom: 34,
-  },
-  loader: {
+  loaderWrap: {
     flex: 1,
-    backgroundColor: "#EEF4E5",
     alignItems: "center",
     justifyContent: "center",
   },
-  hero: {
-    backgroundColor: "#223814",
-    borderRadius: 28,
-    padding: 22,
-    marginBottom: 16,
+  scroll: {
+    width: "100%",
+    maxWidth: 600,
+    alignSelf: "center",
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.lg,
   },
-  heroTopRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 12,
-  },
-  heroIdentity: {
-    flex: 1,
-    paddingRight: 14,
-  },
-  heroActions: {
-    alignItems: "flex-end",
-    gap: 12,
-  },
-  heroPhotoWrap: {
+  profileHeader: {
     alignItems: "center",
+    marginBottom: Spacing["2xl"],
+    paddingTop: Spacing.sm,
   },
-  heroPhotoButton: {
+  avatarRingBase: {
+    width: 104,
+    height: 104,
+    borderRadius: Radius.full,
+    borderWidth: 3,
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderColor: "rgba(255,255,255,0.12)",
-    borderRadius: 30,
-    borderWidth: 1,
-    height: 72,
     justifyContent: "center",
     overflow: "hidden",
-    position: "relative",
-    width: 72,
+    marginBottom: Spacing.md,
   },
-  heroPhotoImage: {
-    height: "100%",
+  avatarImage: {
     width: "100%",
+    height: "100%",
+    borderRadius: Radius.full,
   },
-  heroPhotoBadge: {
-    alignItems: "center",
-    backgroundColor: "#D6E8AE",
-    borderRadius: 999,
-    bottom: 4,
-    height: 24,
-    justifyContent: "center",
+  avatarBadgeBase: {
     position: "absolute",
-    right: 4,
-    width: 24,
-  },
-  heroPhotoActions: {
+    bottom: 2,
+    right: 2,
+    width: 28,
+    height: 28,
+    borderRadius: Radius.full,
     alignItems: "center",
-    marginTop: 8,
+    justifyContent: "center",
+    borderWidth: 2,
   },
-  heroPhotoHint: {
-    color: "#E8F1D4",
-    fontSize: 12,
-    fontWeight: "700",
+  profileNameText: {
+    ...TypeScale.headingMd,
+    marginBottom: Spacing.xs,
   },
-  heroPhotoRemove: {
-    color: "#D6E8AE",
-    fontSize: 12,
-    fontWeight: "800",
-    marginTop: 4,
+  profileEmailText: {
+    ...TypeScale.bodyMd,
   },
-  themeSwitchCard: {
-    alignItems: "center",
-    borderRadius: 18,
-    borderWidth: 1,
+  sectionHeader: {
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.bold,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: Spacing.sm,
+    marginLeft: Spacing.xs,
+  },
+  toggleRow: {
     flexDirection: "row",
-    minWidth: 172,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    gap: Spacing.sm,
   },
-  themeSwitchTextWrap: {
+  miniToggle: {
     flex: 1,
-    marginRight: 12,
-  },
-  themeSwitchTitle: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  themeSwitchSubtitle: {
-    color: "#DCEAC0",
-    fontSize: 12,
-    marginTop: 4,
-  },
-  kicker: {
-    color: "#C8E08E",
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 1,
-    marginBottom: 8,
-  },
-  heroTitle: {
-    color: "#FFFFFF",
-    fontSize: 30,
-    lineHeight: 36,
-    fontWeight: "800",
-  },
-  heroMeta: {
-    color: "#DCEAC0",
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 4,
-  },
-  heroDescription: {
-    color: "#E6F0CF",
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 10,
-  },
-  errorCard: {
-    backgroundColor: "#FFF1EF",
-    borderRadius: 20,
-    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    borderRadius: Radius.md,
     borderWidth: 1,
-    borderColor: "#F0B6AE",
-    marginBottom: 16,
+    paddingVertical: Spacing.md,
+    justifyContent: "center",
   },
-  errorText: {
-    color: "#A63228",
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: "700",
-  },
-  successCard: {
-    backgroundColor: "#F3F9E6",
-    borderRadius: 20,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#C9DF98",
-    marginBottom: 16,
-  },
-  successText: {
-    color: "#3B6D11",
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: "700",
-  },
-  card: {
-    backgroundColor: "#FAFCF5",
-    borderRadius: 28,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: "#DDE8C7",
-    marginBottom: 16,
-  },
-  cardTitle: {
-    color: "#29440F",
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: "800",
-    marginBottom: 8,
-  },
-  cardSubtitle: {
-    color: "#5F6E53",
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 14,
-  },
-  fieldLabel: {
-    color: "#47642A",
-    fontSize: 13,
-    fontWeight: "800",
-    marginTop: 10,
-    marginBottom: 8,
-    textTransform: "uppercase",
-  },
-  input: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "#DDE8C7",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 15,
-    color: "#29440F",
-  },
-  visibilityText: {
-    color: "#5F6E53",
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 8,
-  },
-  multilineInput: {
-    minHeight: 120,
-    textAlignVertical: "top",
+  miniToggleLabel: {
+    ...TypeScale.titleSm,
+    fontWeight: FontWeight.semibold,
   },
   pillsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
+    gap: Spacing.sm,
+    marginBottom: Spacing.xs,
   },
   pill: {
-    backgroundColor: "#EEF4E5",
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginRight: 8,
-    marginBottom: 8,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
     borderWidth: 1,
-    borderColor: "#D8E3C2",
-  },
-  pillSelected: {
-    backgroundColor: "#5C8C1F",
-    borderColor: "#5C8C1F",
   },
   pillText: {
-    color: "#3E5B21",
-    fontSize: 13,
-    fontWeight: "700",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.semibold,
   },
-  pillTextSelected: {
-    color: "#FFFFFF",
+  textArea: {
+    minHeight: 100,
+    textAlignVertical: "top",
   },
-  primaryButton: {
-    backgroundColor: "#5C8C1F",
-    borderRadius: 18,
-    paddingVertical: 16,
-    alignItems: "center",
-    marginTop: 18,
-  },
-  primaryButtonText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "800",
-  },
-  buttonDisabled: {
+  disabled: {
     opacity: 0.55,
   },
-  summaryLabel: {
-    color: "#47642A",
-    fontSize: 13,
-    fontWeight: "800",
-    marginTop: 8,
-    marginBottom: 8,
-    textTransform: "uppercase",
+  prefBlock: {
+    marginBottom: Spacing.lg,
   },
-  summaryRow: {
+  chipsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    marginBottom: 8,
+    gap: Spacing.sm,
+    marginTop: Spacing.xs,
   },
-  summaryChip: {
-    backgroundColor: "#EEF4E5",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginRight: 8,
-    marginBottom: 8,
-  },
-  summaryChipText: {
-    color: "#3E5B21",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  secondaryButton: {
-    backgroundColor: "#FFF2DA",
-    borderRadius: 18,
-    paddingVertical: 14,
+  settingsRow: {
+    flexDirection: "row",
     alignItems: "center",
-    marginTop: 12,
+    gap: Spacing.md,
+    paddingVertical: Spacing.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  secondaryButtonText: {
-    color: "#8B5611",
-    fontSize: 14,
-    fontWeight: "800",
+  settingsRowLabel: {
+    ...TypeScale.bodyLg,
+    flex: 1,
   },
-  logoutButton: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    paddingVertical: 15,
+  settingsRowTrailing: {
+    ...TypeScale.bodySm,
+  },
+  toast: {
+    position: "absolute",
+    top: Spacing.lg,
+    left: Spacing.lg,
+    right: Spacing.lg,
+    zIndex: ZIndex.toast,
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.lg,
+    ...shadow("xl"),
+  },
+  toastText: {
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.bold,
+  },
+  sheetCancel: {
     alignItems: "center",
+    paddingVertical: Spacing.md,
+    marginTop: Spacing.xs,
+  },
+  footer: {
+    height: Spacing["4xl"],
+  },
+
+  // Banner
+  banner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderRadius: Radius.md,
     borderWidth: 1,
-    borderColor: "#E4D4CF",
+    marginBottom: Spacing.lg,
   },
-  logoutButtonText: {
-    color: "#A34A38",
-    fontSize: 15,
-    fontWeight: "800",
+  bannerText: {
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.semibold,
+    flex: 1,
+  },
+
+  // Cards
+  card: {
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+    padding: Spacing.lg,
+    marginBottom: Spacing["2xl"],
+  },
+  miniLabel: {
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.semibold,
+    marginBottom: Spacing.sm,
+  },
+  divider: {
+    height: 1,
+    marginVertical: Spacing.lg,
+  },
+
+  // Form
+  fieldLabel: {
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.semibold,
+    marginBottom: Spacing.sm,
+    marginTop: Spacing.lg,
+  },
+  input: {
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    ...TypeScale.bodyMd,
+    minHeight: 48,
+  },
+  primaryBtn: {
+    borderRadius: Radius.md,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: Spacing.xl,
+  },
+  primaryBtnText: {
+    ...TypeScale.titleMd,
+    color: "#FFFFFF",
+    fontWeight: FontWeight.bold,
+  },
+
+  // Preferences
+  prefTitle: {
+    ...TypeScale.titleSm,
+    fontWeight: FontWeight.semibold,
+    marginBottom: Spacing.xs,
+  },
+  prefEmpty: {
+    ...TypeScale.bodySm,
+    fontStyle: "italic",
+  },
+  readChip: {
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+  },
+  readChipText: {
+    ...TypeScale.labelMd,
+    fontWeight: FontWeight.semibold,
+  },
+  outlineBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.sm,
+    borderWidth: 1,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.md,
+  },
+  outlineBtnText: {
+    ...TypeScale.titleSm,
+    fontWeight: FontWeight.semibold,
+  },
+
+  // Modal / sheet
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  sheet: {
+    borderTopLeftRadius: Radius["3xl"],
+    borderTopRightRadius: Radius["3xl"],
+    paddingHorizontal: Spacing["2xl"],
+    paddingBottom: Spacing["3xl"],
+    paddingTop: Spacing.md,
+  },
+  sheetHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: Radius.full,
+    alignSelf: "center",
+    marginBottom: Spacing.xl,
+  },
+  sheetTitle: {
+    ...TypeScale.headingSm,
+    marginBottom: Spacing.xs,
+  },
+  sheetSubtitle: {
+    ...TypeScale.bodyMd,
+    marginBottom: Spacing.xl,
+  },
+  sheetPrimaryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.sm,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.lg,
+  },
+  sheetPrimaryBtnText: {
+    ...TypeScale.titleMd,
+    color: "#FFFFFF",
+    fontWeight: FontWeight.bold,
+  },
+  sheetSecondaryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.sm,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.lg,
+    marginTop: Spacing.sm,
+    borderWidth: 1,
+  },
+  sheetSecondaryBtnText: {
+    ...TypeScale.titleMd,
+    fontWeight: FontWeight.semibold,
+  },
+  sheetCancelText: {
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.semibold,
   },
 });

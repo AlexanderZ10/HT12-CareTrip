@@ -4,6 +4,7 @@ import {
 } from "./profile-info";
 
 export const GEMINI_MODEL = "gemini-2.5-flash";
+export const DEFAULT_SETTLEMENT_MAP_ZOOM = 5;
 
 type OnboardingSection = {
   note: string;
@@ -40,6 +41,7 @@ export type TripRecommendation = {
   highlights: string[];
   id: string;
   imageUrl: string;
+  imageUrls: string[];
   latitude: number | null;
   longitude: number | null;
   popularityNote: string;
@@ -72,6 +74,15 @@ function sanitizeString(value: unknown, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
 }
 
+function normalizeComparableText(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 function sanitizeStringArray(value: unknown) {
   if (!Array.isArray(value)) {
     return [];
@@ -81,6 +92,18 @@ function sanitizeStringArray(value: unknown) {
     .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
     .filter(Boolean)
+    .slice(0, 6);
+}
+
+function sanitizeImageUrls(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item, index, array) => /^https?:\/\//i.test(item) && array.indexOf(item) === index)
     .slice(0, 6);
 }
 
@@ -100,6 +123,59 @@ function dedupeCandidates(candidates: string[]) {
   return candidates
     .map((candidate) => candidate.trim())
     .filter((candidate, index, array) => candidate && array.indexOf(candidate) === index);
+}
+
+function buildTripIdentityKeys(trip: {
+  country?: string;
+  destination?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  title?: string;
+  wikipediaTitle?: string;
+}) {
+  const title = normalizeComparableText(sanitizeString(trip.title));
+  const country = normalizeComparableText(sanitizeString(trip.country));
+  const destination = normalizeComparableText(sanitizeString(trip.destination));
+  const wikipediaTitle = normalizeComparableText(sanitizeString(trip.wikipediaTitle));
+  const roundedLatitude =
+    typeof trip.latitude === "number" ? Math.round(trip.latitude * 10) / 10 : null;
+  const roundedLongitude =
+    typeof trip.longitude === "number" ? Math.round(trip.longitude * 10) / 10 : null;
+
+  return [
+    destination,
+    wikipediaTitle,
+    title,
+    destination && country ? `${destination}|${country}` : "",
+    title && destination ? `${title}|${destination}` : "",
+    title && country ? `${title}|${country}` : "",
+    wikipediaTitle && country ? `${wikipediaTitle}|${country}` : "",
+    title && destination && country ? `${title}|${destination}|${country}` : "",
+    roundedLatitude !== null && roundedLongitude !== null
+      ? `${roundedLatitude}|${roundedLongitude}`
+      : "",
+  ]
+    .filter(Boolean)
+    .filter((value, index, array) => array.indexOf(value) === index);
+}
+
+export function dedupeTripRecommendations(
+  trips: TripRecommendation[],
+  existingTrips: TripRecommendation[] = []
+) {
+  const seenKeys = new Set(existingTrips.flatMap((trip) => buildTripIdentityKeys(trip)));
+
+  return trips.filter((trip) => {
+    const identityKeys = buildTripIdentityKeys(trip);
+    const isDuplicate = identityKeys.some((key) => seenKeys.has(key));
+
+    if (isDuplicate) {
+      return false;
+    }
+
+    identityKeys.forEach((key) => seenKeys.add(key));
+    return true;
+  });
 }
 
 function getSection(section: Partial<OnboardingSection> | undefined): OnboardingSection {
@@ -126,7 +202,7 @@ async function callGeminiGenerateContent(params: {
   apiKey: string;
   generationConfig?: Record<string, unknown>;
   prompt: string;
-  tools?: Array<Record<string, unknown>>;
+  tools?: Record<string, unknown>[];
 }) {
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
@@ -172,7 +248,7 @@ async function callGeminiGenerateContent(params: {
 function normalizeTrip(
   rawTrip: RawSettlementRecommendation,
   index: number,
-  imageUrl: string
+  imageUrls: string[]
 ): TripRecommendation {
   const title = sanitizeString(rawTrip.title, `Settlement ${index + 1}`);
   const country = sanitizeString(rawTrip.country);
@@ -191,7 +267,8 @@ function normalizeTrip(
     destination,
     highlights: sanitizeStringArray(rawTrip.highlights),
     id: `settlement-${Date.now()}-${index}`,
-    imageUrl,
+    imageUrl: imageUrls[0] ?? "",
+    imageUrls,
     latitude: sanitizeNumber(rawTrip.latitude),
     longitude: sanitizeNumber(rawTrip.longitude),
     popularityNote: sanitizeString(
@@ -207,7 +284,23 @@ function normalizeTrip(
   };
 }
 
-async function fetchWikipediaImage(candidates: string[]) {
+function isUsefulWikipediaImageTitle(title: string) {
+  const normalizedTitle = title.toLowerCase();
+
+  return (
+    normalizedTitle.startsWith("file:") &&
+    !normalizedTitle.endsWith(".svg") &&
+    !normalizedTitle.includes("map") &&
+    !normalizedTitle.includes("locator") &&
+    !normalizedTitle.includes("flag") &&
+    !normalizedTitle.includes("coat of arms") &&
+    !normalizedTitle.includes("logo") &&
+    !normalizedTitle.includes("symbol") &&
+    !normalizedTitle.includes("seal")
+  );
+}
+
+async function fetchWikipediaSummaryImage(candidates: string[]) {
   for (const trimmedCandidate of dedupeCandidates(candidates)) {
     if (!trimmedCandidate) {
       continue;
@@ -233,12 +326,94 @@ async function fetchWikipediaImage(candidates: string[]) {
         payload.originalimage?.source || payload.thumbnail?.source || "";
 
       if (imageUrl) {
-        return imageUrl;
+        return [imageUrl];
       }
     } catch {}
   }
 
-  return "";
+  return [] as string[];
+}
+
+async function fetchWikipediaImages(candidates: string[]) {
+  // Try the summary API first — returns a single direct image URL (most reliable on mobile)
+  const summaryImages = await fetchWikipediaSummaryImage(candidates);
+
+  if (summaryImages.length > 0) {
+    return summaryImages;
+  }
+
+  // Fallback: query API for multiple images
+  for (const trimmedCandidate of dedupeCandidates(candidates)) {
+    if (!trimmedCandidate) {
+      continue;
+    }
+
+    try {
+      const response = await fetch(
+        `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(
+          trimmedCandidate
+        )}&prop=images&imlimit=12&format=json&origin=*`
+      );
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const payload = (await response.json()) as {
+        query?: {
+          pages?: Record<
+            string,
+            {
+              images?: { title?: string }[];
+            }
+          >;
+        };
+      };
+
+      const fileTitles = Object.values(payload.query?.pages ?? {})
+        .flatMap((page) => page.images ?? [])
+        .map((image) => sanitizeString(image.title))
+        .filter((title) => isUsefulWikipediaImageTitle(title))
+        .slice(0, 8);
+
+      if (fileTitles.length === 0) {
+        continue;
+      }
+
+      const imageInfoResponse = await fetch(
+        `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(
+          fileTitles.join("|")
+        )}&prop=imageinfo&iiprop=url&iiurlwidth=1200&format=json&origin=*`
+      );
+
+      if (!imageInfoResponse.ok) {
+        continue;
+      }
+
+      const imageInfoPayload = (await imageInfoResponse.json()) as {
+        query?: {
+          pages?: Record<
+            string,
+            {
+              imageinfo?: { thumburl?: string; url?: string }[];
+            }
+          >;
+        };
+      };
+
+      const imageUrls = Object.values(imageInfoPayload.query?.pages ?? {})
+        .flatMap((page) => page.imageinfo ?? [])
+        .map((image) => image.thumburl || image.url || "")
+        .filter((url, index, array) => url && array.indexOf(url) === index)
+        .slice(0, 4);
+
+      if (imageUrls.length > 0) {
+        return imageUrls;
+      }
+    } catch {}
+  }
+
+  return [] as string[];
 }
 
 async function fetchSettlementCoordinates(candidates: string[]) {
@@ -259,10 +434,10 @@ async function fetchSettlementCoordinates(candidates: string[]) {
       }
 
       const payload = (await response.json()) as {
-        results?: Array<{
+        results?: {
           latitude?: number;
           longitude?: number;
-        }>;
+        }[];
       };
 
       const firstResult = payload.results?.find((item) =>
@@ -287,12 +462,45 @@ async function fetchSettlementCoordinates(candidates: string[]) {
   } satisfies SettlementCoordinates;
 }
 
-export function buildSettlementMapUrl(latitude: number | null, longitude: number | null) {
+export function buildSettlementMapUrl(
+  latitude: number | null,
+  longitude: number | null,
+  variant: "preview" | "expanded" = "preview",
+  zoom = DEFAULT_SETTLEMENT_MAP_ZOOM
+) {
   if (latitude === null || longitude === null) {
     return "";
   }
 
-  return `https://staticmap.openstreetmap.de/staticmap.php?center=${latitude},${longitude}&zoom=10&size=700x420&markers=${latitude},${longitude},red-pushpin`;
+  const size = variant === "expanded" ? "650,450" : "650,360";
+  const roundedZoom = Math.min(Math.max(Math.round(zoom), 1), 17);
+  const marker = `${longitude},${latitude},pm2rdm`;
+
+  return `https://static-maps.yandex.ru/1.x/?lang=en_US&ll=${longitude},${latitude}&z=${roundedZoom}&size=${size}&l=map&pt=${marker}`;
+}
+
+export function buildSettlementMapEmbedUrl(
+  latitude: number | null,
+  longitude: number | null,
+  zoom = DEFAULT_SETTLEMENT_MAP_ZOOM
+) {
+  if (latitude === null || longitude === null) {
+    return "";
+  }
+
+  const zoomFactor = Math.pow(2, DEFAULT_SETTLEMENT_MAP_ZOOM - zoom);
+  const latitudeDelta = Math.min(Math.max(0.85 * zoomFactor, 0.01), 65);
+  const longitudeDelta = Math.min(Math.max(1.25 * zoomFactor, 0.02), 130);
+  const bbox = [
+    longitude - longitudeDelta,
+    latitude - latitudeDelta,
+    longitude + longitudeDelta,
+    latitude + latitudeDelta,
+  ].join(",");
+
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(
+    bbox
+  )}&layer=mapnik&marker=${encodeURIComponent(`${latitude},${longitude}`)}`;
 }
 
 export function extractDiscoverProfile(profileData: RawProfileData): DiscoverProfile | null {
@@ -340,7 +548,11 @@ export function parseStoredDiscoverData(profileData: Record<string, unknown>) {
           wikipediaTitle: sanitizeString(trip.wikipediaTitle),
         },
         index,
-        sanitizeString(trip.imageUrl)
+        sanitizeImageUrls(trip.imageUrls).length > 0
+          ? sanitizeImageUrls(trip.imageUrls)
+          : sanitizeString(trip.imageUrl)
+            ? [sanitizeString(trip.imageUrl)]
+            : []
       )
     );
 
@@ -356,7 +568,7 @@ export function parseStoredDiscoverData(profileData: Record<string, unknown>) {
         ? rawDiscover.sourceModel
         : GEMINI_MODEL,
     summary: sanitizeString(rawDiscover.summary),
-    trips,
+    trips: dedupeTripRecommendations(trips).slice(0, 6),
   } satisfies StoredDiscoverData;
 }
 
@@ -417,8 +629,10 @@ function buildStructuredDiscoverPrompt(params: {
   return [
     "Convert the grounded research notes below into a compact structured discover feed in Bulgarian.",
     "Use only the grounded notes for factual claims.",
-    "Return exactly 6 settlements.",
+    "Return exactly 8 settlements.",
     "Each settlement must be a real village, small town, or settlement with tourism activity.",
+    "Every settlement must be unique.",
+    "Do not repeat the same place under alternate names, nearby district labels, or slightly different spellings.",
     "Prefer places that are often visited and have several things to do plus notable attractions.",
     "Use concise mobile-friendly copy.",
     "For latitude and longitude, include best-effort coordinates for the settlement center.",
@@ -477,8 +691,8 @@ const DISCOVER_RESPONSE_SCHEMA = {
           "wikipediaTitle",
         ],
       },
-      minItems: 6,
-      maxItems: 6,
+      minItems: 8,
+      maxItems: 8,
     },
   },
   required: ["summary", "settlements"],
@@ -526,9 +740,9 @@ export async function generateTripsWithGemini(
   }
 
   const trips = await Promise.all(
-    parsedResponse.settlements.slice(0, 6).map(async (trip, index) => {
-      const [imageUrl, coordinates] = await Promise.all([
-        fetchWikipediaImage([
+    parsedResponse.settlements.slice(0, 8).map(async (trip, index) => {
+      const [imageUrls, coordinates] = await Promise.all([
+        fetchWikipediaImages([
           sanitizeString(trip.wikipediaTitle),
           sanitizeString(trip.destination),
           sanitizeString(trip.title),
@@ -552,17 +766,19 @@ export async function generateTripsWithGemini(
           longitude: coordinates.longitude,
         },
         index,
-        imageUrl
+        imageUrls
       );
     })
   );
+
+  const uniqueTrips = dedupeTripRecommendations(trips, previousTrips).slice(0, 6);
 
   return {
     summary: sanitizeString(
       parsedResponse.summary,
       "Подбрахме популярни селища с интересни активности и забележителности според профила ти."
     ),
-    trips,
+    trips: uniqueTrips,
   };
 }
 
@@ -572,17 +788,18 @@ export async function enrichDiscoverTrips(trips: TripRecommendation[]) {
       let nextTrip = trip;
       let changed = false;
 
-      if (!trip.imageUrl) {
-        const imageUrl = await fetchWikipediaImage([
+      if ((trip.imageUrls?.length ?? 0) === 0 && !trip.imageUrl) {
+        const imageUrls = await fetchWikipediaImages([
           trip.wikipediaTitle,
           trip.destination,
           trip.title,
         ]);
 
-        if (imageUrl) {
+        if (imageUrls.length > 0) {
           nextTrip = {
             ...nextTrip,
-            imageUrl,
+            imageUrl: imageUrls[0] ?? "",
+            imageUrls,
           };
           changed = true;
         }

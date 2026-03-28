@@ -110,7 +110,7 @@ function buildMapDoc(markers: MapMarker[], center: { latitude: number; longitude
         margin: 0;
       }
       body {
-        background: #eef4e5;
+        background: #f5f5f5;
       }
       .leaflet-container {
         font-family: system-ui, sans-serif;
@@ -125,7 +125,7 @@ function buildMapDoc(markers: MapMarker[], center: { latitude: number; longitude
       const markers = ${serializedMarkers};
       const map = L.map("map", {
         zoomControl: true,
-        scrollWheelZoom: false,
+        scrollWheelZoom: true,
       });
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -135,7 +135,7 @@ function buildMapDoc(markers: MapMarker[], center: { latitude: number; longitude
       const bounds = [];
 
       markers.forEach((marker) => {
-        const color = marker.kind === "settlement" ? "#5c8c1f" : "#ba7517";
+        const color = marker.kind === "settlement" ? "#2d6a4f" : "#ba7517";
         const circle = L.circleMarker([marker.latitude, marker.longitude], {
           color,
           fillColor: color,
@@ -257,7 +257,7 @@ const styles = StyleSheet.create({
   },
   fallback: {
     alignItems: "center",
-    backgroundColor: "#EEF4E5",
+    backgroundColor: "#F5F5F5",
     borderRadius: 20,
     justifyContent: "center",
     padding: 16,

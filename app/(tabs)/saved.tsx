@@ -1,23 +1,39 @@
+import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, type User } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAppTheme } from "../../components/app-theme-provider";
+import { DismissKeyboard } from "../../components/dismiss-keyboard";
+import { ConfirmDialog } from "../../components/confirm-dialog";
+import {
+  FontWeight,
+  Layout,
+  Radius,
+  Spacing,
+  TypeScale,
+  shadow,
+} from "../../constants/design-system";
 import { auth, db } from "../../firebase";
 import { parseBookingOrders, type BookingOrder } from "../../utils/bookings";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
 import { getProfileDisplayName } from "../../utils/profile-info";
-import { parseSavedTrips, type SavedTrip } from "../../utils/saved-trips";
+import { parseSavedTrips, removeSavedTripForUser, type SavedTrip } from "../../utils/saved-trips";
 
 const FILTER_OPTIONS = [
   { id: "all", label: "All" },
@@ -37,9 +53,41 @@ function formatSavedDate(value: number) {
   }).format(new Date(value));
 }
 
+function getSavedTripDetailLines(trip: SavedTrip) {
+  const excluded = new Set(
+    [trip.summary, trip.destination, trip.title]
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const seen = new Set<string>();
+
+  return trip.details
+    .split("\n")
+    .map((line) => line.replace(/^[-•]\s*/, "").trim())
+    .filter((line) => line && !line.endsWith(":"))
+    .filter((line) => {
+      const normalized = line.toLowerCase();
+
+      if (!normalized || excluded.has(normalized) || seen.has(normalized)) {
+        return false;
+      }
+
+      seen.add(normalized);
+      return true;
+    });
+}
+
+function buildTripPreviewPoints(trip: SavedTrip) {
+  return getSavedTripDetailLines(trip).slice(0, 3);
+}
+
 export default function SavedTabScreen() {
   const router = useRouter();
   const { colors, isDark } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const isPhoneLayout = width < 768;
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileName, setProfileName] = useState("Traveler");
   const [bookingOrders, setBookingOrders] = useState<BookingOrder[]>([]);
@@ -47,6 +95,10 @@ export default function SavedTabScreen() {
   const [error, setError] = useState("");
   const [activeFilter, setActiveFilter] = useState<SavedFilter>("all");
   const [filterOpen, setFilterOpen] = useState(false);
+  const [tripSearch, setTripSearch] = useState("");
+  const [selectedTrip, setSelectedTrip] = useState<SavedTrip | null>(null);
+  const [pendingDeleteTrip, setPendingDeleteTrip] = useState<SavedTrip | null>(null);
+  const [deletingTripKey, setDeletingTripKey] = useState<string | null>(null);
 
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
@@ -54,6 +106,8 @@ export default function SavedTabScreen() {
     const unsubscribeAuth = onAuthStateChanged(auth, (nextUser) => {
       unsubscribeProfile?.();
       unsubscribeProfile = null;
+
+      setUser(nextUser);
 
       if (!nextUser) {
         setBookingOrders([]);
@@ -104,6 +158,21 @@ export default function SavedTabScreen() {
     };
   }, [router]);
 
+  async function handleDeleteTrip(trip: SavedTrip) {
+    if (!user) return;
+    const key = `${trip.source}_${trip.id}`;
+    setDeletingTripKey(key);
+    try {
+      const remaining = await removeSavedTripForUser(user.uid, trip.sourceKey);
+      setSavedTrips(remaining);
+    } catch {
+      // silent
+    } finally {
+      setDeletingTripKey(null);
+      setPendingDeleteTrip(null);
+    }
+  }
+
   const selectedFilterLabel =
     FILTER_OPTIONS.find((option) => option.id === activeFilter)?.label ?? "All";
   const filteredBookingOrders = activeFilter === "all" || activeFilter === "paid"
@@ -114,13 +183,27 @@ export default function SavedTabScreen() {
       ? savedTrips
       : savedTrips.filter((trip) => trip.source === activeFilter);
 
+  const filteredTrips = useMemo(() => {
+    const query = tripSearch.trim().toLowerCase();
+
+    if (!query) {
+      return filteredSavedTrips;
+    }
+
+    return filteredSavedTrips.filter((trip) =>
+      [trip.title, trip.destination, trip.summary, trip.details, trip.budget, trip.duration]
+        .filter((value): value is string => !!value)
+        .some((value) => value.toLowerCase().includes(query))
+    );
+  }, [filteredSavedTrips, tripSearch]);
+
   if (loading) {
     return (
       <SafeAreaView
         style={[styles.loader, { backgroundColor: colors.screenSoft }]}
         edges={["top", "left", "right"]}
       >
-        <ActivityIndicator size="large" color="#639922" />
+        <ActivityIndicator size="large" color="#2D6A4F" />
       </SafeAreaView>
     );
   }
@@ -130,9 +213,17 @@ export default function SavedTabScreen() {
       style={[styles.screen, { backgroundColor: colors.screenSoft }]}
       edges={["top", "left", "right"]}
     >
+      <DismissKeyboard>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior="padding"
+        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 8 : 0}
+      >
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
         <View style={[styles.hero, { backgroundColor: colors.heroAlt }]}>
           <Text style={[styles.kicker, { color: isDark ? "#B7E07C" : "#D6E8AE" }]}>Saved</Text>
@@ -140,6 +231,17 @@ export default function SavedTabScreen() {
           <Text style={styles.subtitle}>
             Тук събираме trip идеи от Discover и AI маршрутите от Home на едно място.
           </Text>
+        </View>
+
+        <View style={styles.searchShell}>
+          <MaterialIcons color="#9CA3AF" name="search" size={22} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search Trips"
+            placeholderTextColor="#809071"
+            value={tripSearch}
+            onChangeText={setTripSearch}
+          />
         </View>
 
         <View style={styles.filterSection}>
@@ -265,7 +367,7 @@ export default function SavedTabScreen() {
         </View>
       ) : null}
 
-      {!error && filteredBookingOrders.length === 0 && filteredSavedTrips.length === 0 ? (
+      {!error && filteredBookingOrders.length === 0 && filteredTrips.length === 0 ? (
         <View style={[styles.emptyCard, { backgroundColor: colors.cardAlt }]}>
           <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>Няма елементи за този филтър</Text>
           <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
@@ -274,13 +376,28 @@ export default function SavedTabScreen() {
         </View>
       ) : null}
 
-        {filteredSavedTrips.map((trip) => (
-          <View
+      {!error && savedTrips.length > 0 && filteredTrips.length === 0 && tripSearch.trim() ? (
+        <View style={[styles.emptyCard, { backgroundColor: colors.cardAlt }]}>
+          <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>No matching trips</Text>
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+            Try another destination, budget, or keyword from the saved plan.
+          </Text>
+        </View>
+      ) : null}
+
+        {filteredTrips.map((trip) => {
+          const isDeleting = deletingTripKey === trip.sourceKey;
+          const previewPoints = buildTripPreviewPoints(trip);
+
+          return (
+          <TouchableOpacity
             key={trip.id}
             style={[
               styles.tripCard,
               { backgroundColor: colors.cardAlt, borderColor: colors.border },
             ]}
+            activeOpacity={0.94}
+            onPress={() => setSelectedTrip(trip)}
           >
           <View style={styles.cardTopRow}>
             <View
@@ -300,23 +417,161 @@ export default function SavedTabScreen() {
                 {trip.source === "home" ? "Home Planner" : "Discover"}
               </Text>
             </View>
-            <Text style={styles.dateText}>{formatSavedDate(trip.createdAtMs)}</Text>
+            <View style={styles.cardTopRowRight}>
+              <Text style={styles.dateText}>{formatSavedDate(trip.createdAtMs)}</Text>
+              <TouchableOpacity
+                onPress={(e) => {
+                  e.stopPropagation();
+                  setPendingDeleteTrip(trip);
+                }}
+                hitSlop={8}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <ActivityIndicator size="small" color="#DC3545" />
+                ) : (
+                  <MaterialIcons name="delete-outline" size={20} color="#DC3545" />
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
 
           <Text style={styles.tripTitle}>{trip.title}</Text>
           <Text style={styles.tripDestination}>{trip.destination}</Text>
 
-          <View style={styles.metaRow}>
-            {trip.duration ? <Text style={styles.metaText}>{trip.duration}</Text> : null}
-            {trip.budget ? <Text style={styles.metaText}>{trip.budget}</Text> : null}
+          <View style={[styles.previewGrid, isPhoneLayout && styles.previewGridPhone]}>
+            <View style={styles.previewInfoCard}>
+              <Text style={styles.previewInfoLabel}>Destination</Text>
+              <Text style={styles.previewInfoValue}>{trip.destination}</Text>
+            </View>
+            <View style={styles.previewInfoCard}>
+              <Text style={styles.previewInfoLabel}>Source</Text>
+              <Text style={styles.previewInfoValue}>
+                {trip.source === "home" ? "Home Planner" : "Discover"}
+              </Text>
+            </View>
+            {trip.duration ? (
+              <View style={styles.previewInfoCard}>
+                <Text style={styles.previewInfoLabel}>Duration</Text>
+                <Text style={styles.previewInfoValue}>{trip.duration}</Text>
+              </View>
+            ) : null}
+            {trip.budget ? (
+              <View style={styles.previewInfoCard}>
+                <Text style={styles.previewInfoLabel}>Budget</Text>
+                <Text style={styles.previewInfoValue}>{trip.budget}</Text>
+              </View>
+            ) : null}
           </View>
 
-          {trip.summary ? <Text style={styles.summaryText}>{trip.summary}</Text> : null}
+          {trip.summary ? (
+            <Text style={styles.summaryText} numberOfLines={isPhoneLayout ? 4 : 3}>
+              {trip.summary}
+            </Text>
+          ) : null}
 
-          <Text style={styles.detailsText}>{trip.details}</Text>
-          </View>
-        ))}
+          {previewPoints.length > 0 ? (
+            <View style={styles.previewPointsWrap}>
+              {previewPoints.map((point) => (
+                <Text key={`${trip.id}-${point}`} style={styles.previewPointText}>
+                  • {point}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+
+          <Text style={styles.detailsText} numberOfLines={isPhoneLayout ? 6 : 5}>
+            {trip.details}
+          </Text>
+          </TouchableOpacity>
+        );
+        })}
       </ScrollView>
+      </KeyboardAvoidingView>
+      </DismissKeyboard>
+
+      <Modal
+        visible={!!selectedTrip}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedTrip(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalHeaderTextWrap}>
+                <Text style={styles.modalTitle}>{selectedTrip?.title}</Text>
+                <Text style={styles.modalDestination}>{selectedTrip?.destination}</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setSelectedTrip(null)}
+                activeOpacity={0.9}
+              >
+                <MaterialIcons name="close" size={20} color="#1A1A1A" />
+              </TouchableOpacity>
+            </View>
+
+            {selectedTrip ? (
+              <>
+                <View style={[styles.previewGrid, isPhoneLayout && styles.previewGridPhone]}>
+                  <View style={styles.previewInfoCard}>
+                    <Text style={styles.previewInfoLabel}>Source</Text>
+                    <Text style={styles.previewInfoValue}>
+                      {selectedTrip.source === "home" ? "Home Planner" : "Discover"}
+                    </Text>
+                  </View>
+                  <View style={styles.previewInfoCard}>
+                    <Text style={styles.previewInfoLabel}>Saved on</Text>
+                    <Text style={styles.previewInfoValue}>
+                      {formatSavedDate(selectedTrip.createdAtMs)}
+                    </Text>
+                  </View>
+                  {selectedTrip.duration ? (
+                    <View style={styles.previewInfoCard}>
+                      <Text style={styles.previewInfoLabel}>Duration</Text>
+                      <Text style={styles.previewInfoValue}>{selectedTrip.duration}</Text>
+                    </View>
+                  ) : null}
+                  {selectedTrip.budget ? (
+                    <View style={styles.previewInfoCard}>
+                      <Text style={styles.previewInfoLabel}>Budget</Text>
+                      <Text style={styles.previewInfoValue}>{selectedTrip.budget}</Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                {selectedTrip.summary ? (
+                  <Text style={styles.modalSummary}>{selectedTrip.summary}</Text>
+                ) : null}
+
+                <ScrollView
+                  style={styles.modalDetailsScroll}
+                  contentContainerStyle={styles.modalDetailsContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {getSavedTripDetailLines(selectedTrip).map((line) => (
+                    <Text key={`${selectedTrip.id}-${line}`} style={styles.modalDetailLine}>
+                      • {line}
+                    </Text>
+                  ))}
+                </ScrollView>
+              </>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
+      <ConfirmDialog
+        visible={!!pendingDeleteTrip}
+        title="Изтриване на трип"
+        message={`Сигурен ли си, че искаш да премахнеш "${pendingDeleteTrip?.title ?? ""}"?`}
+        confirmLabel="Изтрий"
+        onConfirm={() => {
+          if (pendingDeleteTrip) handleDeleteTrip(pendingDeleteTrip);
+        }}
+        onCancel={() => setPendingDeleteTrip(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -324,290 +579,393 @@ export default function SavedTabScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#EAF3DE",
+    backgroundColor: "#F0F0F0",
   },
   content: {
-    padding: 20,
-    paddingBottom: 32,
+    padding: Spacing.xl,
+    paddingBottom: Spacing["3xl"],
   },
   loader: {
     flex: 1,
-    backgroundColor: "#EAF3DE",
+    backgroundColor: "#F0F0F0",
     alignItems: "center",
     justifyContent: "center",
   },
   hero: {
-    backgroundColor: "#2F4F14",
-    borderRadius: 28,
-    padding: 24,
-    marginBottom: 18,
+    backgroundColor: "#2D2D2D",
+    borderRadius: Radius["3xl"],
+    padding: Spacing["2xl"],
+    marginBottom: Spacing.lg,
+  },
+  searchShell: {
+    alignItems: "center",
+    backgroundColor: "#F5F5F5",
+    borderColor: "#E0E0E0",
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    flexDirection: "row",
+    marginBottom: Spacing.lg,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+  },
+  searchInput: {
+    color: "#1A1A1A",
+    flex: 1,
+    ...TypeScale.titleSm,
+    marginLeft: Spacing.sm,
   },
   kicker: {
     color: "#D6E8AE",
-    fontSize: 13,
-    fontWeight: "700",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.bold,
     textTransform: "uppercase",
     letterSpacing: 0.8,
-    marginBottom: 10,
+    marginBottom: Spacing.sm,
   },
   title: {
     color: "#FFFFFF",
-    fontSize: 28,
-    lineHeight: 36,
-    fontWeight: "800",
-    marginBottom: 10,
+    ...TypeScale.displayMd,
+    marginBottom: Spacing.sm,
   },
   subtitle: {
-    color: "#EAF3DE",
-    fontSize: 15,
-    lineHeight: 22,
+    color: "#F0F0F0",
+    ...TypeScale.titleSm,
   },
   errorCard: {
     backgroundColor: "#FFF1EF",
-    borderRadius: 22,
-    padding: 18,
+    borderRadius: Radius.xl,
+    padding: Spacing.lg,
     borderWidth: 1,
     borderColor: "#F0B6AE",
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
   },
   errorTitle: {
-    color: "#A63228",
-    fontSize: 17,
-    fontWeight: "800",
-    marginBottom: 6,
+    color: "#DC3545",
+    ...TypeScale.titleLg,
+    fontWeight: FontWeight.extrabold,
+    marginBottom: Spacing.xs,
   },
   errorText: {
-    color: "#8A3D35",
-    fontSize: 14,
-    lineHeight: 20,
+    color: "#991B1B",
+    ...TypeScale.bodyMd,
   },
   emptyCard: {
-    backgroundColor: "#F6F8EE",
-    borderRadius: 24,
-    padding: 24,
+    backgroundColor: "#F8F8F8",
+    borderRadius: Radius["2xl"],
+    padding: Spacing["2xl"],
     alignItems: "center",
   },
   emptyTitle: {
-    color: "#29440F",
-    fontSize: 22,
-    fontWeight: "800",
-    marginBottom: 10,
+    color: "#1A1A1A",
+    ...TypeScale.headingMd,
+    marginBottom: Spacing.sm,
     textAlign: "center",
   },
   emptyText: {
-    color: "#5F6E53",
-    fontSize: 15,
-    lineHeight: 22,
+    color: "#6B7280",
+    ...TypeScale.titleSm,
     textAlign: "center",
   },
   filterSection: {
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
   },
   filterLabel: {
-    color: "#47642A",
-    fontSize: 13,
-    fontWeight: "800",
+    color: "#6B7280",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
-    marginBottom: 8,
+    marginBottom: Spacing.sm,
   },
   filterButton: {
-    backgroundColor: "#FAFCF5",
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    backgroundColor: "#FFFFFF",
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
     borderWidth: 1,
-    borderColor: "#DDE8C7",
+    borderColor: "#E8E8E8",
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
   filterButtonText: {
-    color: "#29440F",
-    fontSize: 15,
-    fontWeight: "700",
+    color: "#1A1A1A",
+    ...TypeScale.titleSm,
+    fontWeight: FontWeight.bold,
   },
   filterButtonArrow: {
-    color: "#5A6E41",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#6B7280",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
   },
   filterMenu: {
-    marginTop: 8,
-    backgroundColor: "#FAFCF5",
-    borderRadius: 18,
+    marginTop: Spacing.sm,
+    backgroundColor: "#FFFFFF",
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: "#DDE8C7",
-    padding: 8,
+    borderColor: "#E8E8E8",
+    padding: Spacing.sm,
   },
   filterOption: {
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
   },
   filterOptionActive: {
-    backgroundColor: "#EAF3DE",
+    backgroundColor: "#F0F0F0",
   },
   filterOptionText: {
-    color: "#365A14",
-    fontSize: 14,
-    fontWeight: "700",
+    color: "#1A1A1A",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.bold,
   },
   filterOptionTextActive: {
-    color: "#29440F",
+    color: "#1A1A1A",
   },
   bookingsSection: {
-    marginBottom: 18,
+    marginBottom: Spacing.lg,
   },
   bookingsSectionTitle: {
-    color: "#29440F",
-    fontSize: 22,
-    fontWeight: "800",
-    marginBottom: 6,
+    color: "#1A1A1A",
+    ...TypeScale.headingMd,
+    marginBottom: Spacing.xs,
   },
   bookingsSectionSubtitle: {
-    color: "#5F6E53",
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 12,
+    color: "#6B7280",
+    ...TypeScale.bodyMd,
+    marginBottom: Spacing.md,
   },
   bookingCard: {
-    backgroundColor: "#FFF8E7",
-    borderRadius: 24,
-    padding: 20,
-    marginBottom: 14,
+    backgroundColor: "#FFFBEB",
+    borderRadius: Radius["2xl"],
+    padding: Spacing.xl,
+    marginBottom: Spacing.md,
     borderWidth: 1,
-    borderColor: "#F1D7A5",
+    borderColor: "#FCD34D",
   },
   bookingTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: Spacing.md,
   },
   bookingPaidBadge: {
     backgroundColor: "#DFF1D0",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
   bookingPaidBadgeText: {
     color: "#1D6C4D",
-    fontSize: 12,
-    fontWeight: "800",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
   },
   bookingTotal: {
     color: "#4E3A19",
-    fontSize: 22,
-    fontWeight: "800",
-    marginBottom: 6,
+    ...TypeScale.headingMd,
+    marginBottom: Spacing.xs,
   },
   bookingPaymentMeta: {
-    color: "#8B5611",
-    fontSize: 13,
-    fontWeight: "700",
-    marginBottom: 10,
+    color: "#92400E",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.bold,
+    marginBottom: Spacing.sm,
   },
   bookingDetailBlock: {
-    marginBottom: 10,
+    marginBottom: Spacing.sm,
   },
   bookingDetailTitle: {
-    color: "#47642A",
-    fontSize: 12,
-    fontWeight: "800",
+    color: "#6B7280",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
-    marginBottom: 4,
+    marginBottom: Spacing.xs,
   },
   bookingDetailText: {
-    color: "#5A6E41",
-    fontSize: 14,
-    lineHeight: 20,
+    color: "#6B7280",
+    ...TypeScale.bodyMd,
   },
   bookingContactText: {
-    color: "#627254",
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 4,
+    color: "#9CA3AF",
+    ...TypeScale.bodySm,
+    marginTop: Spacing.xs,
   },
   tripCard: {
-    backgroundColor: "#F6F8EE",
-    borderRadius: 24,
-    padding: 20,
-    marginBottom: 16,
-    shadowColor: "#1E2A12",
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
+    backgroundColor: "#F8F8F8",
+    borderRadius: Radius["2xl"],
+    padding: Spacing.xl,
+    marginBottom: Spacing.lg,
+    ...shadow("md"),
   },
   cardTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
-    gap: 10,
+    marginBottom: Spacing.md,
+    gap: Spacing.sm,
+  },
+  cardTopRowRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
   },
   sourceBadge: {
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
   discoverBadge: {
-    backgroundColor: "#FFF2DA",
+    backgroundColor: "#FFF7ED",
   },
   homeBadge: {
-    backgroundColor: "#E4EFD0",
+    backgroundColor: "#E5E7EB",
   },
   sourceBadgeText: {
-    fontSize: 12,
-    fontWeight: "800",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
   discoverBadgeText: {
-    color: "#8B5611",
+    color: "#92400E",
   },
   homeBadgeText: {
-    color: "#3B6D11",
+    color: "#2D6A4F",
   },
   dateText: {
     color: "#6B7A5D",
-    fontSize: 12,
-    fontWeight: "600",
+    ...TypeScale.labelMd,
   },
   tripTitle: {
-    color: "#29440F",
-    fontSize: 22,
-    fontWeight: "800",
-    marginBottom: 6,
+    color: "#1A1A1A",
+    ...TypeScale.headingMd,
+    marginBottom: Spacing.xs,
   },
   tripDestination: {
-    color: "#5A6E41",
-    fontSize: 15,
-    fontWeight: "700",
-    marginBottom: 10,
+    color: "#6B7280",
+    ...TypeScale.titleSm,
+    fontWeight: FontWeight.bold,
+    marginBottom: Spacing.sm,
+  },
+  previewGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  previewGridPhone: {
+    gap: Spacing.sm,
+  },
+  previewInfoCard: {
+    backgroundColor: "#F0F0F0",
+    borderColor: "#D1D5DB",
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    minWidth: 132,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  previewInfoLabel: {
+    color: "#9CA3AF",
+    ...TypeScale.labelSm,
+    fontWeight: FontWeight.bold,
+    letterSpacing: 0.4,
+    marginBottom: Spacing.xs,
+    textTransform: "uppercase",
+  },
+  previewInfoValue: {
+    color: "#1A1A1A",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
   },
   metaRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    marginBottom: 10,
+    marginBottom: Spacing.sm,
   },
   metaText: {
-    color: "#516244",
-    fontSize: 13,
-    fontWeight: "700",
-    marginRight: 12,
-    marginBottom: 4,
+    color: "#6B7280",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.bold,
+    marginRight: Spacing.md,
+    marginBottom: Spacing.xs,
   },
   summaryText: {
     color: "#3C4B30",
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: 10,
+    ...TypeScale.titleSm,
+    marginBottom: Spacing.sm,
+  },
+  previewPointsWrap: {
+    marginBottom: Spacing.sm,
+  },
+  previewPointText: {
+    color: "#6B7280",
+    ...TypeScale.bodyMd,
+    marginBottom: Spacing.xs,
   },
   detailsText: {
-    color: "#46563A",
-    fontSize: 14,
-    lineHeight: 21,
+    color: "#6B7280",
+    ...TypeScale.bodyMd,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(16, 26, 8, 0.48)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: Spacing.xl,
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: Layout.modalMaxWidth + 380,
+    maxHeight: "84%",
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E8E8E8",
+    borderRadius: Radius["3xl"],
+    borderWidth: 1,
+    padding: Spacing.xl,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: Spacing.lg,
+  },
+  modalHeaderTextWrap: {
+    flex: 1,
+    paddingRight: Spacing.md,
+  },
+  modalTitle: {
+    color: "#1A1A1A",
+    ...TypeScale.displayMd,
+  },
+  modalDestination: {
+    color: "#5D6F4D",
+    ...TypeScale.titleLg,
+    fontWeight: FontWeight.bold,
+    marginTop: Spacing.xs,
+  },
+  modalCloseButton: {
+    width: Layout.touchTarget,
+    height: Layout.touchTarget,
+    borderRadius: Radius.md,
+    backgroundColor: "#F0F0F0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalSummary: {
+    color: "#3C4B30",
+    ...TypeScale.bodyLg,
+    marginBottom: Spacing.md,
+  },
+  modalDetailsScroll: {
+    marginTop: Spacing.xs,
+  },
+  modalDetailsContent: {
+    paddingBottom: Spacing.xs,
+  },
+  modalDetailLine: {
+    color: "#6B7280",
+    ...TypeScale.titleSm,
+    marginBottom: Spacing.sm,
   },
 });

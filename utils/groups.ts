@@ -21,8 +21,12 @@ export type TravelGroup = {
   invitedUserIds: string[];
   joinKeyNormalized: string | null;
   memberCount: number;
+  memberAvatarUrlsById: Record<string, string>;
   memberIds: string[];
+  memberLabelsById: Record<string, string>;
+  memberUsernamesById: Record<string, string>;
   name: string;
+  photoUrl: string;
   updatedAtMs: number | null;
 };
 
@@ -38,6 +42,18 @@ function sanitizeStringArray(value: unknown) {
   return value
     .map((item) => (typeof item === "string" ? item.trim() : ""))
     .filter(Boolean);
+}
+
+function sanitizeStringRecord(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {} as Record<string, string>;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, item]) => [key.trim(), typeof item === "string" ? item.trim() : ""])
+      .filter(([key, item]) => !!key && !!item)
+  );
 }
 
 function toMillis(value: unknown) {
@@ -58,12 +74,15 @@ function toMillis(value: unknown) {
 }
 
 export function normalizeGroupJoinKey(value: string) {
-  return value.toUpperCase().replace(/[^A-Z0-9-]/g, "");
+  return value
+    .toUpperCase()
+    .replace(/^TRIP-?/i, "")
+    .replace(/[^A-Z0-9-]/g, "");
 }
 
 export function createSuggestedGroupKey() {
   const randomSegment = Math.random().toString(36).slice(2, 8).toUpperCase();
-  return `TRIP-${randomSegment}`;
+  return randomSegment;
 }
 
 export function parseTravelGroup(
@@ -72,6 +91,9 @@ export function parseTravelGroup(
 ): TravelGroup {
   const accessType = data?.accessType === "private" ? "private" : "public";
   const memberIds = sanitizeStringArray(data?.memberIds);
+  const memberAvatarUrlsById = sanitizeStringRecord(data?.memberAvatarUrlsById);
+  const memberLabelsById = sanitizeStringRecord(data?.memberLabelsById);
+  const memberUsernamesById = sanitizeStringRecord(data?.memberUsernamesById);
   const memberCountValue =
     typeof data?.memberCount === "number" && Number.isFinite(data.memberCount)
       ? data.memberCount
@@ -90,8 +112,12 @@ export function parseTravelGroup(
         ? sanitizeString(data?.joinKeyNormalized) || null
         : null,
     memberCount: Math.max(memberIds.length, memberCountValue),
+    memberAvatarUrlsById,
     memberIds,
+    memberLabelsById,
+    memberUsernamesById,
     name: sanitizeString(data?.name, "Unnamed group"),
+    photoUrl: sanitizeString(data?.photoUrl),
     updatedAtMs: toMillis(data?.updatedAt),
   };
 }

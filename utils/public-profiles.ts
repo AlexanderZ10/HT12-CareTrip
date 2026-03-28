@@ -4,6 +4,7 @@ export type ProfileVisibility = "public" | "private";
 
 export type PublicProfile = {
   aboutMe: string;
+  avatarUrl: string;
   displayName: string;
   homeBase: string;
   id: string;
@@ -54,6 +55,7 @@ export function buildPublicProfilePayload(params: {
 
   return {
     aboutMe: sanitizeString(params.profileInfo?.aboutMe),
+    avatarUrl: sanitizeString(params.profileInfo?.avatarUrl),
     displayName,
     homeBase: sanitizeString(params.profileInfo?.homeBase),
     photoUrl: sanitizeString(params.profilePhotoUrl),
@@ -70,6 +72,7 @@ export function parsePublicProfile(
 ): PublicProfile {
   return {
     aboutMe: sanitizeString(data?.aboutMe),
+    avatarUrl: sanitizeString(data?.avatarUrl),
     displayName: sanitizeString(data?.displayName, "Traveler"),
     homeBase: sanitizeString(data?.homeBase),
     id,

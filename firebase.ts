@@ -4,15 +4,16 @@ import * as FirebaseAuth from "firebase/auth";
 import { getAuth, initializeAuth } from "firebase/auth";
 import { getFirestore, initializeFirestore } from "firebase/firestore";
 import { getFunctions } from "firebase/functions";
+import { getStorage } from "firebase/storage";
 import { Platform } from "react-native";
 
 const firebaseConfig = {
-  apiKey: "PUT_your_API_KEY",
-  authDomain: "travelapp-f7ff4.firebaseapp.com",
-  projectId: "travelapp-f7ff4",
-  storageBucket: "travelapp-f7ff4.firebasestorage.app",
-  messagingSenderId: "1093173844964",
-  appId: "1:1093173844964:web:991c37c1fdfe50853705f1"
+  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
 };
 
 const app = initializeApp(firebaseConfig);
@@ -71,6 +72,7 @@ export const db = shouldUseFirestoreWebTransportWorkaround()
     } as Parameters<typeof initializeFirestore>[1] & Record<string, unknown>)
   : getFirestore(app);
 
+export const storage = getStorage(app);
 export const functions = getFunctions(
   app,
   process.env.EXPO_PUBLIC_FIREBASE_FUNCTIONS_REGION || "us-central1"
