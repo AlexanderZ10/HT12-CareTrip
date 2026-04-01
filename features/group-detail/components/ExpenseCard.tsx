@@ -2,6 +2,8 @@ import { MaterialIcons } from "@expo/vector-icons";
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
+import { useAppLanguage } from "../../../components/app-language-provider";
+import { useAppTheme } from "../../../components/app-theme-provider";
 import {
   FontWeight,
   Radius,
@@ -41,30 +43,35 @@ export function ExpenseCard({
   settledShareCount,
   userId,
 }: ExpenseCardProps) {
+  const { t } = useAppLanguage();
+  const { colors } = useAppTheme();
   const isGroupPaymentExpense = expense.collectionMode === "group-payment";
 
   return (
     <View
       style={[
         styles.expenseCard,
-        isMine ? styles.myExpenseCard : styles.theirExpenseCard,
+        {
+          backgroundColor: isMine ? colors.accentMuted : colors.card,
+          borderColor: colors.border,
+        },
       ]}
     >
       <View style={styles.expenseCardTopRow}>
-        <Text style={[styles.expenseCardKicker, isMine && styles.myExpenseCardKicker]}>
-          Expense split
+        <Text style={[styles.expenseCardKicker, { color: colors.textSecondary }]}>
+          {t("groupDetail.expenseSplit")}
         </Text>
-        <Text style={[styles.expenseCardAmount, isMine && styles.myExpenseCardAmount]}>
+        <Text style={[styles.expenseCardAmount, { color: colors.textPrimary }]}>
           {expense.amountLabel}
         </Text>
       </View>
-      <Text style={[styles.expenseCardTitle, isMine && styles.myExpenseCardTitle]}>
+      <Text style={[styles.expenseCardTitle, { color: colors.textPrimary }]}>
         {expense.title}
       </Text>
       <Text
         style={[
           styles.expenseCardMeta,
-          isMine && styles.myExpenseCardMeta,
+          { color: colors.textSecondary },
         ]}
       >
         {isGroupPaymentExpense
@@ -75,13 +82,15 @@ export function ExpenseCard({
         <View
           style={[
             styles.expenseCardChip,
-            isMine ? styles.myExpenseCardChip : styles.theirExpenseCardChip,
+            {
+              backgroundColor: isMine ? colors.accentMuted : colors.cardAlt,
+            },
           ]}
         >
           <Text
             style={[
               styles.expenseCardChipText,
-              isMine && styles.myExpenseCardChipText,
+              { color: colors.textSecondary },
             ]}
           >
             Split with {expense.participantCount} people
@@ -90,28 +99,32 @@ export function ExpenseCard({
         <View
           style={[
             styles.expenseCardChip,
-            isMine ? styles.myExpenseCardChip : styles.theirExpenseCardChip,
+            {
+              backgroundColor: isMine ? colors.accentMuted : colors.cardAlt,
+            },
           ]}
         >
           <Text
             style={[
               styles.expenseCardChipText,
-              isMine && styles.myExpenseCardChipText,
+              { color: colors.textSecondary },
             ]}
           >
-            {formatExpenseAmount(getExpensePerPerson(expense))} each
+            {formatExpenseAmount(getExpensePerPerson(expense))} {t("common.each")}
           </Text>
         </View>
         <View
           style={[
             styles.expenseCardChip,
-            isMine ? styles.myExpenseCardChip : styles.theirExpenseCardChip,
+            {
+              backgroundColor: isMine ? colors.accentMuted : colors.cardAlt,
+            },
           ]}
         >
           <Text
             style={[
               styles.expenseCardChipText,
-              isMine && styles.myExpenseCardChipText,
+              { color: colors.textSecondary },
             ]}
           >
             {`${settledShareCount}/${expense.participantCount} shares covered`}
@@ -123,7 +136,7 @@ export function ExpenseCard({
           <Text
             style={[
               styles.expenseRepaymentStatusText,
-              isMine && styles.myExpenseRepaymentStatusText,
+              { color: colors.textSecondary },
             ]}
           >
             {isGroupPaymentExpense
@@ -148,12 +161,14 @@ export function ExpenseCard({
           }}
           style={[
             styles.linkedExpenseOpenButton,
-            isMine ? styles.myLinkedExpenseOpenButton : styles.theirLinkedExpenseOpenButton,
+            {
+              backgroundColor: isMine ? colors.accentMuted : colors.cardAlt,
+            },
           ]}
         >
-          <MaterialIcons color="#6B7280" name="confirmation-number" size={16} />
-          <Text style={styles.linkedExpenseOpenButtonText}>
-            Open planner ticket link
+          <MaterialIcons color={colors.textSecondary} name="confirmation-number" size={16} />
+          <Text style={[styles.linkedExpenseOpenButtonText, { color: colors.textSecondary }]}>
+            {t("groupDetail.openPlannerTicket")}
           </Text>
         </TouchableOpacity>
       ) : null}
@@ -169,14 +184,15 @@ export function ExpenseCard({
           }}
           style={[
             styles.expensePayButton,
+            { backgroundColor: colors.accent },
             processingRepaymentExpenseId === message.id &&
               styles.expensePayButtonDisabled,
           ]}
         >
-          <MaterialIcons color="#FFFFFF" name="lock" size={16} />
-          <Text style={styles.expensePayButtonText}>
+          <MaterialIcons color={colors.buttonTextOnAction} name="lock" size={16} />
+          <Text style={[styles.expensePayButtonText, { color: colors.buttonTextOnAction }]}>
             {processingRepaymentExpenseId === message.id
-              ? "Opening Stripe..."
+              ? t("groupDetail.openingStripe")
               : isGroupPaymentExpense
                 ? `Pay your ${formatExpenseRepaymentAmount(
                     myOutstandingAmount
@@ -190,11 +206,13 @@ export function ExpenseCard({
         <View
           style={[
             styles.expensePaidBadge,
-            isMine ? styles.myExpensePaidBadge : styles.theirExpensePaidBadge,
+            {
+              backgroundColor: isMine ? colors.accentMuted : colors.cardAlt,
+            },
           ]}
         >
-          <MaterialIcons color="#2D6A4F" name="verified" size={15} />
-          <Text style={styles.expensePaidBadgeText}>
+          <MaterialIcons color={colors.accent} name="verified" size={15} />
+          <Text style={[styles.expensePaidBadgeText, { color: colors.accent }]}>
             {isGroupPaymentExpense
               ? `Your share was paid via Stripe • ${myRepayment!.amountLabel}`
               : `Paid via Stripe • ${myRepayment!.amountLabel}`}
@@ -212,52 +230,28 @@ const styles = StyleSheet.create({
     marginTop: 2,
     padding: Spacing.md,
   },
-  myExpenseCard: {
-    backgroundColor: "#F7FAF1",
-    borderColor: "#E8E8E8",
-  },
-  theirExpenseCard: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E8E8E8",
-  },
   expenseCardTopRow: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
   },
   expenseCardKicker: {
-    color: "#6B7280",
     ...TypeScale.labelLg,
     fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
   },
-  myExpenseCardKicker: {
-    color: "#6B7280",
-  },
   expenseCardAmount: {
-    color: "#1A1A1A",
     ...TypeScale.titleMd,
     fontWeight: FontWeight.extrabold,
   },
-  myExpenseCardAmount: {
-    color: "#1A1A1A",
-  },
   expenseCardTitle: {
-    color: "#1A1A1A",
     ...TypeScale.titleLg,
     fontWeight: FontWeight.extrabold,
     marginTop: Spacing.sm,
   },
-  myExpenseCardTitle: {
-    color: "#1A1A1A",
-  },
   expenseCardMeta: {
-    color: "#5A6E41",
     ...TypeScale.bodyMd,
     marginTop: Spacing.xs,
-  },
-  myExpenseCardMeta: {
-    color: "#5A6E41",
   },
   expenseCardChipsRow: {
     flexDirection: "row",
@@ -270,30 +264,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.sm,
     paddingVertical: Spacing.sm,
   },
-  myExpenseCardChip: {
-    backgroundColor: "#E6F1DA",
-  },
-  theirExpenseCardChip: {
-    backgroundColor: "#F5F5F5",
-  },
   expenseCardChipText: {
-    color: "#6B7280",
     ...TypeScale.labelLg,
     fontWeight: FontWeight.bold,
-  },
-  myExpenseCardChipText: {
-    color: "#6B7280",
   },
   expenseRepaymentStatusRow: {
     marginTop: Spacing.md,
   },
   expenseRepaymentStatusText: {
-    color: "#5A6E41",
     ...TypeScale.bodySm,
     fontWeight: FontWeight.bold,
-  },
-  myExpenseRepaymentStatusText: {
-    color: "#5A6E41",
   },
   linkedExpenseOpenButton: {
     alignItems: "center",
@@ -305,20 +285,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
   },
-  myLinkedExpenseOpenButton: {
-    backgroundColor: "#E6F1DA",
-  },
-  theirLinkedExpenseOpenButton: {
-    backgroundColor: "#F5F5F5",
-  },
   linkedExpenseOpenButtonText: {
-    color: "#6B7280",
     ...TypeScale.labelLg,
     fontWeight: FontWeight.extrabold,
   },
   expensePayButton: {
     alignItems: "center",
-    backgroundColor: "#2D6A4F",
     borderRadius: Radius.lg,
     flexDirection: "row",
     gap: Spacing.sm,
@@ -331,7 +303,6 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   expensePayButtonText: {
-    color: "#FFFFFF",
     ...TypeScale.bodySm,
     fontWeight: FontWeight.extrabold,
   },
@@ -344,14 +315,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
   },
-  myExpensePaidBadge: {
-    backgroundColor: "#E6F1DA",
-  },
-  theirExpensePaidBadge: {
-    backgroundColor: "#F5F5F5",
-  },
   expensePaidBadgeText: {
-    color: "#2D6A4F",
     ...TypeScale.labelLg,
     fontWeight: FontWeight.extrabold,
   },

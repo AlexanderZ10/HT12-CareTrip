@@ -2,6 +2,7 @@ import {
   extractPersonalProfile,
   type PersonalProfileInfo,
 } from "./profile-info";
+import type { AppLanguage } from "./translations";
 
 export const GEMINI_MODEL = "gemini-2.5-flash";
 export const DEFAULT_SETTLEMENT_MAP_ZOOM = 5;
@@ -52,6 +53,7 @@ export type TripRecommendation = {
 
 export type StoredDiscoverData = {
   generatedAtMs: number | null;
+  language: string | null;
   lastRefreshDateKey: string | null;
   sourceModel: string;
   summary: string;
@@ -72,6 +74,98 @@ type SettlementCoordinates = {
 
 function sanitizeString(value: unknown, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
+}
+
+function getLanguageVariant(language?: string): AppLanguage {
+  const normalized = (language || "").trim().toLowerCase();
+
+  if (normalized === "en" || normalized === "english") return "en";
+  if (normalized === "de" || normalized === "german" || normalized === "deutsch") return "de";
+  if (normalized === "es" || normalized === "spanish" || normalized === "español") return "es";
+  if (normalized === "fr" || normalized === "french" || normalized === "français") return "fr";
+  return "bg";
+}
+
+function getDiscoverCopy(language?: string) {
+  switch (getLanguageVariant(language)) {
+    case "en":
+      return {
+        accessibilityNotes: "Check local accessibility in advance.",
+        genericError: "We couldn't generate new suggestions. Please try again.",
+        invalidResponse: "Gemini returned an unexpected format. Please try refresh again.",
+        missingApiKey:
+          "EXPO_PUBLIC_GEMINI_API_KEY is missing. Add a Gemini API key and restart the app.",
+        popularityNote: "Popular with visitors and packed with things to do.",
+        requestFailed:
+          "Gemini could not return grounded destination data. Check your network and limits.",
+        summary:
+          "We selected popular places with interesting activities and landmarks based on your profile.",
+        whyItFits: "Selected based on your interests and profile.",
+      } as const;
+    case "de":
+      return {
+        accessibilityNotes: "Prüfe die lokale Barrierefreiheit im Voraus.",
+        genericError:
+          "Wir konnten keine neuen Vorschläge generieren. Bitte versuche es erneut.",
+        invalidResponse:
+          "Gemini hat ein unerwartetes Format zurückgegeben. Bitte versuche die Aktualisierung erneut.",
+        missingApiKey:
+          "EXPO_PUBLIC_GEMINI_API_KEY fehlt. Füge einen Gemini-API-Schlüssel hinzu und starte die App neu.",
+        popularityNote: "Beliebt bei Besuchern und mit vielen Aktivitäten.",
+        requestFailed:
+          "Gemini konnte keine fundierten Zieldaten liefern. Prüfe Netzwerk und Limits.",
+        summary:
+          "Wir haben beliebte Orte mit interessanten Aktivitäten und Sehenswürdigkeiten passend zu deinem Profil ausgewählt.",
+        whyItFits: "Passend zu deinen Interessen und deinem Profil ausgewählt.",
+      } as const;
+    case "es":
+      return {
+        accessibilityNotes: "Revisa la accesibilidad local con antelación.",
+        genericError:
+          "No pudimos generar nuevas sugerencias. Inténtalo de nuevo.",
+        invalidResponse:
+          "Gemini devolvió un formato inesperado. Intenta actualizar otra vez.",
+        missingApiKey:
+          "Falta EXPO_PUBLIC_GEMINI_API_KEY. Añade una clave de Gemini y reinicia la app.",
+        popularityNote: "Popular entre visitantes y con muchas cosas para hacer.",
+        requestFailed:
+          "Gemini no pudo devolver datos fiables del destino. Revisa tu red y los límites.",
+        summary:
+          "Seleccionamos lugares populares con actividades y atracciones interesantes según tu perfil.",
+        whyItFits: "Seleccionado según tus intereses y tu perfil.",
+      } as const;
+    case "fr":
+      return {
+        accessibilityNotes: "Vérifie l’accessibilité locale à l’avance.",
+        genericError:
+          "Nous n'avons pas pu générer de nouvelles suggestions. Réessaie.",
+        invalidResponse:
+          "Gemini a renvoyé un format inattendu. Essaie de rafraîchir à nouveau.",
+        missingApiKey:
+          "EXPO_PUBLIC_GEMINI_API_KEY est manquant. Ajoute une clé Gemini puis redémarre l’application.",
+        popularityNote: "Très apprécié des visiteurs avec beaucoup de choses à faire.",
+        requestFailed:
+          "Gemini n’a pas pu renvoyer des données fiables sur les destinations. Vérifie le réseau et les limites.",
+        summary:
+          "Nous avons sélectionné des lieux populaires avec des activités et des attractions intéressantes selon ton profil.",
+        whyItFits: "Sélectionné selon tes intérêts et ton profil.",
+      } as const;
+    default:
+      return {
+        accessibilityNotes: "Провери локалната достъпност предварително.",
+        genericError: "Не успяхме да генерираме нови предложения. Опитай отново.",
+        invalidResponse: "Gemini върна неочакван формат. Опитай нов refresh.",
+        missingApiKey:
+          "Липсва EXPO_PUBLIC_GEMINI_API_KEY. Добави Gemini API ключ и рестартирай приложението.",
+        popularityNote:
+          "Има активен интерес от посетители и разнообразни неща за правене.",
+        requestFailed:
+          "Gemini не успя да върне grounded settlements. Провери мрежата и лимитите.",
+        summary:
+          "Подбрахме популярни селища с интересни активности и забележителности според профила ти.",
+        whyItFits: "Подбрано според интересите и профила на потребителя.",
+      } as const;
+  }
 }
 
 function normalizeComparableText(value: string) {
@@ -248,8 +342,10 @@ async function callGeminiGenerateContent(params: {
 function normalizeTrip(
   rawTrip: RawSettlementRecommendation,
   index: number,
-  imageUrls: string[]
+  imageUrls: string[],
+  language?: string
 ): TripRecommendation {
+  const copy = getDiscoverCopy(language);
   const title = sanitizeString(rawTrip.title, `Settlement ${index + 1}`);
   const country = sanitizeString(rawTrip.country);
   const destination = sanitizeString(
@@ -260,7 +356,7 @@ function normalizeTrip(
   return {
     accessibilityNotes: sanitizeString(
       rawTrip.accessibilityNotes,
-      "Провери локалната достъпност предварително."
+      copy.accessibilityNotes
     ),
     attractions: sanitizeStringArray(rawTrip.attractions),
     country,
@@ -273,12 +369,12 @@ function normalizeTrip(
     longitude: sanitizeNumber(rawTrip.longitude),
     popularityNote: sanitizeString(
       rawTrip.popularityNote,
-      "Има активен интерес от посетители и разнообразни неща за правене."
+      copy.popularityNote
     ),
     title,
     whyItFits: sanitizeString(
       rawTrip.whyItFits,
-      "Подбрано според интересите и профила на потребителя."
+      copy.whyItFits
     ),
     wikipediaTitle: sanitizeString(rawTrip.wikipediaTitle, title),
   };
@@ -552,13 +648,16 @@ export function parseStoredDiscoverData(profileData: Record<string, unknown>) {
           ? sanitizeImageUrls(trip.imageUrls)
           : sanitizeString(trip.imageUrl)
             ? [sanitizeString(trip.imageUrl)]
-            : []
+            : [],
+        typeof rawDiscover.language === "string" ? rawDiscover.language : undefined
       )
     );
 
   return {
     generatedAtMs:
       typeof rawDiscover.generatedAtMs === "number" ? rawDiscover.generatedAtMs : null,
+    language:
+      typeof rawDiscover.language === "string" ? rawDiscover.language : null,
     lastRefreshDateKey:
       typeof rawDiscover.lastRefreshDateKey === "string"
         ? rawDiscover.lastRefreshDateKey
@@ -581,7 +680,8 @@ export function getLocalDateKey(date = new Date()) {
 
 function buildGroundedSettlementResearchPrompt(
   profile: DiscoverProfile,
-  previousTrips: TripRecommendation[]
+  previousTrips: TripRecommendation[],
+  language = "Bulgarian"
 ) {
   const previousSettlementHints =
     previousTrips.length > 0
@@ -592,7 +692,7 @@ function buildGroundedSettlementResearchPrompt(
 
   return [
     "You are researching travel-friendly settlements for a mobile app discover screen.",
-    "Answer in Bulgarian.",
+    `Answer in ${language}.`,
     "Use Google Search grounding to find real villages, small towns, and settlements around the world.",
     "Return research notes only. No intro. No filler.",
     "Focus on settlements that are often visited, have tourism activity, and offer several things to do plus notable attractions.",
@@ -624,10 +724,13 @@ function buildGroundedSettlementResearchPrompt(
 
 function buildStructuredDiscoverPrompt(params: {
   groundedNotes: string;
+  language?: string;
   profile: DiscoverProfile;
 }) {
   return [
-    "Convert the grounded research notes below into a compact structured discover feed in Bulgarian.",
+    `Convert the grounded research notes below into a compact structured discover feed in ${
+      params.language || "Bulgarian"
+    }.`,
     "Use only the grounded notes for factual claims.",
     "Return exactly 8 settlements.",
     "Each settlement must be a real village, small town, or settlement with tourism activity.",
@@ -700,7 +803,8 @@ const DISCOVER_RESPONSE_SCHEMA = {
 
 export async function generateTripsWithGemini(
   profile: DiscoverProfile,
-  previousTrips: TripRecommendation[]
+  previousTrips: TripRecommendation[],
+  language = "Bulgarian"
 ) {
   const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
 
@@ -710,7 +814,7 @@ export async function generateTripsWithGemini(
 
   const groundedNotes = await callGeminiGenerateContent({
     apiKey,
-    prompt: buildGroundedSettlementResearchPrompt(profile, previousTrips),
+    prompt: buildGroundedSettlementResearchPrompt(profile, previousTrips, language),
     tools: [
       {
         google_search: {},
@@ -722,6 +826,7 @@ export async function generateTripsWithGemini(
     apiKey,
     prompt: buildStructuredDiscoverPrompt({
       groundedNotes,
+      language,
       profile,
     }),
     generationConfig: {
@@ -766,7 +871,8 @@ export async function generateTripsWithGemini(
           longitude: coordinates.longitude,
         },
         index,
-        imageUrls
+        imageUrls,
+        language
       );
     })
   );
@@ -776,7 +882,7 @@ export async function generateTripsWithGemini(
   return {
     summary: sanitizeString(
       parsedResponse.summary,
-      "Подбрахме популярни селища с интересни активности и забележителности според профила ти."
+      getDiscoverCopy(language).summary
     ),
     trips: uniqueTrips,
   };
@@ -835,33 +941,60 @@ export async function enrichDiscoverTrips(trips: TripRecommendation[]) {
   };
 }
 
-export function getTripGenerationErrorMessage(error: unknown) {
+export function isTripGenerationError(error: unknown) {
   if (!(error instanceof Error)) {
-    return "Не успяхме да генерираме нови предложения. Опитай отново.";
+    return false;
+  }
+
+  return (
+    error.message === "missing-api-key" ||
+    error.message.startsWith("gemini-request-failed:") ||
+    error.message === "empty-gemini-response" ||
+    error.message === "invalid-gemini-response" ||
+    error instanceof SyntaxError
+  );
+}
+
+export function getTripGenerationErrorMessage(
+  error: unknown,
+  language: AppLanguage = "bg"
+) {
+  const copy = getDiscoverCopy(language);
+
+  if (!(error instanceof Error)) {
+    return copy.genericError;
   }
 
   if (error.message === "missing-api-key") {
-    return "Липсва EXPO_PUBLIC_GEMINI_API_KEY. Добави Gemini API ключ и рестартирай приложението.";
+    return copy.missingApiKey;
   }
 
   if (error.message.startsWith("gemini-request-failed:429")) {
-    return "Gemini достигна лимит за заявки. Опитай отново по-късно.";
+    return language === "en"
+      ? "Gemini hit the request limit. Please try again later."
+      : language === "de"
+        ? "Gemini hat das Anfrage-Limit erreicht. Bitte versuche es später erneut."
+        : language === "es"
+          ? "Gemini alcanzó el límite de solicitudes. Inténtalo más tarde."
+          : language === "fr"
+            ? "Gemini a atteint la limite de requêtes. Réessaie plus tard."
+            : "Gemini достигна лимит за заявки. Опитай отново по-късно.";
   }
 
   if (error.message.startsWith("gemini-request-failed:")) {
-    return "Gemini не успя да върне grounded settlements. Провери мрежата и лимитите.";
+    return copy.requestFailed;
   }
 
   if (
     error.message === "empty-gemini-response" ||
     error.message === "invalid-gemini-response"
   ) {
-    return "Gemini върна невалиден отговор. Опитай нов refresh.";
+    return copy.invalidResponse;
   }
 
   if (error instanceof SyntaxError) {
-    return "Gemini върна неочакван формат. Опитай отново.";
+    return copy.invalidResponse;
   }
 
-  return "Не успяхме да генерираме нови предложения. Опитай отново.";
+  return copy.genericError;
 }

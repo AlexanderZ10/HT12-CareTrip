@@ -64,7 +64,7 @@ export default function EntryScreen() {
       return;
     }
 
-    router.replace(nextRoute);
+    router.replace(nextRoute as "/(tabs)/home");
   }, [minimumDelayDone, nextRoute, router]);
 
   return (

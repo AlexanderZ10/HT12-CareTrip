@@ -15,12 +15,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -39,16 +41,24 @@ import { AvatarSheet } from "../../features/profile/components/AvatarSheet";
 import { ChoicePill, MiniToggle, SectionHeader, SettingsRow } from "../../features/profile/components/ProfileHelpers";
 import { DismissKeyboard } from "../../components/dismiss-keyboard";
 import { auth, db } from "../../firebase";
+import { useAppLanguage } from "../../components/app-language-provider";
 import {
   useAppTheme,
   type AppThemePreference,
 } from "../../components/app-theme-provider";
+import {
+  getLanguageFlag,
+  getLanguageLabel,
+  LANGUAGE_OPTIONS,
+  STAY_STYLE_KEYS,
+  TRAVEL_PACE_KEYS,
+  translateOnboardingOption,
+  type AppLanguage,
+} from "../../utils/translations";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
 import {
   extractPersonalProfile,
   getProfileDisplayName,
-  STAY_STYLE_OPTIONS,
-  TRAVEL_PACE_OPTIONS,
   type PersonalProfileInfo,
 } from "../../utils/profile-info";
 import {
@@ -102,6 +112,7 @@ const PROFILE_PHOTO_MAX_LENGTH = 850000;
 export default function ProfileTabScreen() {
   const router = useRouter();
   const { colors, setThemePreference, themePreference } = useAppTheme();
+  const { language, setLanguage, t } = useAppLanguage();
   const insets = useSafeAreaInsets();
 
   // ── State ──────────────────────────────────────────────────────────────
@@ -120,6 +131,7 @@ export default function ProfileTabScreen() {
   const [sendingReset, setSendingReset] = useState(false);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const [avatarSheetVisible, setAvatarSheetVisible] = useState(false);
+  const [languageMenuVisible, setLanguageMenuVisible] = useState(false);
   const [floatingNotice, setFloatingNotice] = useState<FloatingNotice | null>(null);
   const [onboardingSummary, setOnboardingSummary] = useState<{
     assistance: string[];
@@ -246,6 +258,13 @@ export default function ProfileTabScreen() {
   const saveBtnAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: saveBtnScale.value }],
   }));
+  const selectedLanguageOption = useMemo(
+    () => ({
+      flag: getLanguageFlag(language),
+      label: getLanguageLabel(language),
+    }),
+    [language]
+  );
 
   // ── Effects ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -261,10 +280,12 @@ export default function ProfileTabScreen() {
 
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
+    let hasLoadedOnce = false;
 
     const unsubscribeAuth = onAuthStateChanged(auth, (nextUser) => {
       unsubscribeProfile?.();
       unsubscribeProfile = null;
+      hasLoadedOnce = false;
 
       if (!nextUser) {
         setLoading(false);
@@ -319,10 +340,13 @@ export default function ProfileTabScreen() {
             skills: onboarding?.skills.selectedOptions ?? [],
           });
           setLoading(false);
-          triggerEntrance();
+          if (!hasLoadedOnce) {
+            hasLoadedOnce = true;
+            triggerEntrance();
+          }
         },
         (err) => {
-          setError(getFirestoreUserMessage(err, "read"));
+          setError(getFirestoreUserMessage(err, "read", language));
           setLoading(false);
         }
       );
@@ -403,9 +427,9 @@ export default function ProfileTabScreen() {
 
       await batch.commit();
 
-      setSaveSuccess("Profile saved.");
+      setSaveSuccess(t("profile.saved"));
     } catch (nextError) {
-      setError(getFirestoreUserMessage(nextError, "write"));
+      setError(getFirestoreUserMessage(nextError, "write", language));
     } finally {
       setSaving(false);
     }
@@ -435,13 +459,49 @@ export default function ProfileTabScreen() {
       );
 
       showFloatingNotice(
-        nextThemePreference === "dark" ? "Dark mode enabled." : "Light mode enabled.",
+        nextThemePreference === "dark" ? t("profile.dark") : t("profile.light"),
         colors.accent,
-        "#FFFFFF"
+        colors.buttonTextOnAction
       );
     } catch (nextError) {
       setThemePreference(previousThemePreference);
-      setError(getFirestoreUserMessage(nextError, "write"));
+      setError(getFirestoreUserMessage(nextError, "write", language));
+    }
+  };
+
+  const handleLanguageChange = async (next: AppLanguage) => {
+    const currentUser = auth.currentUser;
+
+    if (!currentUser || next === language) {
+      return;
+    }
+
+    const previous = language;
+
+    try {
+      setLanguageMenuVisible(false);
+      setLanguage(next);
+      setError("");
+      setSaveSuccess("");
+
+      await setDoc(
+        doc(db, "profiles", currentUser.uid),
+        {
+          language: next,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      const label = LANGUAGE_OPTIONS.find((o) => o.code === next)?.label ?? next;
+      showFloatingNotice(
+        `${label}`,
+        colors.accent,
+        colors.buttonTextOnAction
+      );
+    } catch (nextError) {
+      setLanguage(previous);
+      setError(getFirestoreUserMessage(nextError, "write", language));
     }
   };
 
@@ -492,12 +552,14 @@ export default function ProfileTabScreen() {
 
       setProfileVisibility(next);
       showFloatingNotice(
-        next === "public" ? "Profile is now public." : "Profile is now private.",
+        `${t("profile.visibility")}: ${
+          next === "public" ? t("profile.public") : t("profile.private")
+        }`,
         colors.accent,
-        "#FFFFFF"
+        colors.buttonTextOnAction
       );
     } catch (nextError) {
-      setError(getFirestoreUserMessage(nextError, "write"));
+      setError(getFirestoreUserMessage(nextError, "write", language));
     } finally {
       setSaving(false);
     }
@@ -567,9 +629,9 @@ export default function ProfileTabScreen() {
 
       setProfilePhotoUrl(url);
       setAvatarSheetVisible(false);
-      setSaveSuccess("Photo updated.");
+      setSaveSuccess(t("profile.photoUpdated"));
     } catch (nextError) {
-      setError(getFirestoreUserMessage(nextError, "write"));
+      setError(getFirestoreUserMessage(nextError, "write", language));
     } finally {
       setUpdatingPhoto(false);
     }
@@ -617,16 +679,16 @@ export default function ProfileTabScreen() {
 
       setProfilePhotoUrl("");
       setAvatarSheetVisible(false);
-      setSaveSuccess("Photo removed.");
+      setSaveSuccess(t("profile.photoRemoved"));
     } catch (nextError) {
-      setError(getFirestoreUserMessage(nextError, "write"));
+      setError(getFirestoreUserMessage(nextError, "write", language));
     } finally {
       setUpdatingPhoto(false);
     }
   };
 
   const handleLogout = async () => {
-    try { await signOut(auth); router.replace("/login"); } catch (e) { setError(getFirestoreUserMessage(e, "write")); }
+    try { await signOut(auth); router.replace("/login"); } catch (e) { setError(getFirestoreUserMessage(e, "write", language)); }
   };
 
   const handleResetPassword = async () => {
@@ -641,9 +703,11 @@ export default function ProfileTabScreen() {
       setError("");
       setSaveSuccess("");
       await sendPasswordResetEmail(auth, currentUser.email);
-      setSaveSuccess(`Password reset email sent to ${currentUser.email}.`);
+      setSaveSuccess(
+        `${t("profile.passwordResetSent")}${currentUser.email ? ` ${currentUser.email}` : ""}`
+      );
     } catch (nextError) {
-      setError(getFirestoreUserMessage(nextError, "write"));
+      setError(getFirestoreUserMessage(nextError, "write", language));
     } finally {
       setSendingReset(false);
     }
@@ -709,9 +773,9 @@ export default function ProfileTabScreen() {
             )}
             <View style={[staticStyles.avatarBadgeBase, { backgroundColor: colors.accent, borderColor: colors.card }]}>
               {updatingPhoto ? (
-                <ActivityIndicator size={12} color="#FFFFFF" />
+                <ActivityIndicator size={12} color={colors.buttonTextOnAction} />
               ) : (
-                <MaterialIcons name="camera-alt" size={14} color="#FFFFFF" />
+                <MaterialIcons name="camera-alt" size={14} color={colors.buttonTextOnAction} />
               )}
             </View>
           </Pressable>
@@ -724,7 +788,7 @@ export default function ProfileTabScreen() {
             </Text>
           ) : null}
           <Text style={[staticStyles.profileEmailText, { color: colors.textMuted }]}>
-            {email || "No email"}
+            {email || t("common.noEmail")}
           </Text>
         </Animated.View>
 
@@ -754,67 +818,95 @@ export default function ProfileTabScreen() {
 
         {/* ───────── 2. Appearance & privacy ───────── */}
         <Animated.View style={sec1Style}>
-          <SectionHeader title="Appearance" color={colors.textMuted} />
+          <SectionHeader title={t("profile.appearance")} color={colors.textMuted} />
           <View style={[staticStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[staticStyles.miniLabel, { color: colors.textSecondary }]}>Theme</Text>
+            <Text style={[staticStyles.miniLabel, { color: colors.textSecondary }]}>
+              {t("profile.theme")}
+            </Text>
             <View style={staticStyles.toggleRow}>
               <MiniToggle
                 icon="light-mode"
-                label="Light"
+                label={t("profile.light")}
                 active={themePreference === "light"}
                 onPress={() => void handleThemePreferenceChange("light")}
                 accentColor={colors.accent}
                 cardBg={colors.card}
                 cardBorder={colors.border}
                 textColor={colors.textSecondary}
-                activeTextColor="#FFFFFF"
+                activeTextColor={colors.buttonTextOnAction}
               />
               <MiniToggle
                 icon="dark-mode"
-                label="Dark"
+                label={t("profile.dark")}
                 active={themePreference === "dark"}
                 onPress={() => void handleThemePreferenceChange("dark")}
                 accentColor={colors.accent}
                 cardBg={colors.card}
                 cardBorder={colors.border}
                 textColor={colors.textSecondary}
-                activeTextColor="#FFFFFF"
+                activeTextColor={colors.buttonTextOnAction}
               />
             </View>
             <View style={[staticStyles.divider, { backgroundColor: colors.border }]} />
-            <Text style={[staticStyles.miniLabel, { color: colors.textSecondary }]}>Visibility</Text>
+            <Text style={[staticStyles.miniLabel, { color: colors.textSecondary }]}>
+              {t("profile.visibility")}
+            </Text>
             <View style={staticStyles.toggleRow}>
               <MiniToggle
                 icon="public"
-                label="Public"
+                label={t("profile.public")}
                 active={profileVisibility === "public"}
                 onPress={() => void handleVisibilityChange("public")}
                 accentColor={colors.accent}
                 cardBg={colors.card}
                 cardBorder={colors.border}
                 textColor={colors.textSecondary}
-                activeTextColor="#FFFFFF"
+                activeTextColor={colors.buttonTextOnAction}
               />
               <MiniToggle
                 icon="lock-outline"
-                label="Private"
+                label={t("profile.private")}
                 active={profileVisibility === "private"}
                 onPress={() => void handleVisibilityChange("private")}
                 accentColor={colors.accent}
                 cardBg={colors.card}
                 cardBorder={colors.border}
                 textColor={colors.textSecondary}
-                activeTextColor="#FFFFFF"
+                activeTextColor={colors.buttonTextOnAction}
               />
             </View>
+            <View style={[staticStyles.divider, { backgroundColor: colors.border }]} />
+            <Text style={[staticStyles.miniLabel, { color: colors.textSecondary }]}>
+              {t("profile.language")}
+            </Text>
+            <Pressable
+              onPress={() => setLanguageMenuVisible(true)}
+              style={[
+                staticStyles.languageMenuTrigger,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.inputBorder,
+                },
+              ]}
+            >
+              <View style={staticStyles.languageMenuTriggerTextWrap}>
+                <Text style={staticStyles.languageFlag}>{selectedLanguageOption.flag}</Text>
+                <Text style={[staticStyles.languageLabel, { color: colors.textPrimary }]}>
+                  {selectedLanguageOption.label}
+                </Text>
+              </View>
+              <MaterialIcons name="expand-more" size={22} color={colors.textMuted} />
+            </Pressable>
           </View>
         </Animated.View>
 
         {/* ───────── 3. About you ───────── */}
         <Animated.View style={sec2Style}>
-          <SectionHeader title="About you" color={colors.textMuted} />
+          <SectionHeader title={t("profile.aboutYou")} color={colors.textMuted} />
           <View style={[staticStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>Home base</Text>
+            <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>
+              {t("profile.homeBase")}
+            </Text>
             <TextInput
               style={[
                 staticStyles.input,
@@ -824,47 +916,59 @@ export default function ProfileTabScreen() {
                   color: colors.textPrimary,
                 },
               ]}
-              placeholder="City or country"
+              placeholder={t("profile.cityPlaceholder")}
               placeholderTextColor={colors.inputPlaceholder}
               value={form.homeBase}
               onChangeText={(v) => updateField("homeBase", v)}
             />
 
-            <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>Travel pace</Text>
+            <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>
+              {t("profile.travelPace")}
+            </Text>
             <View style={staticStyles.pillsRow}>
-              {TRAVEL_PACE_OPTIONS.map((o) => (
-                <ChoicePill
-                  key={o}
-                  label={o}
-                  selected={form.travelPace === o}
-                  onPress={() => updateField("travelPace", o)}
-                  accentColor={colors.accent}
-                  cardBg={colors.card}
-                  cardBorder={colors.border}
-                  textColor={colors.textSecondary}
-                  selectedTextColor="#FFFFFF"
-                />
-              ))}
+              {TRAVEL_PACE_KEYS.map((k) => {
+                const label = t(k);
+                return (
+                  <ChoicePill
+                    key={k}
+                    label={label}
+                    selected={translateOnboardingOption(form.travelPace, language) === label}
+                    onPress={() => updateField("travelPace", label)}
+                    accentColor={colors.accent}
+                    cardBg={colors.card}
+                    cardBorder={colors.border}
+                    textColor={colors.textSecondary}
+                    selectedTextColor={colors.buttonTextOnAction}
+                  />
+                );
+              })}
             </View>
 
-            <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>Stay style</Text>
+            <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>
+              {t("profile.stayStyle")}
+            </Text>
             <View style={staticStyles.pillsRow}>
-              {STAY_STYLE_OPTIONS.map((o) => (
-                <ChoicePill
-                  key={o}
-                  label={o}
-                  selected={form.stayStyle === o}
-                  onPress={() => updateField("stayStyle", o)}
-                  accentColor={colors.accent}
-                  cardBg={colors.card}
-                  cardBorder={colors.border}
-                  textColor={colors.textSecondary}
-                  selectedTextColor="#FFFFFF"
-                />
-              ))}
+              {STAY_STYLE_KEYS.map((k) => {
+                const label = t(k);
+                return (
+                  <ChoicePill
+                    key={k}
+                    label={label}
+                    selected={translateOnboardingOption(form.stayStyle, language) === label}
+                    onPress={() => updateField("stayStyle", label)}
+                    accentColor={colors.accent}
+                    cardBg={colors.card}
+                    cardBorder={colors.border}
+                    textColor={colors.textSecondary}
+                    selectedTextColor={colors.buttonTextOnAction}
+                  />
+                );
+              })}
             </View>
 
-            <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>Bio</Text>
+            <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>
+              {t("profile.bio")}
+            </Text>
             <TextInput
               style={[
                 staticStyles.input,
@@ -875,7 +979,7 @@ export default function ProfileTabScreen() {
                   color: colors.textPrimary,
                 },
               ]}
-              placeholder="What kind of trips do you enjoy?"
+              placeholder={t("profile.bioPlaceholder")}
               placeholderTextColor={colors.inputPlaceholder}
               value={form.aboutMe}
               onChangeText={(v) => updateField("aboutMe", v)}
@@ -895,9 +999,9 @@ export default function ProfileTabScreen() {
                 disabled={saving}
               >
                 {saving ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
+                  <ActivityIndicator color={colors.buttonTextOnAction} size="small" />
                 ) : (
-                  <Text style={staticStyles.primaryBtnText}>Save changes</Text>
+                  <Text style={[staticStyles.primaryBtnText, { color: colors.buttonTextOnAction }]}>{t("profile.saveChanges")}</Text>
                 )}
               </Pressable>
             </Animated.View>
@@ -906,22 +1010,22 @@ export default function ProfileTabScreen() {
 
         {/* ───────── 4. Travel preferences (onboarding) ───────── */}
         <Animated.View style={sec3Style}>
-          <SectionHeader title="Travel preferences" color={colors.textMuted} />
+          <SectionHeader title={t("profile.travelPreferences")} color={colors.textMuted} />
           <View style={[staticStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {([
-              ["Interests", onboardingSummary.interests],
-              ["Accessibility", onboardingSummary.assistance],
-              ["Skills", onboardingSummary.skills],
-            ] as const).map(([label, items]) => (
+              [t("profile.interests"), onboardingSummary.interests],
+              [t("profile.accessibilityLabel"), onboardingSummary.assistance],
+              [t("profile.skills"), onboardingSummary.skills],
+            ] as [string, readonly string[]][]).map(([label, items]) => (
               <View key={label} style={staticStyles.prefBlock}>
                 <Text style={[staticStyles.prefTitle, { color: colors.textPrimary }]}>{label}</Text>
                 <View style={staticStyles.chipsRow}>
                   {items.length === 0 ? (
-                    <Text style={[staticStyles.prefEmpty, { color: colors.textMuted }]}>None selected</Text>
+                    <Text style={[staticStyles.prefEmpty, { color: colors.textMuted }]}>{t("profile.noneSelected")}</Text>
                   ) : (
                     items.map((item) => (
                       <View key={item} style={[staticStyles.readChip, { backgroundColor: colors.accentMuted }]}>
-                        <Text style={[staticStyles.readChipText, { color: colors.textPrimary }]}>{item}</Text>
+                        <Text style={[staticStyles.readChipText, { color: colors.textPrimary }]}>{translateOnboardingOption(item, language)}</Text>
                       </View>
                     ))
                   )}
@@ -934,25 +1038,27 @@ export default function ProfileTabScreen() {
               onPress={() => router.push("/onboarding")}
             >
               <MaterialIcons name="edit" size={16} color={colors.accent} />
-              <Text style={[staticStyles.outlineBtnText, { color: colors.accent }]}>Edit preferences</Text>
+              <Text style={[staticStyles.outlineBtnText, { color: colors.accent }]}>
+                {t("profile.editPreferences")}
+              </Text>
             </Pressable>
           </View>
         </Animated.View>
 
         {/* ───────── 5. Account actions ───────── */}
         <Animated.View style={sec4Style}>
-          <SectionHeader title="Account" color={colors.textMuted} />
+          <SectionHeader title={t("profile.account")} color={colors.textMuted} />
           <View style={[staticStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <SettingsRow
               icon="lock-reset"
-              label="Change password"
+              label={t("profile.changePassword")}
               onPress={() => void handleResetPassword()}
               colors={colors}
               loading={sendingReset}
             />
             <SettingsRow
               icon="logout"
-              label="Sign out"
+              label={t("profile.signOut")}
               onPress={() => void handleLogout()}
               colors={colors}
               destructive
@@ -992,6 +1098,83 @@ export default function ProfileTabScreen() {
         updatingPhoto={updatingPhoto}
         colors={colors}
       />
+
+      <Modal
+        animationType="none"
+        transparent
+        visible={languageMenuVisible}
+        onRequestClose={() => setLanguageMenuVisible(false)}
+      >
+        <Pressable
+          style={[staticStyles.modalOverlay, { backgroundColor: colors.modalOverlay }]}
+          onPress={() => setLanguageMenuVisible(false)}
+        >
+          <Pressable
+            style={[
+              staticStyles.languageMenuSheet,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                marginTop: insets.top + Spacing.xl,
+              },
+            ]}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <View style={staticStyles.languageMenuHeader}>
+              <Text style={[staticStyles.languageMenuTitle, { color: colors.textPrimary }]}>
+                {t("profile.language")}
+              </Text>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setLanguageMenuVisible(false)}
+                style={[
+                  staticStyles.languageMenuCloseButton,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: colors.inputBorder,
+                  },
+                ]}
+              >
+                <MaterialIcons name="close" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {LANGUAGE_OPTIONS.map((option) => {
+              const isActive = option.code === language;
+
+              return (
+                <Pressable
+                  key={option.code}
+                  onPress={() => void handleLanguageChange(option.code)}
+                  style={[
+                    staticStyles.languageMenuItem,
+                    {
+                      backgroundColor: isActive ? colors.accentMuted : colors.inputBackground,
+                      borderColor: isActive ? colors.accent : colors.inputBorder,
+                    },
+                  ]}
+                >
+                  <View style={staticStyles.languageMenuItemTextWrap}>
+                    <Text style={staticStyles.languageFlag}>{option.flag}</Text>
+                    <Text style={[staticStyles.languageLabel, { color: colors.textPrimary }]}>
+                      {option.label}
+                    </Text>
+                  </View>
+                  {isActive ? (
+                    <MaterialIcons name="check-circle" size={20} color={colors.accent} />
+                  ) : (
+                    <MaterialIcons
+                      name="radio-button-unchecked"
+                      size={20}
+                      color={colors.textMuted}
+                    />
+                  )}
+                </Pressable>
+              );
+            })}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1054,6 +1237,27 @@ const staticStyles = StyleSheet.create({
   },
   toggleRow: {
     flexDirection: "row",
+    gap: Spacing.sm,
+  },
+  languageFlag: {
+    fontSize: 18,
+  },
+  languageLabel: {
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.semibold,
+  },
+  languageMenuTrigger: {
+    minHeight: 52,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    paddingHorizontal: Spacing.lg,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  languageMenuTriggerTextWrap: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: Spacing.sm,
   },
   pillsRow: {
@@ -1155,7 +1359,6 @@ const staticStyles = StyleSheet.create({
   },
   primaryBtnText: {
     ...TypeScale.titleMd,
-    color: "#FFFFFF",
     fontWeight: FontWeight.bold,
   },
 
@@ -1191,5 +1394,47 @@ const staticStyles = StyleSheet.create({
     ...TypeScale.titleSm,
     fontWeight: FontWeight.semibold,
   },
-
+  modalOverlay: {
+    flex: 1,
+    paddingHorizontal: Spacing.lg,
+  },
+  languageMenuSheet: {
+    borderRadius: Radius["2xl"],
+    borderWidth: 1,
+    padding: Spacing.lg,
+    ...shadow("lg"),
+  },
+  languageMenuHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: Spacing.md,
+  },
+  languageMenuTitle: {
+    ...TypeScale.titleLg,
+    fontWeight: FontWeight.bold,
+  },
+  languageMenuCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  languageMenuItem: {
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    minHeight: 54,
+    paddingHorizontal: Spacing.lg,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: Spacing.sm,
+  },
+  languageMenuItemTextWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
 });

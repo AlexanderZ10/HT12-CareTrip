@@ -4,6 +4,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 
+import { AppLanguageProvider } from "../components/app-language-provider";
 import { AppThemeProvider, useAppTheme } from "../components/app-theme-provider";
 
 function RootNavigator() {
@@ -28,9 +29,11 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <AppThemeProvider>
-          <RootNavigator />
-        </AppThemeProvider>
+        <AppLanguageProvider>
+          <AppThemeProvider>
+            <RootNavigator />
+          </AppThemeProvider>
+        </AppLanguageProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

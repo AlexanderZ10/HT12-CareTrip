@@ -8,6 +8,7 @@ import {
   addDoc,
   collection,
   deleteField,
+  deleteDoc,
   doc,
   getDoc,
   onSnapshot,
@@ -20,6 +21,7 @@ import {
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -31,6 +33,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 
+import { useAppLanguage } from "../../components/app-language-provider";
 import { useAppTheme } from "../../components/app-theme-provider";
 import { auth, db } from "../../firebase";
 import {
@@ -67,6 +70,7 @@ import { extractPersonalProfile, getProfileDisplayName } from "../../utils/profi
 import { parseSavedTrips, type SavedTrip } from "../../utils/saved-trips";
 import { buildStripeCheckoutReturnUrls } from "../../utils/stripe-checkout-return";
 import { createTestCheckoutSession } from "../../utils/travel-offers";
+import { isFirestorePermissionError } from "../../utils/firestore-errors";
 
 import { styles } from "../../features/group-detail/screen-styles";
 import { GroupChatComposer } from "../../features/group-detail/components/GroupChatComposer";
@@ -94,6 +98,7 @@ WebBrowser.maybeCompleteAuthSession();
 export default function GroupChatScreen() {
   const router = useRouter();
   const { colors } = useAppTheme();
+  const { t } = useAppLanguage();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ groupId: string | string[] }>();
   const groupId = Array.isArray(params.groupId) ? params.groupId[0] ?? "" : params.groupId ?? "";
@@ -136,6 +141,38 @@ export default function GroupChatScreen() {
   const [groupJoinKeyInput, setGroupJoinKeyInput] = useState("");
   const [memberSearchQuery, setMemberSearchQuery] = useState("");
   const [updatingGroupPhoto, setUpdatingGroupPhoto] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
+
+  const safeAvatarUrlForGroupWrite = useMemo(() => {
+    const trimmedAvatarUrl = profileAvatarUrl.trim();
+
+    if (!trimmedAvatarUrl) {
+      return "";
+    }
+
+    // Large base64 data URLs can break Firestore writes (message/group doc size).
+    if (trimmedAvatarUrl.startsWith("data:")) {
+      return "";
+    }
+
+    if (trimmedAvatarUrl.length > 2048) {
+      return "";
+    }
+
+    return trimmedAvatarUrl;
+  }, [profileAvatarUrl]);
+
+  const safeProfileLabelForWrite = useMemo(() => {
+    const trimmedProfileName = profileName.trim();
+
+    if (!trimmedProfileName) {
+      return "Traveler";
+    }
+
+    return trimmedProfileName.slice(0, 80);
+  }, [profileName]);
 
   const readAssetDataUrl = async (asset: ImagePicker.ImagePickerAsset) => {
     const mimeType = asset.mimeType || "image/jpeg";
@@ -179,7 +216,7 @@ export default function GroupChatScreen() {
         setMessages([]);
         setSavedTrips([]);
         setStoredHomePlansBySourceKey({});
-        setError("Липсва group id.");
+        setError(t("groupDetail.missingId"));
         setLoading(false);
         return;
       }
@@ -256,7 +293,7 @@ export default function GroupChatScreen() {
         doc(db, "groups", groupId),
         (groupSnapshot) => {
           if (!groupSnapshot.exists()) {
-            setError("Групата не беше намерена.");
+            setError(t("groupDetail.notFound"));
             setLoading(false);
             return;
           }
@@ -274,14 +311,14 @@ export default function GroupChatScreen() {
           if (!nextGroup.memberIds.includes(nextUser.uid)) {
             if (nextGroup.accessType === "public") {
               setError("");
-              setInfoMessage("Това е public група. Join-ни я, за да можеш да пишеш.");
+              setInfoMessage(t("groupDetail.publicCanWrite"));
               setLoading(false);
               return;
             }
 
             setMessages([]);
             setInfoMessage("");
-            setError("Нямаш достъп до тази група.");
+            setError(t("groupDetail.noAccess"));
             setLoading(false);
             return;
           }
@@ -308,10 +345,21 @@ export default function GroupChatScreen() {
   const canReadMessages = !!group && (group.accessType === "public" || isMember);
   const canOpenSharePicker = !!group && (group.accessType === "public" || isMember);
   const canManageExpenses = !!group && (group.accessType === "public" || isMember);
-  const composerBottomInset = insets.bottom + 8;
+  const composerBottomInset =
+    Platform.OS === "ios" && keyboardHeight > 0 ? 8 : insets.bottom + 8;
+  const toastBottomInset = keyboardHeight > 0 ? keyboardHeight + 16 : 100;
   const expenseMessages = useMemo(
     () => messages.filter((message) => message.messageType === "expense" && !!message.expense),
     [messages]
+  );
+  const editingMessage = useMemo(
+    () =>
+      editingMessageId
+        ? messages.find(
+            (message) => message.id === editingMessageId && message.messageType === "text"
+          ) ?? null
+        : null,
+    [editingMessageId, messages]
   );
 
   useEffect(() => {
@@ -380,16 +428,30 @@ export default function GroupChatScreen() {
   }, [messages]);
 
   useEffect(() => {
+    if (!editingMessageId) {
+      return;
+    }
+
+    if (!editingMessage) {
+      setEditingMessageId(null);
+      setComposerValue("");
+    }
+  }, [editingMessage, editingMessageId]);
+
+  useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
 
-    const showSubscription = Keyboard.addListener(showEvent, () => {
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardHeight(event?.endCoordinates?.height ?? 0);
       requestAnimationFrame(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
       });
     });
 
-    const hideSubscription = Keyboard.addListener(hideEvent, () => {});
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
 
     return () => {
       showSubscription.remove();
@@ -549,7 +611,7 @@ export default function GroupChatScreen() {
     }
 
     if (group.accessType !== "public") {
-      setError("Нямаш достъп да пишеш в тази група.");
+      setError(t("groupDetail.noWriteAccess"));
       return false;
     }
 
@@ -559,31 +621,7 @@ export default function GroupChatScreen() {
       return false;
     }
 
-    try {
-      const latestGroupSnapshot = await getDoc(doc(db, "groups", group.id));
-
-      if (!latestGroupSnapshot.exists()) {
-        setError("Групата не беше намерена.");
-        return false;
-      }
-
-      const latestGroup = parseTravelGroup(
-        latestGroupSnapshot.id,
-        latestGroupSnapshot.data() as Record<string, unknown>
-      );
-
-      setGroup(latestGroup);
-
-      if (latestGroup.memberIds.includes(user.uid)) {
-        return true;
-      }
-
-      setError("Join-ът още не е синхронизиран. Изчакай секунда и опитай пак.");
-      return false;
-    } catch (nextError) {
-      setError(getGroupDetailErrorMessage(nextError, "write"));
-      return false;
-    }
+    return true;
   };
 
   const handleJoinGroup = async () => {
@@ -616,9 +654,9 @@ export default function GroupChatScreen() {
 
         transaction.update(groupRef, {
           memberCount: nextMemberIds.length,
-          [`memberAvatarUrlsById.${user.uid}`]: profileAvatarUrl,
+          [`memberAvatarUrlsById.${user.uid}`]: safeAvatarUrlForGroupWrite,
           memberIds: nextMemberIds,
-          [`memberLabelsById.${user.uid}`]: profileName,
+          [`memberLabelsById.${user.uid}`]: safeProfileLabelForWrite,
           [`memberUsernamesById.${user.uid}`]: username,
           updatedAt: serverTimestamp(),
         });
@@ -635,12 +673,12 @@ export default function GroupChatScreen() {
           memberCount: nextMemberIds.length,
           memberAvatarUrlsById: {
             ...currentGroup.memberAvatarUrlsById,
-            [user.uid]: profileAvatarUrl,
+            [user.uid]: safeAvatarUrlForGroupWrite,
           },
           memberIds: nextMemberIds,
           memberLabelsById: {
             ...currentGroup.memberLabelsById,
-            [user.uid]: profileName,
+            [user.uid]: safeProfileLabelForWrite,
           },
           memberUsernamesById: {
             ...currentGroup.memberUsernamesById,
@@ -664,29 +702,56 @@ export default function GroupChatScreen() {
       return;
     }
 
-    const hasWriteAccess = await ensureWriteAccess();
-
-    if (!hasWriteAccess) {
-      return;
-    }
-
     const trimmedMessage = composerValue.trim();
 
     if (!trimmedMessage) {
       return;
     }
 
+    const textMessagePayload = {
+      createdAt: serverTimestamp(),
+      messageType: "text" as const,
+      senderAvatarUrl: safeAvatarUrlForGroupWrite,
+      senderId: user.uid,
+      senderLabel: safeProfileLabelForWrite,
+      text: trimmedMessage.slice(0, 1000),
+    };
+
     try {
       setSending(true);
       setError("");
+      setInfoMessage("");
 
-      await addDoc(collection(db, "groups", group.id, "messages"), {
-        createdAt: serverTimestamp(),
-        senderId: user.uid,
-        senderAvatarUrl: profileAvatarUrl,
-        senderLabel: profileName,
-        text: trimmedMessage,
-      });
+      if (editingMessageId) {
+        await updateDoc(doc(db, "groups", group.id, "messages", editingMessageId), {
+          text: trimmedMessage.slice(0, 1000),
+        });
+
+        setComposerValue("");
+        setEditingMessageId(null);
+        setInfoMessage(t("groupDetail.messageUpdated"));
+        return;
+      }
+
+      if (group.accessType === "public") {
+        try {
+          await addDoc(collection(db, "groups", group.id, "messages"), textMessagePayload);
+          setComposerValue("");
+          return;
+        } catch (nextError) {
+          if (!isFirestorePermissionError(nextError)) {
+            throw nextError;
+          }
+        }
+      }
+
+      const hasWriteAccess = await ensureWriteAccess();
+
+      if (!hasWriteAccess) {
+        return;
+      }
+
+      await addDoc(collection(db, "groups", group.id, "messages"), textMessagePayload);
 
       setComposerValue("");
     } catch (nextError) {
@@ -694,6 +759,82 @@ export default function GroupChatScreen() {
     } finally {
       setSending(false);
     }
+  };
+
+  const handleStartEditingMessage = (message: GroupChatMessage) => {
+    if (!user || message.senderId !== user.uid || message.messageType !== "text") {
+      return;
+    }
+
+    setComposerValue(message.text);
+    setEditingMessageId(message.id);
+    setError("");
+    setInfoMessage("");
+
+    requestAnimationFrame(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    });
+  };
+
+  const handleCancelEditingMessage = () => {
+    setComposerValue("");
+    setEditingMessageId(null);
+  };
+
+  const handleDeleteMessage = (message: GroupChatMessage) => {
+    if (!user || !group) {
+      return;
+    }
+
+    const canDeleteMessage = message.senderId === user.uid || isCreator;
+
+    if (!canDeleteMessage || deletingMessageId) {
+      return;
+    }
+
+    const runDelete = async () => {
+      try {
+        setDeletingMessageId(message.id);
+        setError("");
+        setInfoMessage("");
+
+        await deleteDoc(doc(db, "groups", group.id, "messages", message.id));
+
+        if (editingMessageId === message.id) {
+          setEditingMessageId(null);
+          setComposerValue("");
+        }
+
+        setInfoMessage(t("groupDetail.messageDeleted"));
+      } catch (nextError) {
+        setError(getGroupDetailErrorMessage(nextError, "write"));
+      } finally {
+        setDeletingMessageId(null);
+      }
+    };
+
+    const deletePrompt =
+      message.senderId === user.uid
+        ? t("groupDetail.deleteOwnMessage")
+        : t("groupDetail.deleteAnyMessage");
+
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm(deletePrompt)) {
+        void runDelete();
+      }
+      return;
+    }
+
+    Alert.alert(t("groupDetail.deleteMessage"), deletePrompt, [
+      { style: "cancel", text: t("common.cancel") },
+      {
+        style: "destructive",
+        text: t("common.delete"),
+        onPress: () => {
+          void runDelete();
+        },
+      },
+    ]);
   };
 
   const handleShareTrip = async (trip: SavedTrip) => {
@@ -720,12 +861,12 @@ export default function GroupChatScreen() {
         createdAt: serverTimestamp(),
         messageType: "shared-trip",
         senderId: user.uid,
-        senderAvatarUrl: profileAvatarUrl,
-        senderLabel: profileName,
+        senderAvatarUrl: safeAvatarUrlForGroupWrite,
+        senderLabel: safeProfileLabelForWrite,
         sharedTrip: buildGroupChatSharedTrip(trip, {
           linkedTransports,
         }),
-        text: "Shared a trip plan",
+        text: t("groupDetail.sharedTrip"),
       });
 
       setShareSheetVisible(false);
@@ -741,7 +882,7 @@ export default function GroupChatScreen() {
       setError("");
       await Linking.openURL(bookingUrl);
     } catch {
-      setError("Не успяхме да отворим линка за билета. Опитай пак.");
+      setError(t("groupDetail.ticketLinkError"));
     }
   };
 
@@ -762,7 +903,7 @@ export default function GroupChatScreen() {
     const lookupKey = buildLinkedExpenseLookupKey(message.sharedTrip.sourceKey, linkedTransport.itemKey);
 
     if (linkedExpenseMessagesByKey[lookupKey]) {
-      setInfoMessage("Този planner билет вече е добавен като group expense.");
+      setInfoMessage(t("groupDetail.ticketAlreadyExpense"));
       return;
     }
 
@@ -780,14 +921,14 @@ export default function GroupChatScreen() {
           linkedItemKey: linkedTransport.itemKey,
           linkedSourceKey: message.sharedTrip.sourceKey,
           paidById: user.uid,
-          paidByLabel: profileName,
+          paidByLabel: safeProfileLabelForWrite,
           participantIds: group.memberIds,
           title: `Ticket • ${linkedTransport.title}`,
         }),
         messageType: "expense",
         senderId: user.uid,
-        senderLabel: profileName,
-        text: "Added a planner ticket expense",
+        senderLabel: safeProfileLabelForWrite,
+        text: t("groupDetail.ticketExpenseAdded"),
       });
 
       setInfoMessage(
@@ -815,12 +956,12 @@ export default function GroupChatScreen() {
     const parsedAmount = Number.parseFloat(expenseAmount.replace(",", "."));
 
     if (trimmedTitle.length < 2) {
-      setError("Добави кратко име на разхода.");
+      setError(t("groupDetail.expenseTitleRequired"));
       return;
     }
 
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      setError("Добави валидна сума за разхода.");
+      setError(t("groupDetail.expenseAmountRequired"));
       return;
     }
 
@@ -833,14 +974,14 @@ export default function GroupChatScreen() {
         expense: buildGroupChatExpense({
           amountValue: parsedAmount,
           paidById: user.uid,
-          paidByLabel: profileName,
+          paidByLabel: safeProfileLabelForWrite,
           participantIds: group.memberIds,
           title: trimmedTitle,
         }),
         messageType: "expense",
         senderId: user.uid,
-        senderLabel: profileName,
-        text: "Added an expense",
+        senderLabel: safeProfileLabelForWrite,
+        text: t("groupDetail.expenseAdded"),
       });
 
       setExpenseTitle("");
@@ -867,7 +1008,7 @@ export default function GroupChatScreen() {
     const outstandingAmount = getOutstandingExpenseAmount(message.id, message.expense, user.uid, expenseRepaymentsByKey);
 
     if (outstandingAmount <= 0) {
-      setInfoMessage("Този expense вече е покрит от теб.");
+      setInfoMessage(t("groupDetail.expenseAlreadyCovered"));
       return;
     }
 
@@ -887,7 +1028,7 @@ export default function GroupChatScreen() {
           : message.expense.paidById,
       paidToLabel:
         message.expense.collectionMode === "group-payment"
-          ? "Trip split"
+          ? t("groupDetail.tripSplit")
           : message.expense.paidByLabel,
       payerUserId: user.uid,
       payerUserLabel: profileName,
@@ -992,8 +1133,8 @@ export default function GroupChatScreen() {
       setPreviewTrip(null);
       setInfoMessage(
         existingChat
-          ? "This shared trip is already in Home and is now selected there."
-          : "Shared trip saved to Home. You can continue it there as your own copy."
+          ? t("groupDetail.tripAlreadyInHome")
+          : t("groupDetail.tripSavedToHome")
       );
     } catch (nextError) {
       setError(getGroupDetailErrorMessage(nextError, "write"));
@@ -1013,12 +1154,12 @@ export default function GroupChatScreen() {
       group.accessType === "private" ? normalizeGroupJoinKey(groupJoinKeyInput) : "";
 
     if (trimmedName.length < 3) {
-      setError("Group name must be at least 3 characters.");
+      setError(t("groupDetail.groupNameMinLength"));
       return;
     }
 
     if (group.accessType === "private" && normalizedJoinKey.length < 4) {
-      setError("Private groups need a code with at least 4 characters.");
+      setError(t("groupDetail.privateCodeMinLength"));
       return;
     }
 
@@ -1034,7 +1175,7 @@ export default function GroupChatScreen() {
         updatedAt: serverTimestamp(),
       });
 
-      setInfoMessage("Group settings updated.");
+      setInfoMessage(t("groupDetail.settingsUpdated"));
     } catch (nextError) {
       setError(getGroupDetailErrorMessage(nextError, "write"));
     } finally {
@@ -1087,7 +1228,7 @@ export default function GroupChatScreen() {
         });
       });
 
-      setInfoMessage("Member removed from the group.");
+      setInfoMessage(t("groupDetail.memberRemoved"));
     } catch (nextError) {
       setError(getGroupDetailErrorMessage(nextError, "write"));
     } finally {
@@ -1139,7 +1280,7 @@ export default function GroupChatScreen() {
         updatedAt: serverTimestamp(),
       });
 
-      setInfoMessage("Group photo updated.");
+      setInfoMessage(t("groupDetail.photoUpdated"));
     } catch (nextError) {
       setError(getGroupDetailErrorMessage(nextError, "write"));
     } finally {
@@ -1162,7 +1303,7 @@ export default function GroupChatScreen() {
         updatedAt: serverTimestamp(),
       });
 
-      setInfoMessage("Group photo reset.");
+      setInfoMessage(t("groupDetail.photoReset"));
     } catch (nextError) {
       setError(getGroupDetailErrorMessage(nextError, "write"));
     } finally {
@@ -1188,7 +1329,7 @@ export default function GroupChatScreen() {
     >
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 8 : 0}
+        keyboardVerticalOffset={0}
         style={styles.screen}
       >
         {/* Header */}
@@ -1217,10 +1358,10 @@ export default function GroupChatScreen() {
                 <View
                   style={[
                     styles.headerAvatarCircle,
-                    { backgroundColor: getAvatarColor(group?.name ?? "Group") },
+                    { backgroundColor: getAvatarColor(group?.name ?? t("groupDetail.group")) },
                   ]}
                 >
-                  <Text style={styles.headerAvatarText}>{getInitials(group?.name ?? "Group")}</Text>
+                  <Text style={styles.headerAvatarText}>{getInitials(group?.name ?? t("groupDetail.group"))}</Text>
                 </View>
               )}
             </View>
@@ -1230,7 +1371,7 @@ export default function GroupChatScreen() {
               {group?.name}
             </Text>
             <Text numberOfLines={1} style={styles.headerMeta}>
-              {group?.accessType === "private" ? "Private" : "Public"} • {membersLabel}
+              {group?.accessType === "private" ? t("common.private") : t("common.public")} • {membersLabel}
             </Text>
             </View>
           </TouchableOpacity>
@@ -1243,10 +1384,18 @@ export default function GroupChatScreen() {
             styles.messagesContent,
             { paddingBottom: 24 + composerBottomInset },
           ]}
+          alwaysBounceVertical
+          bounces
+          canCancelContentTouches
           showsVerticalScrollIndicator={false}
           style={styles.messagesScroll}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+          onContentSizeChange={() => {
+            requestAnimationFrame(() => {
+              scrollViewRef.current?.scrollToEnd({ animated: true });
+            });
+          }}
         >
           {group?.description ? (
             <View
@@ -1267,9 +1416,9 @@ export default function GroupChatScreen() {
           {group?.accessType === "public" && !isMember ? (
             <View style={styles.joinInfoCard}>
               <View style={styles.joinInfoTextWrap}>
-                <Text style={styles.joinInfoTitle}>Public group</Text>
+                <Text style={styles.joinInfoTitle}>{t("groupDetail.publicGroup")}</Text>
                 <Text style={styles.joinInfoText}>
-                  Можеш да разглеждаш чата, а с `Join group` ще станеш member и ще можеш да пишеш.
+                  {t("groupDetail.joinHint")}
                 </Text>
               </View>
               <TouchableOpacity
@@ -1280,7 +1429,7 @@ export default function GroupChatScreen() {
                 }}
                 style={[styles.joinInfoButton, joining && styles.joinInfoButtonDisabled]}
               >
-                <Text style={styles.joinInfoButtonText}>{joining ? "Joining..." : "Join group"}</Text>
+                <Text style={styles.joinInfoButtonText}>{joining ? t("groupDetail.joining") : t("groupDetail.joinGroup")}</Text>
               </TouchableOpacity>
             </View>
           ) : null}
@@ -1295,11 +1444,11 @@ export default function GroupChatScreen() {
               <View style={styles.expenseSummaryHeader}>
                 <View style={styles.expenseSummaryHeaderTextWrap}>
                   <Text style={[styles.expenseSummaryKicker, { color: colors.accent }]}>
-                    Expense split
+                    {t("groupDetail.expenseSplit")}
                   </Text>
                   <Text style={[styles.expenseSummaryTitle, { color: colors.textPrimary }]}>
                     {expenseSummary.expenseCount === 0
-                      ? "Start tracking shared costs"
+                      ? t("groupDetail.startTracking")
                       : formatExpenseAmount(expenseSummary.totalSpent)}
                   </Text>
                   <Text style={[styles.expenseSummaryText, { color: colors.textSecondary }]}>
@@ -1345,7 +1494,7 @@ export default function GroupChatScreen() {
                 >
                   <MaterialIcons color={colors.warningText} name="equalizer" size={15} />
                   <Text style={[styles.expenseSummaryChipText, { color: colors.textPrimary }]}>
-                    Equal split
+                    {t("groupDetail.equalSplit")}
                   </Text>
                 </View>
               </View>
@@ -1354,9 +1503,9 @@ export default function GroupChatScreen() {
 
           {messages.length === 0 ? (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>Няма съобщения още</Text>
+              <Text style={styles.emptyTitle}>{t("groupDetail.noMessages")}</Text>
               <Text style={styles.emptyText}>
-                Send the first message or share a trip from Trips to start the conversation in this group.
+                {t("groupDetail.noMessagesHint")}
               </Text>
             </View>
           ) : (
@@ -1378,8 +1527,13 @@ export default function GroupChatScreen() {
 
               return (
                 <GroupChatMessageRow
+                  canDeleteMessage={!!user && (message.senderId === user.uid || isCreator)}
+                  canEditMessage={
+                    !!user && message.senderId === user.uid && message.messageType === "text"
+                  }
                   key={message.id}
                   creatingLinkedExpenseKey={creatingLinkedExpenseKey}
+                  deleting={deletingMessageId === message.id}
                   expenseRemainingCollection={expenseRemainingCollection}
                   group={group}
                   isMember={isMember}
@@ -1388,6 +1542,8 @@ export default function GroupChatScreen() {
                   message={message}
                   myOutstandingAmount={myOutstandingAmount}
                   myRepayment={myRepayment}
+                  onDeleteMessage={handleDeleteMessage}
+                  onEditMessage={handleStartEditingMessage}
                   onCreateLinkedTransportExpense={(msg, lt) => {
                     void handleCreateLinkedTransportExpense(msg, lt);
                   }}
@@ -1405,18 +1561,21 @@ export default function GroupChatScreen() {
               );
             })
           )}
+          <View style={styles.messagesScrollSpacer} />
         </ScrollView>
 
         {/* Composer */}
         <GroupChatComposer
           canManageExpenses={canManageExpenses}
           canOpenSharePicker={canOpenSharePicker}
-          colors={colors}
           composerBottomInset={composerBottomInset}
           composerValue={composerValue}
+          editingMessageText={editingMessage?.text ?? ""}
           isMember={isMember}
+          isEditing={!!editingMessageId}
           isPublicGroup={group?.accessType === "public"}
           joining={joining}
+          onCancelEditing={handleCancelEditingMessage}
           onChangeComposerValue={setComposerValue}
           onFocusInput={() => {
             requestAnimationFrame(() => {
@@ -1435,7 +1594,7 @@ export default function GroupChatScreen() {
 
       {/* Error toast */}
       {error ? (
-        <View style={styles.toastContainer} pointerEvents="box-none">
+        <View style={[styles.toastContainer, { bottom: toastBottomInset }]} pointerEvents="box-none">
           <View
             style={[
               styles.toast,
@@ -1455,7 +1614,7 @@ export default function GroupChatScreen() {
 
       {/* Info toast */}
       {infoMessage ? (
-        <View style={styles.toastContainer} pointerEvents="box-none">
+        <View style={[styles.toastContainer, { bottom: toastBottomInset }]} pointerEvents="box-none">
           <View
             style={[
               styles.toast,

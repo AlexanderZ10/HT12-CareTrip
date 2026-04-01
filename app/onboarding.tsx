@@ -16,46 +16,46 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { auth, db } from "../firebase";
+import { useAppLanguage } from "../components/app-language-provider";
+import { useAppTheme } from "../components/app-theme-provider";
 import { DismissKeyboard } from "../components/dismiss-keyboard";
+import { Spacing, Radius, TypeScale, FontWeight, shadow } from "../constants/design-system";
 import { getFirestoreUserMessage } from "../utils/firestore-errors";
-import React from "react";
+import type { TranslationKey } from "../utils/translations";
+import React, { useMemo } from "react";
 
-const NO_INTERESTS_OPTION = "X - Nothing specific";
-const NO_ASSISTANCE_OPTION = "X - No special needs";
-const NO_SKILLS_OPTION = "X - No specific skills";
-
-const INTEREST_OPTIONS = [
-  NO_INTERESTS_OPTION,
-  "🌿 Природа и планини",
-  "🏛️ История и култура",
-  "🍷 Храна и вино",
-  "🎨 Занаяти и изкуство",
-  "🚴 Активности и спорт",
-  "🧘 Релакс и уединение",
-  "👨‍👩‍👧‍👦 Семейно пътуване",
-  "📸 Фотография",
+const INTEREST_KEYS: TranslationKey[] = [
+  "onboarding.optNone.interests",
+  "onboarding.interest.nature",
+  "onboarding.interest.history",
+  "onboarding.interest.food",
+  "onboarding.interest.art",
+  "onboarding.interest.sport",
+  "onboarding.interest.relax",
+  "onboarding.interest.family",
+  "onboarding.interest.photo",
 ];
 
-const ASSISTANCE_OPTIONS = [
-  NO_ASSISTANCE_OPTION,
-  "♿ Достъпна среда (рампи, широки врати)",
-  "👁️ Зрителни затруднения",
-  "🦻 Слухови затруднения",
-  "💊 Хронично заболяване (нужда от лекар/аптека)",
-  "🍽️ Хранителни алергии",
-  "🧠 Сензорна чувствителност (тихи места)",
+const ASSISTANCE_KEYS: TranslationKey[] = [
+  "onboarding.optNone.assistance",
+  "onboarding.assist.wheelchair",
+  "onboarding.assist.visual",
+  "onboarding.assist.hearing",
+  "onboarding.assist.medical",
+  "onboarding.assist.allergy",
+  "onboarding.assist.sensory",
 ];
 
-const SKILLS_OPTIONS = [
-  NO_SKILLS_OPTION,
-  "🌱 Градинарство / земеделска работа",
-  "🔨 Строителство / ремонт",
-  "📚 Преподаване / работа с деца",
-  "🍳 Готвене",
-  "💻 IT / дигитални умения",
-  "📷 Фотография / видео",
-  "💪 Физическа помощ",
-  "🙌 Просто имам желание, без специални умения",
+const SKILLS_KEYS: TranslationKey[] = [
+  "onboarding.optNone.skills",
+  "onboarding.skill.gardening",
+  "onboarding.skill.construction",
+  "onboarding.skill.teaching",
+  "onboarding.skill.cooking",
+  "onboarding.skill.it",
+  "onboarding.skill.photo",
+  "onboarding.skill.physical",
+  "onboarding.skill.willingness",
 ];
 
 type OnboardingErrors = {
@@ -67,26 +67,37 @@ type OnboardingErrors = {
 
 type MultiSelectField = "interests" | "assistance" | "skills";
 
-const EXCLUSIVE_NONE_OPTIONS: Record<MultiSelectField, string> = {
-  interests: NO_INTERESTS_OPTION,
-  assistance: NO_ASSISTANCE_OPTION,
-  skills: NO_SKILLS_OPTION,
+const EXCLUSIVE_NONE_KEYS: Record<MultiSelectField, TranslationKey> = {
+  interests: "onboarding.optNone.interests",
+  assistance: "onboarding.optNone.assistance",
+  skills: "onboarding.optNone.skills",
 };
 
 type ChoiceChipProps = {
   label: string;
   selected: boolean;
   onPress: () => void;
+  colors: ReturnType<typeof useAppTheme>["colors"];
 };
 
-function ChoiceChip({ label, selected, onPress }: ChoiceChipProps) {
+function ChoiceChip({ label, selected, onPress, colors }: ChoiceChipProps) {
   return (
     <TouchableOpacity
-      style={[styles.chip, selected && styles.chipSelected]}
+      style={[
+        styles.chip,
+        { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder },
+        selected && { backgroundColor: colors.accent, borderColor: colors.accent },
+      ]}
       onPress={onPress}
       activeOpacity={0.9}
     >
-      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+      <Text
+        style={[
+          styles.chipText,
+          { color: colors.textSecondary },
+          selected && { color: colors.buttonTextOnAction },
+        ]}
+      >
         {label}
       </Text>
     </TouchableOpacity>
@@ -96,6 +107,8 @@ function ChoiceChip({ label, selected, onPress }: ChoiceChipProps) {
 export default function OnboardingScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { t } = useAppLanguage();
+  const { colors } = useAppTheme();
   const params = useLocalSearchParams<{ returnTo?: string }>();
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [loading, setLoading] = useState(true);
@@ -107,6 +120,15 @@ export default function OnboardingScreen() {
   const [assistanceNote, setAssistanceNote] = useState("");
   const [skills, setSkills] = useState<string[]>([]);
   const [skillsNote, setSkillsNote] = useState("");
+
+  const interestOptions = useMemo(() => INTEREST_KEYS.map((k) => t(k)), [t]);
+  const assistanceOptions = useMemo(() => ASSISTANCE_KEYS.map((k) => t(k)), [t]);
+  const skillsOptions = useMemo(() => SKILLS_KEYS.map((k) => t(k)), [t]);
+  const exclusiveNoneOptions = useMemo<Record<MultiSelectField, string>>(() => ({
+    interests: t(EXCLUSIVE_NONE_KEYS.interests),
+    assistance: t(EXCLUSIVE_NONE_KEYS.assistance),
+    skills: t(EXCLUSIVE_NONE_KEYS.skills),
+  }), [t]);
   const [errors, setErrors] = useState<OnboardingErrors>({});
   const returnTo = typeof params.returnTo === "string" ? params.returnTo : null;
 
@@ -193,7 +215,7 @@ export default function OnboardingScreen() {
   ) => {
     setter((currentValues) => {
       const hasValue = currentValues.includes(value);
-      const exclusiveNoneOption = EXCLUSIVE_NONE_OPTIONS[field];
+      const exclusiveNoneOption = exclusiveNoneOptions[field];
 
       if (hasValue) {
         return currentValues.filter((item) => item !== value);
@@ -220,16 +242,15 @@ export default function OnboardingScreen() {
     const trimmedSkillsNote = skillsNote.trim();
 
     if (interests.length === 0 && !trimmedInterestsNote) {
-      nextErrors.interests = "Избери поне едно нещо, което те вълнува.";
+      nextErrors.interests = t("onboarding.q1Error");
     }
 
     if (assistance.length === 0 && !trimmedAssistanceNote) {
-      nextErrors.assistance =
-        "Избери поне една опция за помощ или посочи, че нямаш специални нужди.";
+      nextErrors.assistance = t("onboarding.q2Error");
     }
 
     if (skills.length === 0 && !trimmedSkillsNote) {
-      nextErrors.skills = "Избери поне една опция за умения или желание за помощ.";
+      nextErrors.skills = t("onboarding.q3Error");
     }
 
     if (Object.keys(nextErrors).length > 0) {
@@ -269,7 +290,7 @@ export default function OnboardingScreen() {
         { merge: true }
       );
 
-      router.replace(returnTo ?? "/profile");
+      router.replace((returnTo ?? "/profile") as "/(tabs)/profile");
     } catch (error) {
       setErrors({
         form: getFirestoreUserMessage(error, "write"),
@@ -281,14 +302,14 @@ export default function OnboardingScreen() {
 
   if (loading || user === undefined || user === null) {
     return (
-      <SafeAreaView style={styles.loader} edges={["top", "bottom", "left", "right"]}>
-        <ActivityIndicator size="large" color="#2D6A4F" />
+      <SafeAreaView style={[styles.loader, { backgroundColor: colors.screen }]} edges={["top", "bottom", "left", "right"]}>
+        <ActivityIndicator size="large" color={colors.accent} />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.screen} edges={["top", "bottom", "left", "right"]}>
+    <SafeAreaView style={[styles.screen, { backgroundColor: colors.screen }]} edges={["top", "bottom", "left", "right"]}>
       <DismissKeyboard>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -301,32 +322,31 @@ export default function OnboardingScreen() {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
-        <View style={styles.hero}>
-          <Text style={styles.kicker}>Нека те опознаем</Text>
-          <Text style={styles.title}>3 бързи въпроса за по-точни AI предложения</Text>
-          <Text style={styles.subtitle}>
-            Ще отнеме под минута и ще запазим отговорите към твоя профил.
-          </Text>
+        <View style={[styles.hero, { backgroundColor: colors.heroAlt }]}>
+          <Text style={[styles.kicker, { color: colors.textMuted }]}>{t("onboarding.kicker")}</Text>
+          <Text style={[styles.title, { color: colors.heroText }]}>{t("onboarding.title")}</Text>
+          <Text style={[styles.subtitle, { color: colors.heroText }]}>{t("onboarding.subtitle")}</Text>
         </View>
 
-      <View style={styles.card}>
-        <Text style={styles.questionTitle}>1. Какво те вълнува по време на пътуване?</Text>
-        <Text style={styles.questionSubtitle}>Избери едно или повече.</Text>
+      <View style={[styles.card, { backgroundColor: colors.card }]}>
+        <Text style={[styles.questionTitle, { color: colors.textPrimary }]}>{t("onboarding.q1Title")}</Text>
+        <Text style={[styles.questionSubtitle, { color: colors.textSecondary }]}>{t("onboarding.selectOneOrMore")}</Text>
         <View style={styles.chipWrap}>
-          {INTEREST_OPTIONS.map((option) => (
+          {interestOptions.map((option) => (
             <ChoiceChip
               key={option}
               label={option}
               selected={interests.includes(option)}
               onPress={() => toggleMultiValue(option, setInterests, "interests")}
+              colors={colors}
             />
           ))}
         </View>
-        <Text style={styles.noteLabel}>Допълнително по желание</Text>
+        <Text style={[styles.noteLabel, { color: colors.textSecondary }]}>{t("onboarding.optionalNote")}</Text>
         <TextInput
-          style={styles.noteInput}
-          placeholder="Напиши какво най-много търсиш или какво искаш да избегнеш..."
-          placeholderTextColor="#7B8870"
+          style={[styles.noteInput, { borderColor: colors.inputBorder, backgroundColor: colors.inputBackground, color: colors.inputText }]}
+          placeholder={t("onboarding.q1Placeholder")}
+          placeholderTextColor={colors.inputPlaceholder}
           value={interestsNote}
           onChangeText={(value) => {
             setInterestsNote(value);
@@ -336,30 +356,29 @@ export default function OnboardingScreen() {
           textAlignVertical="top"
         />
         {errors.interests ? (
-          <Text style={styles.errorText}>{errors.interests}</Text>
+          <Text style={[styles.errorText, { color: colors.error }]}>{errors.interests}</Text>
         ) : null}
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.questionTitle}>
-          2. Имаш ли нужда от специална помощ по време на пътуване?
-        </Text>
-        <Text style={styles.questionSubtitle}>Избери едно или повече.</Text>
+      <View style={[styles.card, { backgroundColor: colors.card }]}>
+        <Text style={[styles.questionTitle, { color: colors.textPrimary }]}>{t("onboarding.q2Title")}</Text>
+        <Text style={[styles.questionSubtitle, { color: colors.textSecondary }]}>{t("onboarding.selectOneOrMore")}</Text>
         <View style={styles.chipWrap}>
-          {ASSISTANCE_OPTIONS.map((option) => (
+          {assistanceOptions.map((option) => (
             <ChoiceChip
               key={option}
               label={option}
               selected={assistance.includes(option)}
               onPress={() => toggleMultiValue(option, setAssistance, "assistance")}
+              colors={colors}
             />
           ))}
         </View>
-        <Text style={styles.noteLabel}>Допълнително по желание</Text>
+        <Text style={[styles.noteLabel, { color: colors.textSecondary }]}>{t("onboarding.optionalNote")}</Text>
         <TextInput
-          style={styles.noteInput}
-          placeholder="Напиши детайли, които ще помогнат за по-подходящи предложения..."
-          placeholderTextColor="#7B8870"
+          style={[styles.noteInput, { borderColor: colors.inputBorder, backgroundColor: colors.inputBackground, color: colors.inputText }]}
+          placeholder={t("onboarding.q2Placeholder")}
+          placeholderTextColor={colors.inputPlaceholder}
           value={assistanceNote}
           onChangeText={(value) => {
             setAssistanceNote(value);
@@ -369,30 +388,29 @@ export default function OnboardingScreen() {
           textAlignVertical="top"
         />
         {errors.assistance ? (
-          <Text style={styles.errorText}>{errors.assistance}</Text>
+          <Text style={[styles.errorText, { color: colors.error }]}>{errors.assistance}</Text>
         ) : null}
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.questionTitle}>
-          3. Какво можеш да правиш, ако искаш да помогнеш?
-        </Text>
-        <Text style={styles.questionSubtitle}>Избери едно или повече.</Text>
+      <View style={[styles.card, { backgroundColor: colors.card }]}>
+        <Text style={[styles.questionTitle, { color: colors.textPrimary }]}>{t("onboarding.q3Title")}</Text>
+        <Text style={[styles.questionSubtitle, { color: colors.textSecondary }]}>{t("onboarding.selectOneOrMore")}</Text>
         <View style={styles.chipWrap}>
-          {SKILLS_OPTIONS.map((option) => (
+          {skillsOptions.map((option) => (
             <ChoiceChip
               key={option}
               label={option}
               selected={skills.includes(option)}
               onPress={() => toggleMultiValue(option, setSkills, "skills")}
+              colors={colors}
             />
           ))}
         </View>
-        <Text style={styles.noteLabel}>Допълнително по желание</Text>
+        <Text style={[styles.noteLabel, { color: colors.textSecondary }]}>{t("onboarding.optionalNote")}</Text>
         <TextInput
-          style={styles.noteInput}
-          placeholder="Добави конкретни умения, опит или предпочитан тип помощ..."
-          placeholderTextColor="#7B8870"
+          style={[styles.noteInput, { borderColor: colors.inputBorder, backgroundColor: colors.inputBackground, color: colors.inputText }]}
+          placeholder={t("onboarding.q3Placeholder")}
+          placeholderTextColor={colors.inputPlaceholder}
           value={skillsNote}
           onChangeText={(value) => {
             setSkillsNote(value);
@@ -402,24 +420,24 @@ export default function OnboardingScreen() {
           textAlignVertical="top"
         />
         {errors.skills ? (
-          <Text style={styles.errorText}>{errors.skills}</Text>
+          <Text style={[styles.errorText, { color: colors.error }]}>{errors.skills}</Text>
         ) : null}
       </View>
 
-      {errors.form ? <Text style={styles.formError}>{errors.form}</Text> : null}
+      {errors.form ? <Text style={[styles.formError, { color: colors.error }]}>{errors.form}</Text> : null}
 
         <TouchableOpacity
-          style={[styles.primaryButton, saving && styles.primaryButtonDisabled]}
+          style={[styles.primaryButton, { backgroundColor: colors.accent }, saving && styles.primaryButtonDisabled]}
           onPress={handleSave}
           activeOpacity={0.9}
           disabled={saving}
         >
-          <Text style={styles.primaryButtonText}>
+          <Text style={[styles.primaryButtonText, { color: colors.buttonTextOnAction }]}>
             {saving
-              ? "Запазване..."
+              ? t("common.saving")
               : returnTo
-                ? "Save changes"
-                : "Запази и продължи"}
+                ? t("onboarding.saveChangesButton")
+                : t("onboarding.saveAndContinue")}
           </Text>
         </TouchableOpacity>
       </ScrollView>
@@ -432,127 +450,92 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#F0F0F0",
   },
   content: {
-    padding: 20,
-    paddingBottom: 40,
+    padding: Spacing.xl,
+    paddingBottom: Spacing["4xl"],
   },
   loader: {
     flex: 1,
-    backgroundColor: "#F0F0F0",
     alignItems: "center",
     justifyContent: "center",
   },
   hero: {
-    backgroundColor: "#2D2D2D",
-    borderRadius: 24,
-    padding: 24,
-    marginBottom: 18,
+    borderRadius: Radius["2xl"],
+    padding: Spacing["2xl"],
+    marginBottom: Spacing.lg,
   },
   kicker: {
-    color: "#9CA3AF",
-    fontSize: 13,
-    fontWeight: "700",
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.bold,
     letterSpacing: 0.8,
-    marginBottom: 8,
+    marginBottom: Spacing.sm,
     textTransform: "uppercase",
   },
   title: {
-    color: "#FFFFFF",
-    fontSize: 28,
-    lineHeight: 36,
-    fontWeight: "800",
-    marginBottom: 10,
+    ...TypeScale.displayMd,
+    marginBottom: Spacing.sm,
   },
   subtitle: {
-    color: "#F0F0F0",
-    fontSize: 15,
-    lineHeight: 22,
+    ...TypeScale.titleSm,
   },
   card: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 22,
-    padding: 18,
-    marginBottom: 16,
-    shadowColor: "#1E2A12",
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    borderRadius: Radius.xl,
+    padding: Spacing.lg,
+    marginBottom: Spacing.lg,
+    ...shadow("md"),
   },
   questionTitle: {
     fontSize: 19,
     lineHeight: 26,
-    fontWeight: "700",
-    color: "#1A1A1A",
+    fontWeight: FontWeight.bold,
     marginBottom: 6,
   },
   questionSubtitle: {
-    fontSize: 14,
-    lineHeight: 20,
-    color: "#6B7280",
-    marginBottom: 14,
+    ...TypeScale.bodyMd,
+    marginBottom: Spacing.md,
   },
   chipWrap: {
     flexDirection: "row",
     flexWrap: "wrap",
   },
   chip: {
-    backgroundColor: "#F8F8F8",
-    borderRadius: 16,
+    borderRadius: Radius.lg,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: Spacing.md,
     marginRight: 10,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#E0E0E0",
-  },
-  chipSelected: {
-    backgroundColor: "#2D6A4F",
-    borderColor: "#2D6A4F",
   },
   chipText: {
-    color: "#39521C",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  chipTextSelected: {
-    color: "#FFFFFF",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.semibold,
   },
   noteLabel: {
-    marginTop: 8,
-    marginBottom: 8,
-    color: "#516244",
-    fontSize: 13,
-    fontWeight: "600",
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.sm,
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.semibold,
   },
   noteInput: {
     minHeight: 92,
-    borderRadius: 16,
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: "#E0E0E0",
-    backgroundColor: "#F5F5F5",
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    color: "#1A1A1A",
-    fontSize: 14,
-    lineHeight: 20,
+    paddingVertical: Spacing.md,
+    ...TypeScale.bodyMd,
   },
   errorText: {
-    color: "#C62828",
     marginTop: 6,
-    fontSize: 13,
+    ...TypeScale.bodySm,
   },
   formError: {
-    color: "#C62828",
     textAlign: "center",
-    fontSize: 14,
-    marginBottom: 14,
+    ...TypeScale.bodyMd,
+    marginBottom: Spacing.md,
   },
   primaryButton: {
-    backgroundColor: "#2D6A4F",
-    borderRadius: 16,
+    borderRadius: Radius.lg,
     paddingVertical: 17,
     alignItems: "center",
     marginTop: 6,
@@ -561,8 +544,7 @@ const styles = StyleSheet.create({
     opacity: 0.75,
   },
   primaryButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "700",
+    ...TypeScale.titleMd,
+    fontWeight: FontWeight.bold,
   },
 });

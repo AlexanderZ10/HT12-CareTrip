@@ -19,7 +19,9 @@ service cloud.firestore {
     }
 
     function isGroupMember(groupId) {
-      return signedIn() && groupData(groupId).memberIds.hasAny([request.auth.uid]);
+      return signedIn()
+        && groupData(groupId).memberIds is list
+        && groupData(groupId).memberIds.hasAny([request.auth.uid]);
     }
 
     function isPublicGroup(groupId) {
@@ -85,8 +87,7 @@ service cloud.firestore {
     }
 
     function validSelfJoin() {
-      return validGroupShape(request.resource.data)
-        && sameGroupMetadata()
+      return sameGroupMetadata()
         && !hasCurrentUser(resource.data.memberIds)
         && hasCurrentUser(request.resource.data.memberIds)
         && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1
@@ -94,12 +95,19 @@ service cloud.firestore {
     }
 
     function validSelfLeave() {
-      return validGroupShape(request.resource.data)
-        && sameGroupMetadata()
+      return sameGroupMetadata()
         && resource.data.creatorId != request.auth.uid
         && hasCurrentUser(resource.data.memberIds)
         && !hasCurrentUser(request.resource.data.memberIds)
         && request.resource.data.memberIds.size() + 1 == resource.data.memberIds.size()
+        && resource.data.memberIds.hasAll(request.resource.data.memberIds);
+    }
+
+    function validCreatorMemberRemoval() {
+      return sameGroupMetadata()
+        && resource.data.creatorId == request.auth.uid
+        && hasCurrentUser(request.resource.data.memberIds)
+        && resource.data.memberIds.size() == request.resource.data.memberIds.size() + 1
         && resource.data.memberIds.hasAll(request.resource.data.memberIds);
     }
 
@@ -252,6 +260,25 @@ service cloud.firestore {
         );
     }
 
+    function isTextGroupMessage(data) {
+      return data.messageType == null || data.messageType == "text";
+    }
+
+    function validOwnTextMessageEdit() {
+      return signedIn()
+        && resource.data.senderId == request.auth.uid
+        && isTextGroupMessage(resource.data)
+        && isTextGroupMessage(request.resource.data)
+        && request.resource.data.senderId == resource.data.senderId
+        && request.resource.data.senderLabel == resource.data.senderLabel
+        && request.resource.data.senderAvatarUrl == resource.data.senderAvatarUrl
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.sharedTrip == resource.data.sharedTrip
+        && request.resource.data.expense == resource.data.expense
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["text"])
+        && validGroupMessageShape(request.resource.data);
+    }
+
     match /profiles/{userId} {
       allow read, create, update: if isOwner(userId);
       allow delete: if false;
@@ -300,18 +327,23 @@ service cloud.firestore {
     match /groups/{groupId} {
       allow read: if signedIn();
       allow create: if validCreatedGroup();
-      allow update: if validCreatorGroupEdit() || validSelfJoin() || validSelfLeave();
+      allow update: if validCreatorGroupEdit() || validSelfJoin() || validSelfLeave() || validCreatorMemberRemoval();
       allow delete: if resource.data.creatorId == request.auth.uid;
 
       match /messages/{messageId} {
         allow read: if isGroupMember(groupId) || isPublicGroup(groupId);
 
-        allow create: if isGroupMember(groupId)
+        allow create: if signedIn()
+          && (
+            (isPublicGroup(groupId) && isTextGroupMessage(request.resource.data))
+            || isGroupMember(groupId)
+                      )
           && request.resource.data.senderId == request.auth.uid
           && validGroupMessageShape(request.resource.data);
 
-        allow update: if false;
-        allow delete: if canManageGroup(groupId);
+        allow update: if validOwnTextMessageEdit();
+        allow delete: if canManageGroup(groupId)
+          || (signedIn() && resource.data.senderId == request.auth.uid);
       }
 
       match /expenseRepayments/{repaymentId} {

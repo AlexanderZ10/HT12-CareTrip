@@ -4,9 +4,10 @@ import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View 
 
 import { FontWeight, Radius, Spacing, TypeScale } from "../../../constants/design-system";
 import type { StoredHomePlan } from "../../../utils/home-chat-storage";
-import type { PlannerTransportOption } from "../../../utils/home-travel-planner";
-import type { PlannerStayOption } from "../../../utils/home-travel-planner";
-import { PAYMENT_METHODS } from "../constants";
+import type {
+  PlannerStayOption,
+  PlannerTransportOption,
+} from "../../../utils/home-travel-planner";
 import { formatCheckoutReference, getPaymentMethodDisplayLabel, getPaymentMethodIcon } from "../helpers";
 import { formatProcessedAt } from "../../../utils/formatting";
 import type { BookingCheckoutStage, BookingReceipt } from "../types";
@@ -27,6 +28,7 @@ type BookingModalProps = {
   bookingProgress: number;
   bookingReceipt: BookingReceipt | null;
   bookingStage: BookingCheckoutStage;
+  paymentMethods: string[];
   colors: {
     border: string;
     card: string;
@@ -54,6 +56,7 @@ export function BookingModal({
   bookingProgressLabel,
   bookingReceipt,
   bookingStage,
+  paymentMethods,
   colors,
   latestPlan,
   onClose,
@@ -128,6 +131,7 @@ export function BookingModal({
                 latestPlan={latestPlan}
                 onConfirm={onConfirm}
                 onUpdateForm={onUpdateForm}
+                paymentMethods={paymentMethods}
                 selectedStay={selectedStay}
                 selectedStayIndex={selectedStayIndex}
                 selectedTransport={selectedTransport}
@@ -255,6 +259,7 @@ function FormView({
   latestPlan,
   onConfirm,
   onUpdateForm,
+  paymentMethods,
   selectedStay,
   selectedStayIndex,
   selectedTransport,
@@ -269,6 +274,7 @@ function FormView({
   latestPlan: NonNullable<StoredHomePlan>;
   onConfirm: () => void;
   onUpdateForm: (updater: (current: BookingForm) => BookingForm) => void;
+  paymentMethods: string[];
   selectedStay: PlannerStayOption | null;
   selectedStayIndex: number | null;
   selectedTransport: PlannerTransportOption | null;
@@ -386,7 +392,7 @@ function FormView({
       <View style={styles.bookingSection}>
         <Text style={styles.bookingSectionTitle}>Метод на плащане</Text>
         <View style={styles.paymentMethodsRow}>
-          {PAYMENT_METHODS.map((method) => {
+          {paymentMethods.map((method) => {
             const isSelected = bookingForm.paymentMethod === method;
             return (
               <TouchableOpacity

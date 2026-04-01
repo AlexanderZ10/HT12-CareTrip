@@ -2,6 +2,8 @@ import { MaterialIcons } from "@expo/vector-icons";
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
+import { useAppLanguage } from "../../../components/app-language-provider";
+import { useAppTheme } from "../../../components/app-theme-provider";
 import {
   FontWeight,
   Radius,
@@ -17,7 +19,6 @@ import {
   buildLinkedExpenseLookupKey,
   buildSharedTripDetailsPreview,
   formatExpenseAmount,
-  getSharedTripSourceLabel,
 } from "../helpers";
 
 interface SharedTripCardProps {
@@ -44,13 +45,18 @@ export function SharedTripCard({
   onOpenPlannerTicket,
   onPreviewTrip,
 }: SharedTripCardProps) {
+  const { t } = useAppLanguage();
+  const { colors } = useAppTheme();
   const sharedTripLinkedTransports = message.sharedTrip?.linkedTransports ?? [];
 
   return (
     <View
       style={[
         styles.sharedTripCard,
-        isMine ? styles.mySharedTripCard : styles.theirSharedTripCard,
+        {
+          backgroundColor: isMine ? colors.accentMuted : colors.card,
+          borderColor: colors.border,
+        },
       ]}
     >
       <TouchableOpacity
@@ -62,36 +68,42 @@ export function SharedTripCard({
         }}
       >
         <View style={styles.sharedTripTopRow}>
-          <Text style={[styles.sharedTripKicker, isMine && styles.mySharedTripKicker]}>
-            Trip plan
+          <Text style={[styles.sharedTripKicker, { color: colors.textSecondary }]}>
+            {t("groupDetail.tripPlan")}
           </Text>
           <View
             style={[
               styles.sharedTripSourceBadge,
-              message.sharedTrip?.source === "home"
-                ? styles.sharedTripHomeBadge
-                : styles.sharedTripDiscoverBadge,
+              {
+                backgroundColor:
+                  message.sharedTrip?.source === "home"
+                    ? colors.skeleton
+                    : colors.warningBackground,
+              },
             ]}
           >
             <Text
               style={[
                 styles.sharedTripSourceBadgeText,
-                message.sharedTrip?.source === "home"
-                  ? styles.sharedTripHomeBadgeText
-                  : styles.sharedTripDiscoverBadgeText,
+                {
+                  color:
+                    message.sharedTrip?.source === "home"
+                      ? colors.accent
+                      : colors.textSecondary,
+                },
               ]}
             >
-              {getSharedTripSourceLabel(message.sharedTrip?.source ?? "discover")}
+              {message.sharedTrip?.source === "home" ? t("common.homePlanner") : t("common.discover")}
             </Text>
           </View>
         </View>
-        <Text style={[styles.sharedTripTitle, isMine && styles.mySharedTripTitle]}>
+        <Text style={[styles.sharedTripTitle, { color: colors.textPrimary }]}>
           {message.sharedTrip?.title}
         </Text>
         <Text
           style={[
             styles.sharedTripDestination,
-            isMine && styles.mySharedTripDestination,
+            { color: colors.textSecondary },
           ]}
         >
           {message.sharedTrip?.destination}
@@ -101,7 +113,7 @@ export function SharedTripCard({
             <Text
               style={[
                 styles.sharedTripMetaText,
-                isMine && styles.mySharedTripMetaText,
+                { color: colors.textSecondary },
               ]}
             >
               {message.sharedTrip.duration}
@@ -111,7 +123,7 @@ export function SharedTripCard({
             <Text
               style={[
                 styles.sharedTripMetaText,
-                isMine && styles.mySharedTripMetaText,
+                { color: colors.textSecondary },
               ]}
             >
               {message.sharedTrip.budget}
@@ -121,7 +133,7 @@ export function SharedTripCard({
         {message.sharedTrip?.summary ? (
           <Text
             numberOfLines={3}
-            style={[styles.sharedTripSummary, isMine && styles.mySharedTripSummary]}
+            style={[styles.sharedTripSummary, { color: colors.textSecondary }]}
           >
             {message.sharedTrip.summary}
           </Text>
@@ -130,15 +142,13 @@ export function SharedTripCard({
           numberOfLines={4}
           style={[
             styles.sharedTripDetailsPreview,
-            isMine && styles.mySharedTripDetailsPreview,
+            { color: colors.textSecondary },
           ]}
         >
           {buildSharedTripDetailsPreview(message.sharedTrip)}
         </Text>
-        <Text style={[styles.sharedTripHint, isMine && styles.mySharedTripHint]}>
-          {sharedTripLinkedTransports.length > 0
-            ? "Tap to open the full trip plan and all linked planner offers"
-            : "Tap to open the full trip plan"}
+        <Text style={[styles.sharedTripHint, { color: colors.textMuted }]}>
+          {t("groupDetail.openTripHint")}
         </Text>
       </TouchableOpacity>
       {sharedTripLinkedTransports.length > 0 ? (
@@ -146,10 +156,10 @@ export function SharedTripCard({
           <Text
             style={[
               styles.linkedTransportSectionTitle,
-              isMine && styles.myLinkedTransportSectionTitle,
+              { color: colors.textSecondary },
             ]}
           >
-            Planner ticket prices
+            {t("groupDetail.plannerTicketPrices")}
           </Text>
           {sharedTripLinkedTransports.slice(0, 2).map((linkedTransport) => {
             const linkedExpenseKey = buildLinkedExpenseLookupKey(
@@ -167,7 +177,10 @@ export function SharedTripCard({
                 key={linkedTransport.itemKey}
                 style={[
                   styles.linkedTransportCard,
-                  isMine ? styles.myLinkedTransportCard : styles.theirLinkedTransportCard,
+                  {
+                    backgroundColor: isMine ? colors.card : colors.cardAlt,
+                    borderColor: colors.border,
+                  },
                 ]}
               >
                 <View style={styles.linkedTransportTopRow}>
@@ -175,7 +188,7 @@ export function SharedTripCard({
                     <Text
                       style={[
                         styles.linkedTransportTitle,
-                        isMine && styles.myLinkedTransportTitle,
+                        { color: colors.textPrimary },
                       ]}
                     >
                       {linkedTransport.title}
@@ -185,7 +198,7 @@ export function SharedTripCard({
                         numberOfLines={2}
                         style={[
                           styles.linkedTransportRoute,
-                          isMine && styles.myLinkedTransportRoute,
+                          { color: colors.textSecondary },
                         ]}
                       >
                         {linkedTransport.route}
@@ -195,7 +208,7 @@ export function SharedTripCard({
                   <Text
                     style={[
                       styles.linkedTransportAmount,
-                      isMine && styles.myLinkedTransportAmount,
+                      { color: colors.textPrimary },
                     ]}
                   >
                     {linkedTransport.amountLabel}
@@ -207,7 +220,7 @@ export function SharedTripCard({
                     <Text
                       style={[
                         styles.linkedTransportMetaText,
-                        isMine && styles.myLinkedTransportMetaText,
+                        { color: colors.textSecondary },
                       ]}
                     >
                       {linkedTransport.duration}
@@ -217,7 +230,7 @@ export function SharedTripCard({
                     <Text
                       style={[
                         styles.linkedTransportMetaText,
-                        isMine && styles.myLinkedTransportMetaText,
+                        { color: colors.textSecondary },
                       ]}
                     >
                       {linkedTransport.sourceLabel}
@@ -226,10 +239,10 @@ export function SharedTripCard({
                   <Text
                     style={[
                       styles.linkedTransportMetaText,
-                      isMine && styles.myLinkedTransportMetaText,
+                      { color: colors.textSecondary },
                     ]}
                   >
-                    {formatExpenseAmount(ticketShareAmount)} each
+                    {formatExpenseAmount(ticketShareAmount)} {t("common.each")}
                   </Text>
                 </View>
 
@@ -237,14 +250,16 @@ export function SharedTripCard({
                   <View
                     style={[
                       styles.linkedTransportPostedBadge,
-                      isMine
-                        ? styles.myLinkedTransportPostedBadge
-                        : styles.theirLinkedTransportPostedBadge,
+                      {
+                        backgroundColor: isMine
+                          ? colors.accentMuted
+                          : colors.cardAlt,
+                      },
                     ]}
                   >
-                    <MaterialIcons color="#2D6A4F" name="check-circle" size={15} />
-                    <Text style={styles.linkedTransportPostedBadgeText}>
-                      Expense posted in chat
+                    <MaterialIcons color={colors.accent} name="check-circle" size={15} />
+                    <Text style={[styles.linkedTransportPostedBadgeText, { color: colors.accent }]}>
+                      {t("groupDetail.expensePosted")}
                     </Text>
                   </View>
                 ) : (
@@ -256,12 +271,12 @@ export function SharedTripCard({
                       }}
                       style={[
                         styles.linkedTransportSecondaryButton,
-                        isMine && styles.myLinkedTransportSecondaryButton,
+                        { backgroundColor: colors.cardAlt, borderColor: colors.border },
                       ]}
                     >
-                      <MaterialIcons color="#6B7280" name="open-in-new" size={16} />
-                      <Text style={styles.linkedTransportSecondaryButtonText}>
-                        Open link
+                      <MaterialIcons color={colors.textSecondary} name="open-in-new" size={16} />
+                      <Text style={[styles.linkedTransportSecondaryButtonText, { color: colors.textSecondary }]}>
+                        {t("groupDetail.openLink")}
                       </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
@@ -272,15 +287,16 @@ export function SharedTripCard({
                       }}
                       style={[
                         styles.linkedTransportPrimaryButton,
+                        { backgroundColor: colors.accent },
                         creatingLinkedExpenseKey === linkedExpenseKey &&
                           styles.linkedTransportPrimaryButtonDisabled,
                       ]}
                     >
-                      <MaterialIcons color="#FFFFFF" name="payments" size={16} />
-                      <Text style={styles.linkedTransportPrimaryButtonText}>
+                      <MaterialIcons color={colors.buttonTextOnAction} name="payments" size={16} />
+                      <Text style={[styles.linkedTransportPrimaryButtonText, { color: colors.buttonTextOnAction }]}>
                         {creatingLinkedExpenseKey === linkedExpenseKey
-                          ? "Posting..."
-                          : "Create in-app split"}
+                          ? t("groupDetail.posting")
+                          : t("groupDetail.createSplit")}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -292,10 +308,10 @@ export function SharedTripCard({
             <Text
               style={[
                 styles.linkedTransportMoreHint,
-                isMine && styles.myLinkedTransportMoreHint,
+                { color: colors.textMuted },
               ]}
             >
-              Open the trip to see all planner ticket options.
+              {t("groupDetail.openTripHint")}
             </Text>
           ) : null}
         </View>
@@ -311,14 +327,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     padding: Spacing.md,
   },
-  mySharedTripCard: {
-    backgroundColor: "#F7FAF1",
-    borderColor: "#E8E8E8",
-  },
-  theirSharedTripCard: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E8E8E8",
-  },
   sharedTripTopRow: {
     alignItems: "center",
     flexDirection: "row",
@@ -326,51 +334,27 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   sharedTripKicker: {
-    color: "#6B7280",
     ...TypeScale.labelLg,
     fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
-  },
-  mySharedTripKicker: {
-    color: "#6B7280",
   },
   sharedTripSourceBadge: {
     borderRadius: Radius.full,
     paddingHorizontal: Spacing.sm,
     paddingVertical: Spacing.xs,
   },
-  sharedTripHomeBadge: {
-    backgroundColor: "#E5E7EB",
-  },
-  sharedTripDiscoverBadge: {
-    backgroundColor: "#FFF2DA",
-  },
   sharedTripSourceBadgeText: {
     ...TypeScale.labelSm,
     fontWeight: FontWeight.extrabold,
   },
-  sharedTripHomeBadgeText: {
-    color: "#2D6A4F",
-  },
-  sharedTripDiscoverBadgeText: {
-    color: "#8B5611",
-  },
   sharedTripTitle: {
-    color: "#1A1A1A",
     ...TypeScale.titleLg,
     fontWeight: FontWeight.extrabold,
   },
-  mySharedTripTitle: {
-    color: "#1A1A1A",
-  },
   sharedTripDestination: {
-    color: "#5A6E41",
     ...TypeScale.bodyMd,
     fontWeight: FontWeight.bold,
     marginTop: Spacing.xs,
-  },
-  mySharedTripDestination: {
-    color: "#5A6E41",
   },
   sharedTripMetaRow: {
     flexDirection: "row",
@@ -378,66 +362,38 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
   },
   sharedTripMetaText: {
-    color: "#627254",
     ...TypeScale.bodySm,
     fontWeight: FontWeight.bold,
     marginBottom: Spacing.xs,
     marginRight: Spacing.sm,
   },
-  mySharedTripMetaText: {
-    color: "#627254",
-  },
   sharedTripSummary: {
-    color: "#435238",
     ...TypeScale.bodyMd,
     marginTop: Spacing.sm,
   },
-  mySharedTripSummary: {
-    color: "#435238",
-  },
   sharedTripDetailsPreview: {
-    color: "#57684A",
     ...TypeScale.bodySm,
     marginTop: Spacing.sm,
   },
-  mySharedTripDetailsPreview: {
-    color: "#57684A",
-  },
   sharedTripHint: {
-    color: "#7A8870",
     ...TypeScale.labelMd,
     fontWeight: FontWeight.bold,
     marginTop: Spacing.sm,
-  },
-  mySharedTripHint: {
-    color: "#7A8870",
   },
   linkedTransportSection: {
     marginTop: Spacing.md,
   },
   linkedTransportSectionTitle: {
-    color: "#6B7280",
     ...TypeScale.labelLg,
     fontWeight: FontWeight.extrabold,
     letterSpacing: 0.5,
     textTransform: "uppercase",
-  },
-  myLinkedTransportSectionTitle: {
-    color: "#6B7280",
   },
   linkedTransportCard: {
     borderRadius: Radius.lg,
     borderWidth: 1,
     marginTop: Spacing.sm,
     padding: Spacing.md,
-  },
-  myLinkedTransportCard: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E8E8E8",
-  },
-  theirLinkedTransportCard: {
-    backgroundColor: "#F8F8F8",
-    borderColor: "#E8E8E8",
   },
   linkedTransportTopRow: {
     alignItems: "flex-start",
@@ -449,28 +405,16 @@ const styles = StyleSheet.create({
     paddingRight: Spacing.sm,
   },
   linkedTransportTitle: {
-    color: "#1A1A1A",
     ...TypeScale.titleSm,
     fontWeight: FontWeight.extrabold,
   },
-  myLinkedTransportTitle: {
-    color: "#1A1A1A",
-  },
   linkedTransportRoute: {
-    color: "#5A6E41",
     ...TypeScale.bodySm,
     marginTop: Spacing.xs,
   },
-  myLinkedTransportRoute: {
-    color: "#5A6E41",
-  },
   linkedTransportAmount: {
-    color: "#1A1A1A",
     ...TypeScale.bodyMd,
     fontWeight: FontWeight.extrabold,
-  },
-  myLinkedTransportAmount: {
-    color: "#1A1A1A",
   },
   linkedTransportMetaRow: {
     flexDirection: "row",
@@ -479,12 +423,8 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
   },
   linkedTransportMetaText: {
-    color: "#627254",
     ...TypeScale.labelMd,
     fontWeight: FontWeight.bold,
-  },
-  myLinkedTransportMetaText: {
-    color: "#627254",
   },
   linkedTransportActionsRow: {
     flexDirection: "row",
@@ -493,8 +433,6 @@ const styles = StyleSheet.create({
   },
   linkedTransportSecondaryButton: {
     alignItems: "center",
-    backgroundColor: "#F5F5F5",
-    borderColor: "#E8E8E8",
     borderRadius: Radius.md,
     borderWidth: 1,
     flex: 1,
@@ -504,18 +442,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.sm,
     paddingVertical: Spacing.sm,
   },
-  myLinkedTransportSecondaryButton: {
-    backgroundColor: "#F5F5F5",
-    borderColor: "#E8E8E8",
-  },
   linkedTransportSecondaryButtonText: {
-    color: "#6B7280",
     ...TypeScale.labelLg,
     fontWeight: FontWeight.extrabold,
   },
   linkedTransportPrimaryButton: {
     alignItems: "center",
-    backgroundColor: "#2D6A4F",
     borderRadius: Radius.md,
     flex: 1,
     flexDirection: "row",
@@ -528,7 +460,6 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   linkedTransportPrimaryButtonText: {
-    color: "#FFFFFF",
     ...TypeScale.labelLg,
     fontWeight: FontWeight.extrabold,
   },
@@ -541,24 +472,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
   },
-  myLinkedTransportPostedBadge: {
-    backgroundColor: "#E6F1DA",
-  },
-  theirLinkedTransportPostedBadge: {
-    backgroundColor: "#F5F5F5",
-  },
   linkedTransportPostedBadgeText: {
-    color: "#2D6A4F",
     ...TypeScale.labelLg,
     fontWeight: FontWeight.extrabold,
   },
   linkedTransportMoreHint: {
-    color: "#7A8870",
     ...TypeScale.labelMd,
     fontWeight: FontWeight.bold,
     marginTop: Spacing.sm,
-  },
-  myLinkedTransportMoreHint: {
-    color: "#7A8870",
   },
 });

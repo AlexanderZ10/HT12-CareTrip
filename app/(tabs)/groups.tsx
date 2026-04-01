@@ -14,8 +14,8 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "../../components/Avatar";
+import { useAppLanguage } from "../../components/app-language-provider";
 import { useAppTheme } from "../../components/app-theme-provider";
-import { DismissKeyboard } from "../../components/dismiss-keyboard";
 import {
   FontWeight,
   Radius,
@@ -35,6 +35,7 @@ import { formatRelativeTime } from "../../utils/formatting";
 
 export default function GroupsTabScreen() {
   const { colors } = useAppTheme();
+  const { t } = useAppLanguage();
   const insets = useSafeAreaInsets();
   const vm = useGroupsScreen();
 
@@ -44,7 +45,7 @@ export default function GroupsTabScreen() {
         style={[styles.loader, { backgroundColor: colors.screenSoft }]}
         edges={["top", "left", "right"]}
       >
-        <ActivityIndicator size="large" color="#2D6A4F" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </SafeAreaView>
     );
   }
@@ -54,7 +55,6 @@ export default function GroupsTabScreen() {
       style={[styles.screen, { backgroundColor: colors.screenSoft }]}
       edges={["top", "left", "right"]}
     >
-      <DismissKeyboard>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior="padding"
@@ -68,7 +68,7 @@ export default function GroupsTabScreen() {
       >
         <View style={styles.topBar}>
           <View style={styles.topBarTextWrap}>
-            <Text style={[styles.pageTitle, { color: colors.textPrimary }]}>Groups</Text>
+            <Text style={[styles.pageTitle, { color: colors.textPrimary }]}>{t("groups.title")}</Text>
             <Text style={[styles.pageSubtitle, { color: colors.textSecondary }]}>
               @{vm.userHandle} • {vm.profileName}
             </Text>
@@ -84,7 +84,7 @@ export default function GroupsTabScreen() {
               },
             ]}
           >
-            <MaterialIcons color="#FFFFFF" name="add" size={28} />
+            <MaterialIcons color={colors.buttonTextOnAction} name="add" size={28} />
           </TouchableOpacity>
         </View>
 
@@ -103,7 +103,7 @@ export default function GroupsTabScreen() {
               vm.setSearchQuery(value);
               vm.clearFeedback();
             }}
-            placeholder="Search public groups"
+            placeholder={t("groups.searchPublic")}
             placeholderTextColor={colors.inputPlaceholder}
             style={[styles.searchInput, { color: colors.textPrimary }]}
             value={vm.searchQuery}
@@ -153,10 +153,10 @@ export default function GroupsTabScreen() {
                 size={74}
                 subtitle=""
               />
-              <Text numberOfLines={1} style={styles.storyLabel}>
+              <Text numberOfLines={1} style={[styles.storyLabel, { color: colors.textPrimary }]}>
                 {profile.username ? profile.username : profile.displayName}
               </Text>
-              <Text numberOfLines={1} style={styles.storyHint}>
+              <Text numberOfLines={1} style={[styles.storyHint, { color: colors.textMuted }]}>
                 {profile.homeBase || "Public profile"}
               </Text>
             </TouchableOpacity>
@@ -166,11 +166,11 @@ export default function GroupsTabScreen() {
         {!vm.searchQuery.trim() ? (
           <View style={styles.sectionBlock}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Trip requests</Text>
-              <Text style={styles.sectionMeta}>{vm.openTripRequests.length} open</Text>
+              <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{t("groups.tripRequests")}</Text>
+              <Text style={[styles.sectionMeta, { color: colors.textSecondary }]}>{vm.openTripRequests.length} {t("groups.open")}</Text>
             </View>
             <Text style={[styles.sectionSupportText, { color: colors.textSecondary }]}>
-              Quick travel ideas that can turn into a real group when the vibe is right.
+              {t("groups.tripRequestsHint")}
             </Text>
 
             {vm.openTripRequests.length === 0 ? (
@@ -192,18 +192,18 @@ export default function GroupsTabScreen() {
                   <MaterialIcons color={colors.accent} name="travel-explore" size={28} />
                 </View>
                 <Text style={[styles.requestEmptyTitle, { color: colors.textPrimary }]}>
-                  Няма active trip requests
+                  {t("groups.noTripRequests")}
                 </Text>
                 <Text style={[styles.requestEmptyText, { color: colors.textSecondary }]}>
-                  Пусни идея за trip, събери interested users и после я превърни в група.
+                  {t("groups.noTripRequestsHint")}
                 </Text>
                 <TouchableOpacity
                   activeOpacity={0.9}
                   onPress={vm.openRequestComposer}
                   style={[styles.inlineCreateRequestButton, { backgroundColor: colors.accent }]}
                 >
-                  <MaterialIcons color="#FFFFFF" name="add" size={18} />
-                  <Text style={styles.inlineCreateRequestButtonText}>New trip request</Text>
+                  <MaterialIcons color={colors.buttonTextOnAction} name="add" size={18} />
+                  <Text style={[styles.inlineCreateRequestButtonText, { color: colors.buttonTextOnAction }]}>{t("groups.newTripRequest")}</Text>
                 </TouchableOpacity>
               </View>
             ) : (
@@ -236,22 +236,22 @@ export default function GroupsTabScreen() {
 
         {vm.searchQuery.trim() ? (
           <View style={styles.sectionBlock}>
-            <Text style={styles.sectionTitle}>Search results</Text>
-            <Text style={styles.sectionMeta}>{vm.searchedPublicGroups.length} public groups</Text>
+            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{t("groups.searchResults")}</Text>
+            <Text style={[styles.sectionMeta, { color: colors.textSecondary }]}>{vm.searchedPublicGroups.length} {t("groups.publicGroups")}</Text>
 
             {vm.searchedPublicGroups.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyStateTitle}>Няма съвпадения</Text>
-                <Text style={styles.emptyStateText}>
-                  Опитай с друго име на група, creator или тема.
+              <View style={[styles.emptyState, { backgroundColor: colors.cardAlt, borderColor: colors.border }]}>
+                <Text style={[styles.emptyStateTitle, { color: colors.textPrimary }]}>{t("groups.noMatches")}</Text>
+                <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>
+                  {t("groups.noMatchesHint")}
                 </Text>
               </View>
             ) : (
               vm.searchedPublicGroups.map((group) => (
                 <GroupRow
-                  actionLabel={group.memberIds.includes(vm.userId) ? "Joined" : "Join"}
+                  actionLabel={group.memberIds.includes(vm.userId) ? t("common.joined") : t("common.join")}
                   actionLoading={vm.joiningGroupId === group.id}
-                  badge="Public"
+                  badge={t("common.public")}
                   group={group}
                   key={group.id}
                   onActionPress={
@@ -269,32 +269,32 @@ export default function GroupsTabScreen() {
         ) : null}
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Messages</Text>
-          <Text style={styles.sectionMeta}>
-            Requests {vm.invitedGroups.length ? `(${vm.invitedGroups.length})` : ""}
+          <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{t("groups.messages")}</Text>
+          <Text style={[styles.sectionMeta, { color: colors.textSecondary }]}>
+            {t("groups.requests")} {vm.invitedGroups.length ? `(${vm.invitedGroups.length})` : ""}
           </Text>
         </View>
 
         {vm.invitedGroups.length > 0 ? (
           vm.invitedGroups.map((group) => (
             <GroupRow
-              actionLabel="Accept"
+              actionLabel={t("groups.accept")}
               actionLoading={vm.joiningGroupId === group.id}
-              badge="Invite"
+              badge={t("groups.invite")}
               group={group}
               key={`invite-${group.id}`}
               onActionPress={() => vm.joinGroup(group.id)}
               preview={`${group.creatorLabel} invited you${group.description ? ` • ${group.description}` : ""}`}
-              rightMeta="Request"
+              rightMeta={t("groups.request")}
             />
           ))
         ) : null}
 
         {vm.joinedGroups.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyStateTitle}>Още нямаш групи</Text>
-            <Text style={styles.emptyStateText}>
-              Създай група или приеми invite, за да се появят тук като messages.
+          <View style={[styles.emptyState, { backgroundColor: colors.cardAlt, borderColor: colors.border }]}>
+            <Text style={[styles.emptyStateTitle, { color: colors.textPrimary }]}>{t("groups.noGroups")}</Text>
+            <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>
+              {t("groups.noGroupsHint")}
             </Text>
           </View>
         ) : (
@@ -314,8 +314,8 @@ export default function GroupsTabScreen() {
 
             return (
               <GroupRow
-                badge={group.accessType === "private" ? "Private" : "Public"}
-                actionLabel={group.creatorId === vm.userId ? "Delete" : undefined}
+                badge={group.accessType === "private" ? t("common.private") : t("common.public")}
+                actionLabel={group.creatorId === vm.userId ? t("common.delete") : undefined}
                 actionLoading={vm.deletingGroupId === group.id}
                 actionVariant="danger"
                 group={group}
@@ -334,15 +334,15 @@ export default function GroupsTabScreen() {
         {!vm.searchQuery.trim() ? (
           <View style={styles.sectionBlock}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Public groups</Text>
-              <Text style={styles.sectionMeta}>{vm.publicGroups.length} available</Text>
+              <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{t("groups.publicGroupsSection")}</Text>
+              <Text style={[styles.sectionMeta, { color: colors.textSecondary }]}>{vm.publicGroups.length} {t("groups.available")}</Text>
             </View>
 
             {vm.publicGroups.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyStateTitle}>Няма public групи</Text>
-                <Text style={styles.emptyStateText}>
-                  Първата public група ще се появи тук и ще може да бъде намирана през search.
+              <View style={[styles.emptyState, { backgroundColor: colors.cardAlt, borderColor: colors.border }]}>
+                <Text style={[styles.emptyStateTitle, { color: colors.textPrimary }]}>{t("groups.noPublicGroups")}</Text>
+                <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>
+                  {t("groups.noPublicGroupsHint")}
                 </Text>
               </View>
             ) : (
@@ -351,9 +351,9 @@ export default function GroupsTabScreen() {
                 .slice(0, 5)
                 .map((group) => (
                   <GroupRow
-                    actionLabel="Join"
+                    actionLabel={t("common.join")}
                     actionLoading={vm.joiningGroupId === group.id}
-                    badge="Public"
+                    badge={t("common.public")}
                     group={group}
                     key={`discover-${group.id}`}
                     onActionPress={() => vm.joinGroup(group.id)}
@@ -367,7 +367,6 @@ export default function GroupsTabScreen() {
         ) : null}
       </ScrollView>
       </KeyboardAvoidingView>
-      </DismissKeyboard>
 
       <ActionMenu
         visible={vm.actionMenuVisible}
@@ -448,12 +447,10 @@ export default function GroupsTabScreen() {
 
 const styles = StyleSheet.create({
   screen: {
-    backgroundColor: "#F0F0F0",
     flex: 1,
   },
   loader: {
     alignItems: "center",
-    backgroundColor: "#F0F0F0",
     flex: 1,
     justifyContent: "center",
   },
@@ -478,18 +475,14 @@ const styles = StyleSheet.create({
     paddingRight: Spacing.lg,
   },
   pageTitle: {
-    color: "#1A1A1A",
     ...TypeScale.displayMd,
   },
   pageSubtitle: {
     ...TypeScale.bodyMd,
-    color: "#6B7280",
     marginTop: 6,
   },
   topBarCircleButton: {
     alignItems: "center",
-    backgroundColor: "#2D6A4F",
-    borderColor: "#D1D5DB",
     borderRadius: Radius["3xl"],
     borderWidth: 3,
     height: 56,
@@ -499,8 +492,6 @@ const styles = StyleSheet.create({
   },
   searchShell: {
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E8E8E8",
     borderRadius: Radius.lg,
     borderWidth: 1,
     flexDirection: "row",
@@ -509,14 +500,11 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
   },
   searchInput: {
-    color: "#1A1A1A",
     flex: 1,
     ...TypeScale.bodyLg,
     marginLeft: Spacing.md,
   },
   feedbackCardError: {
-    backgroundColor: "#FFF1EF",
-    borderColor: "#F0B6AE",
     borderRadius: Radius.lg,
     borderWidth: 1,
     marginBottom: Spacing.md,
@@ -524,11 +512,8 @@ const styles = StyleSheet.create({
   },
   feedbackTextError: {
     ...TypeScale.bodyMd,
-    color: "#991B1B",
   },
   feedbackCardSuccess: {
-    backgroundColor: "#F0FFF4",
-    borderColor: "#A7F3D0",
     borderRadius: Radius.lg,
     borderWidth: 1,
     marginBottom: Spacing.md,
@@ -536,7 +521,6 @@ const styles = StyleSheet.create({
   },
   feedbackTextSuccess: {
     ...TypeScale.bodyMd,
-    color: "#2D6A4F",
   },
   storiesRow: {
     marginBottom: Spacing.lg,
@@ -551,14 +535,12 @@ const styles = StyleSheet.create({
   },
   storyLabel: {
     ...TypeScale.bodyMd,
-    color: "#1A1A1A",
     fontWeight: FontWeight.bold,
     marginTop: Spacing.sm,
     textAlign: "center",
   },
   storyHint: {
     ...TypeScale.labelLg,
-    color: "#9CA3AF",
     marginTop: Spacing.xs,
     textAlign: "center",
   },
@@ -575,12 +557,10 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     ...TypeScale.headingMd,
-    color: "#1A1A1A",
     fontWeight: FontWeight.extrabold,
   },
   sectionMeta: {
     ...TypeScale.bodyMd,
-    color: "#6B7280",
     fontWeight: FontWeight.bold,
   },
   sectionSupportText: {
@@ -627,13 +607,10 @@ const styles = StyleSheet.create({
   },
   inlineCreateRequestButtonText: {
     ...TypeScale.bodyMd,
-    color: "#FFFFFF",
     fontWeight: FontWeight.extrabold,
   },
   emptyState: {
     alignItems: "center",
-    backgroundColor: "#F8F8F8",
-    borderColor: "#E8E8E8",
     borderRadius: Radius["2xl"],
     borderWidth: 1,
     marginTop: Spacing.md,
@@ -642,13 +619,11 @@ const styles = StyleSheet.create({
   },
   emptyStateTitle: {
     ...TypeScale.titleLg,
-    color: "#1A1A1A",
     fontWeight: FontWeight.extrabold,
     textAlign: "center",
   },
   emptyStateText: {
     ...TypeScale.bodyMd,
-    color: "#6B7280",
     marginTop: Spacing.sm,
     textAlign: "center",
   },

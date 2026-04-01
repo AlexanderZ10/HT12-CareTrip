@@ -23,6 +23,7 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useAppLanguage } from "../../components/app-language-provider";
 import { useAppTheme } from "../../components/app-theme-provider";
 import {
   FontWeight,
@@ -33,7 +34,6 @@ import {
 } from "../../constants/design-system";
 import { ConfirmDialog } from "../../components/confirm-dialog";
 import { auth, db } from "../../firebase";
-import { normalizeBudgetToEuro } from "../../utils/currency";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
 import {
   createEmptyPlannerState,
@@ -49,6 +49,7 @@ import {
 } from "../../utils/home-chat-storage";
 import {
   formatGroundedTravelPlan,
+  generateConversationalResponse,
   generateGroundedTravelFollowUp,
   generateGroundedTravelPlan,
   getHomePlannerErrorMessage,
@@ -66,29 +67,14 @@ import {
 } from "../../utils/saved-trips";
 import { extractDiscoverProfile, type DiscoverProfile } from "../../utils/trip-recommendations";
 
-import {
-  BUDGET_SUGGESTIONS,
-  DAY_SUGGESTIONS,
-  PAYMENT_METHODS,
-  TIMING_SUGGESTIONS,
-  TRANSPORT_SUGGESTIONS,
-  TRAVELER_SUGGESTIONS,
-} from "../../features/home/constants";
 import type { BookingCheckoutStage, BookingReceipt } from "../../features/home/types";
 import {
-  buildDaysQuestion,
-  buildDestinationQuestion,
   buildInitialAssistantMessage,
-  buildTimingQuestion,
-  buildTransportQuestion,
-  buildTravelersQuestion,
   getAutoChatTitle,
   getDefaultChatTitle,
-  getDestinationSuggestions,
+  getPlannerGenerationDefaults,
   getStepTitle,
   normalizeLatestPlan,
-  normalizeDaysLabel,
-  normalizeTravelersLabel,
   parseCheckoutReturnState,
   wait,
 } from "../../features/home/helpers";
@@ -103,6 +89,7 @@ WebBrowser.maybeCompleteAuthSession();
 
 export default function HomeTabScreen() {
   const { colors } = useAppTheme();
+  const { language, languageForPrompt, t } = useAppLanguage();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { width } = useWindowDimensions();
@@ -134,7 +121,7 @@ export default function HomeTabScreen() {
     contactEmail: "",
     contactName: "",
     note: "",
-    paymentMethod: PAYMENT_METHODS[0] ?? "Банкова карта",
+    paymentMethod: t("home.paymentBankCard"),
   });
   const [savedSourceKeys, setSavedSourceKeys] = useState<string[]>([]);
   const [homeStore, setHomeStore] = useState<HomePlannerStore>({
@@ -157,6 +144,7 @@ export default function HomeTabScreen() {
   const homeFocusHandledRef = useRef(false);
   const [typingMessageId, setTypingMessageId] = useState<string | null>(null);
   const [typingVisibleText, setTypingVisibleText] = useState("");
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
   const isKeyboardOpenRef = useRef(false);
   const keyboardHeightRef = useRef(0);
 
@@ -190,9 +178,37 @@ export default function HomeTabScreen() {
   }, [homeStore, sortedChats]);
 
   const currentPlannerState =
-    currentChat?.state ?? createEmptyPlannerState(buildInitialAssistantMessage(profileName));
+    currentChat?.state ??
+    createEmptyPlannerState(buildInitialAssistantMessage(profileName, language));
+  const plannerDefaults = useMemo(
+    () => getPlannerGenerationDefaults(language),
+    [language]
+  );
+  const paymentMethods = useMemo(
+    () => [t("home.paymentBankCard"), "Apple Pay", "Google Pay"],
+    [t]
+  );
   const latestPlan = currentPlannerState.latestPlan;
   const followUpMessages = currentPlannerState.followUpMessages ?? [];
+  const plannerContextChips = useMemo(
+    () =>
+      [
+        currentPlannerState.budget,
+        currentPlannerState.days,
+        currentPlannerState.travelers,
+        currentPlannerState.transportPreference,
+        currentPlannerState.timing,
+        currentPlannerState.destination,
+      ].map((value) => value.trim()).filter(Boolean),
+    [
+      currentPlannerState.budget,
+      currentPlannerState.days,
+      currentPlannerState.destination,
+      currentPlannerState.timing,
+      currentPlannerState.transportPreference,
+      currentPlannerState.travelers,
+    ]
+  );
   const messagesScrollRef = useRef<ScrollView | null>(null);
   const selectedTransport =
     selectedTransportIndex !== null
@@ -211,7 +227,7 @@ export default function HomeTabScreen() {
       })
     : {
         totalEstimate: null,
-        totalLabel: "Цена при запитване",
+        totalLabel: t("home.priceOnRequest"),
       };
 
   const clearTypingAnimation = useCallback(() => {
@@ -300,11 +316,13 @@ export default function HomeTabScreen() {
 
     const showSubscription = Keyboard.addListener(showEvent, (event) => {
       isKeyboardOpenRef.current = true;
+      setIsKeyboardOpen(true);
       keyboardHeightRef.current = event?.endCoordinates?.height ?? 0;
       scrollMessagesToBottom(true);
     });
     const hideSubscription = Keyboard.addListener(hideEvent, () => {
       isKeyboardOpenRef.current = false;
+      setIsKeyboardOpen(false);
       keyboardHeightRef.current = 0;
     });
 
@@ -409,13 +427,13 @@ export default function HomeTabScreen() {
           setHomeStore(
             parseStoredHomePlannerStore(
               profileData,
-              buildInitialAssistantMessage(nextProfileName)
+              buildInitialAssistantMessage(nextProfileName, language)
             )
           );
           setLoading(false);
         },
         (nextError) => {
-          setError(getFirestoreUserMessage(nextError, "read"));
+          setError(getFirestoreUserMessage(nextError, "read", language));
           setLoading(false);
         }
       );
@@ -445,50 +463,25 @@ export default function HomeTabScreen() {
   }, [clearTypingAnimation, currentChat?.id, scrollMessagesToBottom]);
 
   const quickReplies = useMemo(() => {
-    if (currentPlannerState.step === "budget") {
-      return BUDGET_SUGGESTIONS;
-    }
-
-    if (currentPlannerState.step === "days") {
-      return DAY_SUGGESTIONS;
-    }
-
-    if (currentPlannerState.step === "travelers") {
-      return TRAVELER_SUGGESTIONS;
-    }
-
-    if (currentPlannerState.step === "transport") {
-      return TRANSPORT_SUGGESTIONS;
-    }
-
-    if (currentPlannerState.step === "timing") {
-      return TIMING_SUGGESTIONS;
-    }
-
-    if (currentPlannerState.step === "destination") {
-      return getDestinationSuggestions(
-        profile,
-        currentPlannerState.budget,
-        currentPlannerState.transportPreference
-      );
-    }
-
     return [];
-  }, [currentPlannerState, profile]);
+  }, []);
 
   const canSend = chatInput.trim().length > 0 && !planning;
 
-  const persistStore = async (nextStore: HomePlannerStore) => {
-    if (!user) {
-      return;
-    }
+  const persistStore = useCallback(
+    async (nextStore: HomePlannerStore) => {
+      if (!user) {
+        return;
+      }
 
-    try {
-      await saveHomePlannerStoreForUser(user.uid, nextStore);
-    } catch (nextError) {
-      setError(getFirestoreUserMessage(nextError, "write"));
-    }
-  };
+      try {
+        await saveHomePlannerStoreForUser(user.uid, nextStore);
+      } catch (nextError) {
+        setError(getFirestoreUserMessage(nextError, "write", language, "trip"));
+      }
+    },
+    [language, user]
+  );
 
   const resetBookingUi = () => {
     setBookingStage("form");
@@ -537,8 +530,8 @@ export default function HomeTabScreen() {
     }
 
     const nextChat = createHomePlannerChat(
-      buildInitialAssistantMessage(profileName),
-      getDefaultChatTitle(homeStore.chats.length)
+      buildInitialAssistantMessage(profileName, language),
+      getDefaultChatTitle(homeStore.chats.length, language)
     );
     const nextStore = {
       chats: sortHomePlannerChats([nextChat, ...homeStore.chats]),
@@ -559,6 +552,7 @@ export default function HomeTabScreen() {
     profileName,
     sortedChats,
     user,
+    language,
   ]);
 
   const replaceCurrentChat = async (
@@ -609,10 +603,10 @@ export default function HomeTabScreen() {
   };
 
   const handleCreateChat = async () => {
-    const initialAssistantMessage = buildInitialAssistantMessage(profileName);
+    const initialAssistantMessage = buildInitialAssistantMessage(profileName, language);
     const nextChat = createHomePlannerChat(
       initialAssistantMessage,
-      getDefaultChatTitle(homeStore.chats.length)
+      getDefaultChatTitle(homeStore.chats.length, language)
     );
     const nextStore = {
       chats: sortHomePlannerChats([nextChat, ...homeStore.chats]),
@@ -643,7 +637,7 @@ export default function HomeTabScreen() {
           }
         : (() => {
             const nextChat = createHomePlannerChat(
-              buildInitialAssistantMessage(profileName)
+              buildInitialAssistantMessage(profileName, language)
             );
 
             return {
@@ -732,11 +726,8 @@ export default function HomeTabScreen() {
     await replaceCurrentChat((chat) => ({
       ...chat,
       updatedAtMs: Date.now(),
-      state: createEmptyPlannerState(buildInitialAssistantMessage(profileName)),
-      title:
-        chat.title.startsWith("Нов чат") || chat.title === "Последен чат"
-          ? chat.title
-          : chat.title,
+      state: createEmptyPlannerState(buildInitialAssistantMessage(profileName, language)),
+      title: chat.title,
     }));
     setChatInput("");
     setError("");
@@ -773,7 +764,7 @@ export default function HomeTabScreen() {
       if (!plannerState.latestPlan) {
         const assistantMessage = createHomeChatMessage(
           "assistant",
-          "Кажи какво искаш да променим или започни нов чат, за да подготвя нов маршрут."
+          t("home.refineOrNewRoute")
         );
 
         await replaceCurrentChatWithAssistant((chat) => ({
@@ -811,6 +802,7 @@ export default function HomeTabScreen() {
             formatGroundedTravelPlan(plannerState.latestPlan.plan),
           days: plannerState.days,
           destination: plannerState.destination || plannerState.latestPlan.destination,
+          language: languageForPrompt,
           profile,
           recentMessages: [...plannerState.messages, ...(plannerState.followUpMessages ?? [])].map((message) => ({
             role: message.role,
@@ -834,7 +826,7 @@ export default function HomeTabScreen() {
         }), assistantMessage);
         scrollMessagesToBottom(true);
       } catch (nextError) {
-        const message = getHomePlannerErrorMessage(nextError);
+        const message = getHomePlannerErrorMessage(nextError, language);
         const errorMessage = createHomeChatMessage("assistant", message);
         setError(message);
 
@@ -855,197 +847,134 @@ export default function HomeTabScreen() {
       return;
     }
 
-    if (plannerState.step === "budget") {
-      const normalizedBudget = normalizeBudgetToEuro(value);
-      const assistantMessage = createHomeChatMessage(
-        "assistant",
-        buildDaysQuestion(normalizedBudget)
-      );
-
-      await replaceCurrentChatWithAssistant((chat) => ({
-        ...chat,
-        updatedAtMs: Date.now(),
-        state: {
-          ...chat.state,
-          budget: normalizedBudget,
-          days: "",
-          destination: "",
-          followUpMessages: [],
-          timing: "",
-          transportPreference: "",
-          travelers: "",
-          latestPlan: null,
-          messages: [...messagesAfterUser, assistantMessage],
-          step: "days",
-        },
-      }), assistantMessage);
-
-      return;
-    }
-
-    if (plannerState.step === "days") {
-      const normalizedDays = normalizeDaysLabel(value);
-      const assistantMessage = createHomeChatMessage(
-        "assistant",
-        buildTravelersQuestion(normalizedDays)
-      );
-
-      await replaceCurrentChatWithAssistant((chat) => ({
-        ...chat,
-        updatedAtMs: Date.now(),
-        state: {
-          ...chat.state,
-          days: normalizedDays,
-          travelers: "",
-          followUpMessages: [],
-          latestPlan: null,
-          messages: [...messagesAfterUser, assistantMessage],
-          step: "travelers",
-        },
-      }), assistantMessage);
-
-      return;
-    }
-
-    if (plannerState.step === "travelers") {
-      const normalizedTravelers = normalizeTravelersLabel(value);
-      const assistantMessage = createHomeChatMessage(
-        "assistant",
-        buildTransportQuestion(normalizedTravelers)
-      );
-
-      await replaceCurrentChatWithAssistant((chat) => ({
-        ...chat,
-        updatedAtMs: Date.now(),
-        state: {
-          ...chat.state,
-          travelers: normalizedTravelers,
-          transportPreference: "",
-          followUpMessages: [],
-          latestPlan: null,
-          messages: [...messagesAfterUser, assistantMessage],
-          step: "transport",
-        },
-      }), assistantMessage);
-
-      return;
-    }
-
-    if (plannerState.step === "transport") {
-      const assistantMessage = createHomeChatMessage(
-        "assistant",
-        buildTimingQuestion(value)
-      );
-
-      await replaceCurrentChatWithAssistant((chat) => ({
-        ...chat,
-        updatedAtMs: Date.now(),
-        state: {
-          ...chat.state,
-          transportPreference: value,
-          followUpMessages: [],
-          timing: "",
-          latestPlan: null,
-          messages: [...messagesAfterUser, assistantMessage],
-          step: "timing",
-        },
-      }), assistantMessage);
-
-      return;
-    }
-
-    if (plannerState.step === "timing") {
-      const assistantMessage = createHomeChatMessage(
-        "assistant",
-        buildDestinationQuestion(profile, value, plannerState.travelers)
-      );
-
-      await replaceCurrentChatWithAssistant((chat) => ({
-        ...chat,
-        updatedAtMs: Date.now(),
-        state: {
-          ...chat.state,
-          timing: value,
-          followUpMessages: [],
-          latestPlan: null,
-          messages: [...messagesAfterUser, assistantMessage],
-          step: "destination",
-        },
-      }), assistantMessage);
-
-      return;
-    }
-
-    if (plannerState.step === "destination") {
-      const nextDestination = value;
-      const searchingMessage = createHomeChatMessage(
-        "assistant",
-        "Подготвям конкретен маршрут с реални transport и stay варианти от интернет."
-      );
-      const messagesWhilePlanning = [...messagesAfterUser, searchingMessage];
-
+    if (plannerState.step === "chatting") {
       setPlanning(true);
 
-      await replaceCurrentChatWithAssistant((chat) => ({
+      await replaceCurrentChat((chat) => ({
         ...chat,
         updatedAtMs: Date.now(),
         state: {
           ...chat.state,
-          destination: nextDestination,
-          followUpMessages: [],
-          latestPlan: null,
-          messages: messagesWhilePlanning,
-          step: "done",
+          messages: messagesAfterUser,
+          step: "chatting",
         },
-      }), searchingMessage);
+      }));
 
       try {
-        const plan = await generateGroundedTravelPlan({
-          budget: plannerState.budget,
-          days: plannerState.days,
-          destination: nextDestination,
-          timing: plannerState.timing,
-          transportPreference: plannerState.transportPreference,
-          travelers: plannerState.travelers,
+        const conversationHistory = messagesAfterUser.map((m) => ({
+          role: m.role,
+          text: m.text,
+        }));
+
+        const response = await generateConversationalResponse({
+          conversationHistory,
+          language: languageForPrompt,
           profile,
         });
-        const readyMessage = createHomeChatMessage(
-          "assistant",
-          "Готово. По-долу е най-добрият стегнат план според всички твои критерии."
-        );
-        const formattedPlanText = formatGroundedTravelPlan(plan);
-        const nextLatestPlan = normalizeLatestPlan({
-          budget: plannerState.budget,
-          days: plannerState.days,
-          destination: nextDestination,
-          formattedPlanText,
-          timing: plannerState.timing,
-          transportPreference: plannerState.transportPreference,
-          travelers: plannerState.travelers,
-          plan,
-          sourceKey: getHomeSavedSourceKey({
-            budget: plannerState.budget,
-            days: plannerState.days,
-            destination: nextDestination,
-            formattedPlanText,
-          }),
-        });
 
-        await replaceCurrentChatWithAssistant((chat) => ({
-          ...chat,
-          title: getAutoChatTitle(chat.title, nextDestination, plan.title),
-          updatedAtMs: Date.now(),
-          state: {
-            ...chat.state,
-            destination: nextDestination,
-            followUpMessages: [],
-            latestPlan: nextLatestPlan,
-            messages: [...messagesWhilePlanning, readyMessage],
-            step: "done",
-          },
-        }), readyMessage);
+        const extracted = response.extractedInfo;
+
+        if (response.readyToGenerate && extracted.destination) {
+          const searchingMessage = createHomeChatMessage(
+            "assistant",
+            t("home.preparingRoute")
+          );
+          const messagesWhilePlanning = [...messagesAfterUser, searchingMessage];
+
+          await replaceCurrentChatWithAssistant((chat) => ({
+            ...chat,
+            updatedAtMs: Date.now(),
+            state: {
+              ...chat.state,
+              budget: extracted.budget || chat.state.budget,
+              days: extracted.days || chat.state.days,
+              destination: extracted.destination,
+              timing: extracted.timing || chat.state.timing,
+              transportPreference: extracted.transportPreference || chat.state.transportPreference,
+              travelers: extracted.travelers || chat.state.travelers,
+              followUpMessages: [],
+              latestPlan: null,
+              messages: messagesWhilePlanning,
+              step: "done",
+            },
+          }), searchingMessage);
+
+          const plan = await generateGroundedTravelPlan({
+            budget: extracted.budget || plannerDefaults.budget,
+            days: extracted.days || plannerDefaults.days,
+            destination: extracted.destination,
+            language: languageForPrompt,
+            timing: extracted.timing || plannerDefaults.timing,
+            transportPreference:
+              extracted.transportPreference || plannerDefaults.transportPreference,
+            travelers: extracted.travelers || plannerDefaults.travelers,
+            profile,
+          });
+
+          const readyMessage = createHomeChatMessage(
+            "assistant",
+            t("home.planReady")
+          );
+          const formattedPlanText = formatGroundedTravelPlan(plan);
+          const nextLatestPlan = normalizeLatestPlan({
+            budget: extracted.budget || plannerDefaults.budget,
+            days: extracted.days || plannerDefaults.days,
+            destination: extracted.destination,
+            formattedPlanText,
+            timing: extracted.timing || plannerDefaults.timing,
+            transportPreference:
+              extracted.transportPreference || plannerDefaults.transportPreference,
+            travelers: extracted.travelers || plannerDefaults.travelers,
+            plan,
+            sourceKey: getHomeSavedSourceKey({
+              budget: extracted.budget || "",
+              days: extracted.days || "",
+              destination: extracted.destination,
+              formattedPlanText,
+            }),
+          });
+
+          await replaceCurrentChatWithAssistant((chat) => ({
+            ...chat,
+            title: getAutoChatTitle(chat.title, extracted.destination, plan.title, language),
+            updatedAtMs: Date.now(),
+            state: {
+              ...chat.state,
+              destination: extracted.destination,
+              budget: extracted.budget || chat.state.budget,
+              days: extracted.days || chat.state.days,
+              timing: extracted.timing || chat.state.timing,
+              transportPreference: extracted.transportPreference || chat.state.transportPreference,
+              travelers: extracted.travelers || chat.state.travelers,
+              followUpMessages: [],
+              latestPlan: nextLatestPlan,
+              messages: [...messagesWhilePlanning, readyMessage],
+              step: "done",
+            },
+          }), readyMessage);
+        } else {
+          const assistantMessage = createHomeChatMessage("assistant", response.message);
+
+          await replaceCurrentChatWithAssistant((chat) => ({
+            ...chat,
+            updatedAtMs: Date.now(),
+            state: {
+              ...chat.state,
+              budget: extracted.budget || chat.state.budget,
+              days: extracted.days || chat.state.days,
+              destination: extracted.destination || chat.state.destination,
+              timing: extracted.timing || chat.state.timing,
+              transportPreference: extracted.transportPreference || chat.state.transportPreference,
+              travelers: extracted.travelers || chat.state.travelers,
+              messages: [...messagesAfterUser, assistantMessage],
+              step: "chatting",
+            },
+          }), assistantMessage);
+        }
+
+        scrollMessagesToBottom(true);
       } catch (nextError) {
-        const message = getHomePlannerErrorMessage(nextError);
+        const message = getHomePlannerErrorMessage(nextError, language);
         const errorMessage = createHomeChatMessage("assistant", message);
         setError(message);
 
@@ -1054,16 +983,16 @@ export default function HomeTabScreen() {
           updatedAtMs: Date.now(),
           state: {
             ...chat.state,
-            destination: nextDestination,
-            followUpMessages: [],
-            latestPlan: null,
-            messages: [...messagesWhilePlanning, errorMessage],
-            step: "done",
+            messages: [...messagesAfterUser, errorMessage],
+            step: "chatting",
           },
         }), errorMessage);
+        scrollMessagesToBottom(true);
       } finally {
         setPlanning(false);
       }
+
+      return;
     }
   };
 
@@ -1074,7 +1003,7 @@ export default function HomeTabScreen() {
 
     if (savedSourceKeys.includes(latestPlan.sourceKey)) {
       setSaveError("");
-      setSaveSuccess("Този маршрут вече е запазен в Saved.");
+      setSaveSuccess(t("home.routeAlreadySaved"));
       return;
     }
 
@@ -1094,10 +1023,10 @@ export default function HomeTabScreen() {
       );
 
       setSavedSourceKeys(nextSavedTrips.map((trip) => trip.sourceKey));
-      setSaveSuccess("Маршрутът е запазен в Saved.");
+      setSaveSuccess(t("home.routeSaved"));
     } catch (nextError) {
       setSaveSuccess("");
-      setSaveError(getFirestoreUserMessage(nextError, "write"));
+      setSaveError(getFirestoreUserMessage(nextError, "write", language, "trip"));
     } finally {
       setSavingPlan(false);
     }
@@ -1112,12 +1041,12 @@ export default function HomeTabScreen() {
     setSelectedStayIndex(latestPlan.plan.stayOptions.length > 0 ? 0 : null);
     resetBookingUi();
     setBookingSuccess("");
-    setBookingForm({
-      contactEmail: user?.email ?? "",
-      contactName: profile?.personalProfile.fullName || profileName,
-      note: "",
-      paymentMethod: PAYMENT_METHODS[0] ?? "Банкова карта",
-    });
+      setBookingForm({
+        contactEmail: user?.email ?? "",
+        contactName: profile?.personalProfile.fullName || profileName,
+        note: "",
+        paymentMethod: paymentMethods[0] ?? t("home.paymentBankCard"),
+      });
     setBookingModalVisible(true);
   };
 
@@ -1130,12 +1059,12 @@ export default function HomeTabScreen() {
     setSelectedStayIndex(null);
     resetBookingUi();
     setBookingSuccess("");
-    setBookingForm({
-      contactEmail: user?.email ?? "",
-      contactName: profile?.personalProfile.fullName || profileName,
-      note: "",
-      paymentMethod: PAYMENT_METHODS[0] ?? "Банкова карта",
-    });
+      setBookingForm({
+        contactEmail: user?.email ?? "",
+        contactName: profile?.personalProfile.fullName || profileName,
+        note: "",
+        paymentMethod: paymentMethods[0] ?? t("home.paymentBankCard"),
+      });
     setBookingModalVisible(true);
   };
 
@@ -1148,12 +1077,12 @@ export default function HomeTabScreen() {
     setSelectedStayIndex(stayIndex);
     resetBookingUi();
     setBookingSuccess("");
-    setBookingForm({
-      contactEmail: user?.email ?? "",
-      contactName: profile?.personalProfile.fullName || profileName,
-      note: "",
-      paymentMethod: PAYMENT_METHODS[0] ?? "Банкова карта",
-    });
+      setBookingForm({
+        contactEmail: user?.email ?? "",
+        contactName: profile?.personalProfile.fullName || profileName,
+        note: "",
+        paymentMethod: paymentMethods[0] ?? t("home.paymentBankCard"),
+      });
     setBookingModalVisible(true);
   };
 
@@ -1166,17 +1095,17 @@ export default function HomeTabScreen() {
     const trimmedEmail = bookingForm.contactEmail.trim();
 
     if (!trimmedName) {
-      setBookingError("Добави име за резервацията.");
+      setBookingError(t("home.bookingNameRequired"));
       return;
     }
 
     if (!trimmedEmail || !trimmedEmail.includes("@")) {
-      setBookingError("Добави валиден email за потвърждение.");
+      setBookingError(t("home.bookingEmailRequired"));
       return;
     }
 
     if (!selectedTransport && !selectedStay) {
-      setBookingError("Избери поне транспорт или настаняване.");
+      setBookingError(t("home.bookingSelectionRequired"));
       return;
     }
 
@@ -1185,7 +1114,7 @@ export default function HomeTabScreen() {
       setBookingError("");
       setBookingStage("processing");
       setBookingProgress(0.14);
-      setBookingProgressLabel("Подготвяме Stripe test checkout...");
+      setBookingProgressLabel(t("home.bookingPreparingCheckout"));
 
       await user.getIdToken(true);
       await wait(300);
@@ -1227,11 +1156,11 @@ export default function HomeTabScreen() {
       });
 
       setBookingProgress(0.36);
-      setBookingProgressLabel("Отваряме Stripe Checkout...");
+      setBookingProgressLabel(t("home.bookingOpeningCheckout"));
 
       if (Platform.OS === "web" && typeof window !== "undefined") {
         setBookingProgress(0.52);
-        setBookingProgressLabel("Пренасочваме към Stripe Checkout...");
+        setBookingProgressLabel(t("home.bookingRedirectingCheckout"));
         window.location.assign(checkoutSession.checkoutUrl);
         return;
       }
@@ -1283,60 +1212,43 @@ export default function HomeTabScreen() {
       setBookingProgressLabel("");
 
       if (message.includes("functions/not-found") || errorCode === "functions/not-found") {
-        setBookingError(
-          "Липсват Stripe checkout Firebase функциите. Deploy-ни backend-а и опитай пак."
-        );
+        setBookingError(t("home.bookingMissingFunctions"));
       } else if (message.includes("stripe-test-mode-disabled")) {
-        setBookingError(
-          "Stripe test mode е изключен. Задай EXPO_PUBLIC_TEST_PAYMENTS_MODE=functions и рестартирай app-а."
-        );
+        setBookingError(t("home.bookingModeDisabled"));
       } else if (
         message.includes("Failed to fetch") ||
         message.includes("functions/unavailable") ||
         errorCode === "functions/unavailable"
       ) {
-        setBookingError(
-          "Stripe Functions emulator не е стартиран. Пусни `npm run payments:emulator` и опитай пак."
-        );
+        setBookingError(t("home.bookingEmulatorOffline"));
       } else if (message.includes("stripe-checkout-cancelled")) {
-        setBookingError("Плащането беше прекъснато преди потвърждение.");
+        setBookingError(t("home.bookingCancelled"));
       } else if (
         message.includes("stripe-checkout-incomplete") ||
         message.includes("stripe-session-not-paid")
       ) {
-        setBookingError(
-          "Stripe Checkout не върна потвърдено test плащане. Опитай отново."
-        );
+        setBookingError(t("home.bookingNotConfirmed"));
       } else if (
         message.includes("functions/failed-precondition") ||
         errorCode === "functions/failed-precondition" ||
         message.includes("STRIPE_SECRET_KEY") ||
         errorDetails.includes("STRIPE_SECRET_KEY")
       ) {
-        setBookingError(
-          "Липсва Stripe test secret key във Firebase Functions. Добави STRIPE_SECRET_KEY и deploy-ни функциите."
-        );
+        setBookingError(t("home.bookingMissingSecret"));
       } else if (
         message.includes("functions/internal") ||
         errorCode === "functions/internal" ||
         message === "internal"
       ) {
-        setBookingError(
-          errorDetails ||
-            "Stripe backend върна internal грешка. Ако си локално, пусни `npm run payments:emulator`. Ако си на production, трябва deploy на Firebase Functions."
-        );
+        setBookingError(errorDetails || t("home.bookingInternal"));
       } else {
-        const fallbackMessage = getFirestoreUserMessage(nextError, "write");
-
-        if (fallbackMessage === "Не успяхме да запазим профила. Опитай отново.") {
-          setBookingError(
-            message
-              ? `Не успяхме да запазим резервацията. ${message}`
-              : "Не успяхме да запазим резервацията. Опитай отново."
-          );
-        } else {
-          setBookingError(fallbackMessage.replace("профила", "резервацията"));
-        }
+        const fallbackMessage = getFirestoreUserMessage(
+          nextError,
+          "write",
+          language,
+          "reservation"
+        );
+        setBookingError(message ? `${fallbackMessage} ${message}` : fallbackMessage);
       }
     } finally {
       setBookingProcessing(false);
@@ -1349,7 +1261,7 @@ export default function HomeTabScreen() {
         style={[styles.loader, { backgroundColor: colors.screen }]}
         edges={["top", "left", "right"]}
       >
-        <ActivityIndicator size="large" color="#2D6A4F" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </SafeAreaView>
     );
   }
@@ -1362,7 +1274,7 @@ export default function HomeTabScreen() {
       <KeyboardAvoidingView
         style={styles.flex1}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 8 : 0}
+        keyboardVerticalOffset={0}
       >
       <View style={styles.chatShell}>
             <View
@@ -1383,13 +1295,13 @@ export default function HomeTabScreen() {
               </TouchableOpacity>
               <View style={styles.headerCenter}>
                 <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
-                  AI Planner
+                  {t("home.aiPlanner")}
                 </Text>
                 <Text
                   numberOfLines={1}
                   style={[styles.headerSub, { color: colors.textSecondary }]}
                 >
-                  {currentChat?.title ?? "Последен чат"}
+                  {currentChat?.title ?? t("home.lastChat")}
                 </Text>
               </View>
               <TouchableOpacity
@@ -1407,58 +1319,22 @@ export default function HomeTabScreen() {
             </View>
 
             <View style={styles.chatArea}>
-              {[currentPlannerState.budget,
-                currentPlannerState.days,
-                currentPlannerState.travelers,
-                currentPlannerState.transportPreference,
-                currentPlannerState.timing,
-                currentPlannerState.destination,
-              ].filter(Boolean).length > 0 ? (
+              {plannerContextChips.length > 0 ? (
                 <View style={[styles.contextStrip, { backgroundColor: colors.cardAlt, borderColor: colors.border }]}>
-                  <Text style={[styles.contextStripTitle, { color: colors.textMuted }]}>Current plan</Text>
+                  <Text style={[styles.contextStripTitle, { color: colors.textMuted }]}>
+                    {t("home.currentPlan")}
+                  </Text>
                   <View style={styles.profileMetaRow}>
-                    {currentPlannerState.budget ? (
-                      <View style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
+                    {plannerContextChips.map((chip, index) => (
+                      <View
+                        key={`${chip}-${index}`}
+                        style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}
+                      >
                         <Text style={[styles.profileMetaChipText, { color: colors.textPrimary }]}>
-                          {currentPlannerState.budget}
+                          {chip}
                         </Text>
                       </View>
-                    ) : null}
-                    {currentPlannerState.days ? (
-                      <View style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
-                        <Text style={[styles.profileMetaChipText, { color: colors.textPrimary }]}>
-                          {currentPlannerState.days}
-                        </Text>
-                      </View>
-                    ) : null}
-                    {currentPlannerState.travelers ? (
-                      <View style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
-                        <Text style={[styles.profileMetaChipText, { color: colors.textPrimary }]}>
-                          {currentPlannerState.travelers}
-                        </Text>
-                      </View>
-                    ) : null}
-                    {currentPlannerState.transportPreference ? (
-                      <View style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
-                        <Text style={[styles.profileMetaChipText, { color: colors.textPrimary }]}>
-                          {currentPlannerState.transportPreference}
-                        </Text>
-                      </View>
-                    ) : null}
-                    {currentPlannerState.timing ? (
-                      <View style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
-                        <Text style={[styles.profileMetaChipText, { color: colors.textPrimary }]}>
-                          {currentPlannerState.timing}
-                        </Text>
-                      </View>
-                    ) : null}
-                    {currentPlannerState.destination ? (
-                      <View style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
-                        <Text style={[styles.profileMetaChipText, { color: colors.textPrimary }]}>
-                          {currentPlannerState.destination}
-                        </Text>
-                      </View>
-                    ) : null}
+                    ))}
                   </View>
                 </View>
               ) : null}
@@ -1467,8 +1343,10 @@ export default function HomeTabScreen() {
                 ref={messagesScrollRef}
                 style={styles.messagesContainer}
                 contentContainerStyle={styles.messagesContent}
+                alwaysBounceVertical
+                bounces
                 showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
+                keyboardShouldPersistTaps="always"
                 keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
                 onScroll={handleMessagesScroll}
                 scrollEventThrottle={16}
@@ -1496,7 +1374,7 @@ export default function HomeTabScreen() {
                   />
                 ))}
 
-                {!latestPlan && planning ? (
+                {!latestPlan && planning && currentPlannerState.step === "done" ? (
                   <View
                     style={[
                       styles.messageBubble,
@@ -1504,17 +1382,17 @@ export default function HomeTabScreen() {
                       { backgroundColor: colors.cardAlt },
                     ]}
                   >
-                    <Text style={[styles.messageRoleLabel, { color: colors.textMuted }]}>AI Planner</Text>
+                    <Text style={[styles.messageRoleLabel, { color: colors.textMuted }]}>{t("home.aiPlanner")}</Text>
                     <View style={styles.typingRow}>
                       <ActivityIndicator size="small" color={colors.accent} style={{ marginRight: 8 }} />
                       <Text style={[styles.assistantMessageText, { color: colors.textPrimary }]}>
-                        Търся най-добрите цени...
+                        {t("home.searchingPrices")}
                       </Text>
                     </View>
                   </View>
                 ) : null}
 
-                {error ? <Text style={styles.errorText}>{error}</Text> : null}
+                {error ? <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text> : null}
 
                 {latestPlan ? (
                   <PlanCard
@@ -1537,7 +1415,7 @@ export default function HomeTabScreen() {
 
               {showScrollToBottom ? (
                 <TouchableOpacity
-                  style={styles.scrollToBottomButton}
+                  style={[styles.scrollToBottomButton, { backgroundColor: colors.accent }]}
                   onPress={() => {
                     scrollMessagesToBottom(true);
                   }}
@@ -1549,7 +1427,7 @@ export default function HomeTabScreen() {
 
               <QuickReplies
                 replies={quickReplies}
-                title={getStepTitle(currentPlannerState.step)}
+                title={getStepTitle(currentPlannerState.step, language)}
                 colors={colors}
                 disabled={planning}
                 onSelect={(reply) => { void sendPlannerMessage(reply); }}
@@ -1561,7 +1439,7 @@ export default function HomeTabScreen() {
                 planning={planning}
                 step={currentPlannerState.step}
                 colors={colors}
-                insetBottom={insets.bottom}
+                insetBottom={isKeyboardOpen ? 0 : insets.bottom}
                 onChangeText={setChatInput}
                 onSend={() => { void sendPlannerMessage(chatInput); }}
                 onReset={() => { void resetConversation(); }}
@@ -1603,13 +1481,13 @@ export default function HomeTabScreen() {
 
       <ConfirmDialog
         visible={!!pendingDeleteChat}
-        title="Delete chat?"
+        title={t("home.deleteChat")}
         message={
           pendingDeleteChat
-            ? `This will permanently remove "${pendingDeleteChat.title}".`
+            ? t("home.deleteChatConfirm")
             : ""
         }
-        confirmLabel="Delete"
+        confirmLabel={t("common.delete")}
         destructive
         onCancel={() => setPendingDeleteChat(null)}
         onConfirm={() => {
@@ -1639,6 +1517,7 @@ export default function HomeTabScreen() {
           onClose={closeBookingModal}
           onConfirm={() => { void handleConfirmBooking(); }}
           onUpdateForm={setBookingForm}
+          paymentMethods={paymentMethods}
         />
       ) : null}
     </SafeAreaView>
@@ -1729,6 +1608,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   messagesContent: {
+    flexGrow: 1,
+    minHeight: "100%",
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
     paddingBottom: Spacing["2xl"],
@@ -1751,15 +1632,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     marginBottom: 3,
   },
-  assistantMessageText: {
-    color: "#1A1A1A",
-  },
+  assistantMessageText: {},
   typingRow: {
     flexDirection: "row",
     alignItems: "center",
   },
   errorText: {
-    color: "#DC3545",
     ...TypeScale.bodyMd,
     marginTop: Spacing.xs,
     marginBottom: Spacing.sm,
@@ -1771,7 +1649,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: Radius.full,
-    backgroundColor: "#2D6A4F",
     alignItems: "center",
     justifyContent: "center",
     ...shadow("md"),
