@@ -12,6 +12,7 @@ export const styles = StyleSheet.create({
   screen: {
     backgroundColor: "#F0F0F0",
     flex: 1,
+    minHeight: 0,
   },
   loader: {
     alignItems: "center",
@@ -455,11 +456,18 @@ export const styles = StyleSheet.create({
   messagesScroll: {
     flex: 1,
     marginTop: Spacing.sm,
+    minHeight: 0,
   },
   messagesContent: {
+    flexGrow: 1,
+    minHeight: "100%",
     paddingBottom: Spacing.xl,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
+  },
+  messagesScrollSpacer: {
+    flexGrow: 1,
+    minHeight: 1,
   },
   emptyState: {
     alignItems: "center",

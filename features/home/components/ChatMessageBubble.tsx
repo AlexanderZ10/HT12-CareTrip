@@ -1,6 +1,7 @@
 import React from "react";
 import { StyleProp, StyleSheet, Text, TextStyle, View } from "react-native";
 
+import { useAppLanguage } from "../../../components/app-language-provider";
 import { FontWeight, Spacing, TypeScale } from "../../../constants/design-system";
 
 function renderInlineMarkdownSegments(text: string, baseStyle: StyleProp<TextStyle>) {
@@ -71,6 +72,7 @@ type ChatMessageBubbleProps = {
 
 export function ChatMessageBubble({ colors, displayedText, role }: ChatMessageBubbleProps) {
   const isAssistant = role === "assistant";
+  const { t } = useAppLanguage();
 
   return (
     <View
@@ -87,7 +89,7 @@ export function ChatMessageBubble({ colors, displayedText, role }: ChatMessageBu
           { color: isAssistant ? colors.textMuted : "rgba(255,255,255,0.7)" },
         ]}
       >
-        {isAssistant ? "AI Planner" : "You"}
+        {isAssistant ? t("home.aiPlanner") : t("common.you")}
       </Text>
       <FormattedMessageText
         text={displayedText}

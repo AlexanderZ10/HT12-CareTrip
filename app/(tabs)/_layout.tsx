@@ -8,6 +8,7 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 
+import { useAppLanguage } from "../../components/app-language-provider";
 import { useAppTheme } from "../../components/app-theme-provider";
 import { Spacing } from "../../constants/design-system";
 
@@ -54,6 +55,7 @@ function TabIcon({
 
 export default function TabsLayout() {
   const { colors } = useAppTheme();
+  const { t } = useAppLanguage();
 
   return (
     <Tabs
@@ -80,8 +82,8 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="home"
         options={{
-          title: "Home",
-          tabBarAccessibilityLabel: "Home",
+          title: t("tab.home"),
+          tabBarAccessibilityLabel: t("tab.home"),
           tabBarIcon: ({ color, focused }) => (
             <TabIcon name="home" color={color} focused={focused} />
           ),
@@ -90,7 +92,8 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="discover"
         options={{
-          title: "Discover",
+          title: t("tab.discover"),
+          tabBarAccessibilityLabel: t("tab.discover"),
           tabBarIcon: ({ color, focused }) => (
             <TabIcon name="explore" color={color} focused={focused} />
           ),
@@ -99,7 +102,8 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="saved"
         options={{
-          title: "Saved",
+          title: t("tab.saved"),
+          tabBarAccessibilityLabel: t("tab.saved"),
           tabBarIcon: ({ color, focused }) => (
             <TabIcon name="favorite-outline" color={color} focused={focused} />
           ),
@@ -108,7 +112,8 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="groups"
         options={{
-          title: "Groups",
+          title: t("tab.groups"),
+          tabBarAccessibilityLabel: t("tab.groups"),
           tabBarIcon: ({ color, focused }) => (
             <TabIcon name="chat-bubble-outline" color={color} focused={focused} />
           ),
@@ -117,7 +122,8 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="profile"
         options={{
-          title: "Profile",
+          title: t("tab.profile"),
+          tabBarAccessibilityLabel: t("tab.profile"),
           tabBarIcon: ({ color, focused }) => (
             <TabIcon name="person-outline" color={color} focused={focused} />
           ),

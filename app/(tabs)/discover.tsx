@@ -24,6 +24,7 @@ import Animated, {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 
+import { useAppLanguage } from "../../components/app-language-provider";
 import { useAppTheme } from "../../components/app-theme-provider";
 import {
   FontWeight,
@@ -47,12 +48,14 @@ import {
   extractDiscoverProfile,
   generateTripsWithGemini,
   getLocalDateKey,
+  isTripGenerationError,
   getTripGenerationErrorMessage,
   parseStoredDiscoverData,
   type DiscoverProfile,
   type StoredDiscoverData,
   type TripRecommendation,
 } from "../../utils/trip-recommendations";
+import { getLanguageLocale } from "../../utils/translations";
 
 type ExpandedPreviewState =
   | {
@@ -66,12 +69,16 @@ type ExpandedPreviewState =
     }
   | null;
 
-function formatGeneratedDate(value: number | null) {
+function formatGeneratedDate(
+  value: number | null,
+  locale: string,
+  fallbackText: string
+) {
   if (!value) {
-    return "Not generated yet";
+    return fallbackText;
   }
 
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(locale, {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
@@ -165,15 +172,19 @@ function buildOpenStreetMapSource(params: {
 function ZoomableMap({
   latitude,
   longitude,
+  unavailableLabel,
 }: {
   latitude: number | null;
   longitude: number | null;
+  unavailableLabel: string;
 }) {
+  const { colors } = useAppTheme();
+
   if (latitude === null || longitude === null) {
     return (
-      <View style={styles.zoomableMapViewport}>
-        <View style={styles.mapFallback}>
-          <Text style={styles.mapFallbackText}>Map coordinates not available</Text>
+      <View style={[styles.zoomableMapViewport, { backgroundColor: colors.skeleton }]}>
+        <View style={[styles.mapFallback, { backgroundColor: colors.cardAlt }]}>
+          <Text style={[styles.mapFallbackText, { color: colors.textMuted }]}>{unavailableLabel}</Text>
         </View>
       </View>
     );
@@ -189,11 +200,11 @@ function ZoomableMap({
 
   return (
     <View style={styles.zoomableMapRoot}>
-      <View style={styles.zoomableMapViewport}>
+      <View style={[styles.zoomableMapViewport, { backgroundColor: colors.skeleton }]}>
         <WebView
           key={`map-${latitude}-${longitude}`}
           source={{ uri: mapUrl }}
-          style={styles.modalMapWebView}
+          style={[styles.modalMapWebView, { backgroundColor: colors.skeleton }]}
           originWhitelist={["*"]}
           startInLoadingState
           scrollEnabled={false}
@@ -218,6 +229,7 @@ function SaveHeartButton({
   isSaving: boolean;
   onPress: () => void;
 }) {
+  const { colors } = useAppTheme();
   const scale = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -234,7 +246,7 @@ function SaveHeartButton({
 
   return (
     <TouchableOpacity
-      style={styles.heartButton}
+      style={[styles.heartButton, { backgroundColor: colors.modalOverlay }]}
       onPress={handlePress}
       disabled={isSaved || isSaving}
       activeOpacity={0.9}
@@ -243,7 +255,7 @@ function SaveHeartButton({
         <MaterialIcons
           name={isSaved ? "favorite" : "favorite-outline"}
           size={22}
-          color={isSaved ? "#DC3545" : "#FFFFFF"}
+          color={isSaved ? colors.destructive : colors.heroText}
         />
       </Animated.View>
     </TouchableOpacity>
@@ -253,6 +265,7 @@ function SaveHeartButton({
 export default function DiscoverTabScreen() {
   const router = useRouter();
   const { colors } = useAppTheme();
+  const { language, languageForPrompt, t } = useAppLanguage();
 
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -273,6 +286,7 @@ export default function DiscoverTabScreen() {
 
   const todayKey = getLocalDateKey();
   const refreshUsedToday = discoverData?.lastRefreshDateKey === todayKey;
+  const locale = getLanguageLocale(language);
 
   const toggleDetails = (tripId: string) => {
     setExpandedDetails((prev) => {
@@ -298,7 +312,11 @@ export default function DiscoverTabScreen() {
         setGenerating(true);
         setError("");
 
-        const generatedTrips = await generateTripsWithGemini(profileData, previousTrips);
+        const generatedTrips = await generateTripsWithGemini(
+          profileData,
+          previousTrips,
+          languageForPrompt
+        );
         const enrichedTrips = await enrichDiscoverTrips(generatedTrips.trips);
         const generatedAtMs = Date.now();
 
@@ -307,6 +325,7 @@ export default function DiscoverTabScreen() {
           lastRefreshDateKey: isManualRefresh
             ? todayKey
             : currentDiscoverData?.lastRefreshDateKey ?? null,
+          language: languageForPrompt,
           sourceModel: GEMINI_MODEL,
           summary: generatedTrips.summary,
           trips: enrichedTrips.trips,
@@ -323,22 +342,23 @@ export default function DiscoverTabScreen() {
 
         setDiscoverData(nextDiscoverData);
       } catch (nextError) {
-        const aiErrorMessage = getTripGenerationErrorMessage(nextError);
-
-        if (
-          aiErrorMessage !== "Не успяхме да генерираме нови предложения. Опитай отново."
-        ) {
-          setError(aiErrorMessage);
+        if (isTripGenerationError(nextError)) {
+          setError(getTripGenerationErrorMessage(nextError, language));
           return;
         }
 
-        setError(getFirestoreUserMessage(nextError, "write"));
+        setError(getFirestoreUserMessage(nextError, "write", language));
       } finally {
         setGenerating(false);
       }
     },
-    [todayKey]
+    [language, languageForPrompt, todayKey]
   );
+
+  const generateAndStoreTripsRef = useRef(generateAndStoreTrips);
+  generateAndStoreTripsRef.current = generateAndStoreTrips;
+  const languageForPromptRef = useRef(languageForPrompt);
+  languageForPromptRef.current = languageForPrompt;
 
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
@@ -443,11 +463,24 @@ export default function DiscoverTabScreen() {
             !hasRequestedInitialTripsRef.current
           ) {
             hasRequestedInitialTripsRef.current = true;
-            void generateAndStoreTrips(
+            void generateAndStoreTripsRef.current(
               discoverProfile,
               nextUser,
               false,
               [],
+              storedDiscoverData
+            );
+          } else if (
+            storedDiscoverData?.trips.length &&
+            storedDiscoverData.language !== languageForPromptRef.current &&
+            !hasRequestedInitialTripsRef.current
+          ) {
+            hasRequestedInitialTripsRef.current = true;
+            void generateAndStoreTripsRef.current(
+              discoverProfile,
+              nextUser,
+              false,
+              storedDiscoverData.trips,
               storedDiscoverData
             );
           }
@@ -455,7 +488,7 @@ export default function DiscoverTabScreen() {
           setLoading(false);
         },
         (nextError) => {
-          setError(getFirestoreUserMessage(nextError, "read"));
+          setError(getFirestoreUserMessage(nextError, "read", language));
           setLoading(false);
         }
       );
@@ -465,7 +498,22 @@ export default function DiscoverTabScreen() {
       unsubscribeProfile?.();
       unsubscribeAuth();
     };
-  }, [generateAndStoreTrips, router]);
+  }, [router]);
+
+  // Regenerate discover trips when the UI language changes
+  useEffect(() => {
+    if (!user || !profile || generating) return;
+    if (!discoverData?.trips.length) return;
+    if (discoverData.language === languageForPrompt) return;
+
+    void generateAndStoreTripsRef.current(
+      profile,
+      user,
+      false,
+      discoverData.trips,
+      discoverData
+    );
+  }, [discoverData, generating, languageForPrompt, profile, user]);
 
   const handleRefresh = async () => {
     if (!user || !profile || generating || refreshUsedToday) {
@@ -490,7 +538,7 @@ export default function DiscoverTabScreen() {
 
     if (savedSourceKeys.includes(sourceKey)) {
       setSaveError("");
-      setSaveSuccess(`"${trip.title}" is already in Trips.`);
+      setSaveSuccess(`${trip.title} — ${t("discover.tripAlreadySaved")}`);
       return;
     }
 
@@ -505,10 +553,10 @@ export default function DiscoverTabScreen() {
       );
 
       setSavedSourceKeys(nextSavedTrips.map((savedTrip) => savedTrip.sourceKey));
-      setSaveSuccess(`"${trip.title}" was added to Trips.`);
+      setSaveSuccess(`${trip.title} — ${t("discover.tripSaved")}`);
     } catch (nextError) {
       setSaveSuccess("");
-      setSaveError(getFirestoreUserMessage(nextError, "write"));
+      setSaveError(getFirestoreUserMessage(nextError, "write", language, "trip"));
     } finally {
       setSavingTripKey(null);
     }
@@ -543,10 +591,10 @@ export default function DiscoverTabScreen() {
             <View style={styles.headerTop}>
               <View>
                 <Text style={[styles.greeting, { color: colors.textSecondary }]}>
-                  Welcome back
+                  {t("discover.welcomeBack")}
                 </Text>
                 <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
-                  Discover
+                  {t("tab.discover")}
                 </Text>
               </View>
               <TouchableOpacity
@@ -569,9 +617,13 @@ export default function DiscoverTabScreen() {
 
             <Text style={[styles.headerSubtitle, { color: colors.textMuted }]}>
               {discoverData?.generatedAtMs
-                ? `Updated ${formatGeneratedDate(discoverData.generatedAtMs)}`
-                : "AI-curated places just for you"}
-              {refreshUsedToday ? "  ·  Refresh available tomorrow" : ""}
+                ? `${t("discover.updated")} ${formatGeneratedDate(
+                    discoverData.generatedAtMs,
+                    locale,
+                    t("discover.notGeneratedYet")
+                  )}`
+                : t("discover.aiCurated")}
+              {refreshUsedToday ? `  ·  ${t("discover.refreshTomorrow")}` : ""}
             </Text>
           </Animated.View>
 
@@ -635,10 +687,10 @@ export default function DiscoverTabScreen() {
             >
               <ActivityIndicator size="large" color={colors.accent} />
               <Text style={[styles.loadingTitle, { color: colors.textPrimary }]}>
-                Finding perfect places for you
+                {t("discover.loadingTitle")}
               </Text>
               <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-                Combining your profile with real destination data...
+                {t("discover.loadingText")}
               </Text>
             </View>
           ) : null}
@@ -695,15 +747,15 @@ export default function DiscoverTabScreen() {
                     </View>
                   )}
                   <LinearGradient
-                    colors={["transparent", "rgba(0,0,0,0.7)"]}
+                    colors={["transparent", colors.overlay]}
                     style={styles.imageGradient}
                   />
                   <View style={styles.imageOverlayContent}>
-                    <Text style={styles.overlayTitle}>{trip.title}</Text>
+                    <Text style={[styles.overlayTitle, { color: colors.heroText }]}>{trip.title}</Text>
                     {trip.popularityNote ? (
                       <View style={styles.ratingRow}>
-                        <MaterialIcons name="star" size={14} color="#F59E0B" />
-                        <Text style={styles.ratingText}>{trip.popularityNote}</Text>
+                        <MaterialIcons name="star" size={14} color={colors.highlight} />
+                        <Text style={[styles.ratingText, { color: colors.heroText }]}>{trip.popularityNote}</Text>
                       </View>
                     ) : null}
                   </View>
@@ -743,7 +795,9 @@ export default function DiscoverTabScreen() {
                     activeOpacity={0.7}
                   >
                     <Text style={[styles.seeMoreText, { color: colors.textPrimary }]}>
-                      {isDetailsExpanded ? "Show less" : "See more"}
+                      {isDetailsExpanded
+                        ? t("discover.showLess")
+                        : t("discover.seeMore")}
                     </Text>
                     <MaterialIcons
                       name={isDetailsExpanded ? "keyboard-arrow-up" : "keyboard-arrow-down"}
@@ -764,7 +818,7 @@ export default function DiscoverTabScreen() {
                           <WebView
                             key={`${trip.id}-map-preview`}
                             source={{ uri: mapUrl }}
-                            style={styles.mapPreview}
+                            style={[styles.mapPreview, { backgroundColor: colors.skeleton }]}
                             pointerEvents="none"
                             originWhitelist={["*"]}
                             scrollEnabled={false}
@@ -773,15 +827,15 @@ export default function DiscoverTabScreen() {
                             domStorageEnabled
                             bounces={false}
                           />
-                          <View style={styles.mapExpandHint}>
-                            <MaterialIcons name="open-in-full" size={16} color="#FFFFFF" />
+                          <View style={[styles.mapExpandHint, { backgroundColor: colors.modalOverlay }]}>
+                            <MaterialIcons name="open-in-full" size={16} color={colors.heroText} />
                           </View>
                         </TouchableOpacity>
                       ) : null}
 
                       <View style={styles.detailsSection}>
                         <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
-                          WHAT TO DO
+                          {t("discover.whatToDo")}
                         </Text>
                         {trip.highlights.map((highlight) => (
                           <View key={`${trip.id}-a-${highlight}`} style={styles.detailRow}>
@@ -795,7 +849,7 @@ export default function DiscoverTabScreen() {
 
                       <View style={styles.detailsSection}>
                         <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
-                          MUST-SEE SPOTS
+                          {t("discover.mustSee")}
                         </Text>
                         {trip.attractions.map((attraction) => (
                           <View key={`${trip.id}-s-${attraction}`} style={styles.detailRow}>
@@ -809,7 +863,7 @@ export default function DiscoverTabScreen() {
 
                       <View style={styles.detailsSection}>
                         <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
-                          ACCESSIBILITY
+                          {t("discover.accessibility")}
                         </Text>
                         <Text style={[styles.detailText, { color: colors.textSecondary, marginLeft: 0 }]}>
                           {trip.accessibilityNotes}
@@ -854,7 +908,7 @@ export default function DiscoverTabScreen() {
                   {previewImageUrls[expandedPreview.imageIndex] ? (
                     <Image
                       source={{ uri: previewImageUrls[expandedPreview.imageIndex] }}
-                      style={styles.modalHeroImage}
+                      style={[styles.modalHeroImage, { backgroundColor: colors.skeleton }]}
                       contentFit="cover"
                       cachePolicy="memory-disk"
                       transition={200}
@@ -882,6 +936,7 @@ export default function DiscoverTabScreen() {
                             source={{ uri: imageUrl }}
                             style={[
                               styles.modalThumbnailImage,
+                              { backgroundColor: colors.skeleton },
                               imgIdx === expandedPreview.imageIndex && {
                                 borderColor: colors.accent,
                               },
@@ -897,6 +952,7 @@ export default function DiscoverTabScreen() {
                 <ZoomableMap
                   latitude={expandedPreview.trip.latitude}
                   longitude={expandedPreview.trip.longitude}
+                  unavailableLabel={t("discover.mapUnavailable")}
                 />
               )
             ) : null}
@@ -1044,7 +1100,6 @@ const styles = StyleSheet.create({
     right: 60,
   },
   overlayTitle: {
-    color: "#FFFFFF",
     fontSize: 22,
     fontWeight: FontWeight.bold,
     lineHeight: 28,
@@ -1056,7 +1111,6 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   ratingText: {
-    color: "rgba(255,255,255,0.85)",
     ...TypeScale.labelLg,
   },
 
@@ -1068,7 +1122,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: Radius.full,
-    backgroundColor: "rgba(0,0,0,0.3)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1124,7 +1177,6 @@ const styles = StyleSheet.create({
   },
   mapPreview: {
     flex: 1,
-    backgroundColor: "#E5E7EB",
   },
   mapExpandHint: {
     position: "absolute",
@@ -1133,7 +1185,6 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: Radius.sm,
-    backgroundColor: "rgba(0,0,0,0.4)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1145,7 +1196,7 @@ const styles = StyleSheet.create({
   sectionLabel: {
     ...TypeScale.labelSm,
     fontWeight: FontWeight.bold,
-    letterSpacing: 1,
+    letterSpacing: 1.2,
     marginBottom: Spacing.sm,
   },
   detailRow: {
@@ -1197,7 +1248,6 @@ const styles = StyleSheet.create({
     width: "100%",
     height: 420,
     borderRadius: Radius.lg,
-    backgroundColor: "#E5E7EB",
   },
   modalThumbnailScroll: {
     marginTop: Spacing.md,
@@ -1209,13 +1259,11 @@ const styles = StyleSheet.create({
     width: 80,
     height: 60,
     borderRadius: Radius.sm,
-    backgroundColor: "#E5E7EB",
     borderWidth: 2,
     borderColor: "transparent",
   },
   modalMapWebView: {
     flex: 1,
-    backgroundColor: "#E5E7EB",
   },
 
   // Zoomable map
@@ -1227,18 +1275,15 @@ const styles = StyleSheet.create({
     height: 420,
     borderRadius: Radius.lg,
     overflow: "hidden",
-    backgroundColor: "#E5E7EB",
   },
   mapFallback: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     padding: Spacing.lg,
-    backgroundColor: "#F3F4F6",
     borderRadius: Radius.lg,
   },
   mapFallbackText: {
-    color: "#9CA3AF",
     ...TypeScale.bodySm,
     textAlign: "center",
   },

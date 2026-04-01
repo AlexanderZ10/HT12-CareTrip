@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { useAppLanguage } from "../../../components/app-language-provider";
 import { FontWeight, Layout, Radius, Spacing, TypeScale, shadow } from "../../../constants/design-system";
 import type { HomePlannerChatThread } from "../../../utils/home-chat-storage";
 import { formatUpdatedDate } from "../../../utils/formatting";
@@ -57,6 +58,7 @@ function ChatListItem({
   chat,
   isActive,
   isRenaming,
+  renamePlaceholder,
   onDelete,
   onRename,
   onSaveRename,
@@ -69,6 +71,7 @@ function ChatListItem({
   chat: HomePlannerChatThread;
   isActive: boolean;
   isRenaming: boolean;
+  renamePlaceholder: string;
   onDelete: () => void;
   onRename: () => void;
   onSaveRename: () => void;
@@ -86,7 +89,7 @@ function ChatListItem({
             style={styles.renameInput}
             value={renameValue}
             onChangeText={setRenameValue}
-            placeholder="Chat name"
+            placeholder={renamePlaceholder}
             placeholderTextColor="#9CA3AF"
           />
           <View style={styles.renameActions}>
@@ -166,11 +169,23 @@ export function ChatDrawer({
   setRenameValue,
   setRenamingChatId,
 }: ChatDrawerProps) {
+  const { language, t } = useAppLanguage();
+  const savedChatsLabel =
+    language === "bg"
+      ? `${chats.length} запазени chat-а`
+      : language === "de"
+        ? `${chats.length} gespeicherte Chats`
+        : language === "es"
+          ? `${chats.length} chats guardados`
+          : language === "fr"
+            ? `${chats.length} chats enregistrés`
+            : `${chats.length} saved chats`;
+
   const renderChatList = (chatList: HomePlannerChatThread[]) => {
     if (chatList.length === 0) {
       return (
         <View style={styles.emptyChatSearchState}>
-          <Text style={styles.emptyChatSearchText}>No chats found.</Text>
+          <Text style={styles.emptyChatSearchText}>{t("home.noChatsFound")}</Text>
         </View>
       );
     }
@@ -181,6 +196,7 @@ export function ChatDrawer({
         chat={chat}
         isActive={currentChatId === chat.id}
         isRenaming={renamingChatId === chat.id}
+        renamePlaceholder={t("home.chatName")}
         onDelete={() => onDeleteChat(chat)}
         onRename={() => onRenameChat(chat.id, chat.title)}
         onSaveRename={onSaveRename}
@@ -225,7 +241,7 @@ export function ChatDrawer({
                 style={styles.phoneDrawerSearchInput}
                 value={chatSearch}
                 onChangeText={onChatSearchChange}
-                placeholder="Search chats"
+                placeholder={t("home.searchChats")}
                 placeholderTextColor="#9CA3AF"
               />
             </View>
@@ -253,9 +269,11 @@ export function ChatDrawer({
           >
             <View style={styles.historyMenuHeader}>
               <View>
-                <Text style={[styles.historyMenuTitle, { color: colors.textPrimary }]}>AI Chats</Text>
+                <Text style={[styles.historyMenuTitle, { color: colors.textPrimary }]}>
+                  {t("home.aiChats")}
+                </Text>
                 <Text style={[styles.historyMenuSubtitle, { color: colors.textSecondary }]}>
-                  {chats.length} запазени chat-а
+                  {savedChatsLabel}
                 </Text>
               </View>
               <TouchableOpacity
@@ -273,7 +291,7 @@ export function ChatDrawer({
               activeOpacity={0.9}
             >
               <MaterialIcons name="add" size={18} color="#FFFFFF" />
-              <Text style={styles.newChatButtonText}>Нов чат</Text>
+              <Text style={styles.newChatButtonText}>{t("home.newPlan")}</Text>
             </TouchableOpacity>
 
             <ScrollView

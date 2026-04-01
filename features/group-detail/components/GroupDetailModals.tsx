@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 
+import { useAppLanguage } from "../../../components/app-language-provider";
 import { type GroupChatSharedTrip } from "../../../utils/group-chat";
 import { type SavedTrip } from "../../../utils/saved-trips";
 import { type TravelGroup } from "../../../utils/groups";
@@ -19,7 +20,6 @@ import {
   buildSharedTripDetailsText,
   getAvatarColor,
   getInitials,
-  getSharedTripSourceLabel,
   hasMeaningfulDescription,
 } from "../helpers";
 import { styles } from "../screen-styles";
@@ -121,6 +121,8 @@ export function GroupDetailModals({
   sharingTripId,
   updatingGroupPhoto,
 }: GroupDetailModalsProps) {
+  const { t } = useAppLanguage();
+
   return (
     <>
       {/* Group details modal */}
@@ -138,7 +140,7 @@ export function GroupDetailModals({
             >
               <MaterialIcons color={colors.textPrimary} name="close" size={22} />
             </TouchableOpacity>
-            <Text style={[styles.detailsTopBarTitle, { color: colors.textPrimary }]}>Group info</Text>
+            <Text style={[styles.detailsTopBarTitle, { color: colors.textPrimary }]}>{t("groupDetail.groupInfo")}</Text>
             <View style={{ width: 40 }} />
           </View>
 
@@ -186,7 +188,7 @@ export function GroupDetailModals({
                 {group?.name}
               </Text>
               <Text style={[styles.detailsHeroMeta, { color: colors.textSecondary }]}>
-                {group?.accessType === "private" ? "Private" : "Public"} • {membersLabel}
+                {group?.accessType === "private" ? t("common.private") : t("common.public")} • {membersLabel}
               </Text>
               {isCreator && group?.photoUrl ? (
                 <TouchableOpacity
@@ -195,7 +197,7 @@ export function GroupDetailModals({
                   style={styles.groupDetailsSecondaryAction}
                 >
                   <Text style={[styles.groupDetailsSecondaryActionText, { color: colors.textMuted }]}>
-                    {updatingGroupPhoto ? "Updating..." : "Reset photo"}
+                    {updatingGroupPhoto ? t("groupDetail.updating") : t("groupDetail.resetPhoto")}
                   </Text>
                 </TouchableOpacity>
               ) : null}
@@ -203,7 +205,7 @@ export function GroupDetailModals({
 
             {group?.description && hasMeaningfulDescription(group.description) ? (
               <View style={[styles.detailsSection, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Text style={[styles.detailsSectionTitle, { color: colors.textMuted }]}>Description</Text>
+                <Text style={[styles.detailsSectionTitle, { color: colors.textMuted }]}>{t("groupDetail.description")}</Text>
                 <Text style={[styles.descriptionText, { color: colors.textPrimary }]}>
                   {group.description}
                 </Text>
@@ -213,9 +215,9 @@ export function GroupDetailModals({
             <View style={[styles.detailsSection, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={styles.membersHeaderRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.detailsSectionTitle, { color: colors.textMuted }]}>Members</Text>
+                  <Text style={[styles.detailsSectionTitle, { color: colors.textMuted }]}>{t("groupDetail.members")}</Text>
                   <Text style={[styles.membersSubtitle, { color: colors.textSecondary }]}>
-                    Everyone in the group can see who is inside.
+                    {t("groupDetail.membersHint")}
                   </Text>
                 </View>
                 <View style={[styles.membersCountBadge, { backgroundColor: colors.cardAlt, borderColor: colors.border }]}>
@@ -229,13 +231,13 @@ export function GroupDetailModals({
                     style={styles.membersSearchInput}
                     value={memberSearchQuery}
                     onChangeText={onChangeMemberSearchQuery}
-                    placeholder="Search people in the group"
+                    placeholder={t("groupDetail.searchMembers")}
                     placeholderTextColor="#809071"
                   />
                 </View>
 
                 {memberRows.length === 0 ? (
-                  <Text style={styles.membersEmptyText}>No people match this search yet.</Text>
+                  <Text style={styles.membersEmptyText}>{t("groupDetail.noMembersMatch")}</Text>
                 ) : (
                   memberRows.map((member) => (
                     <View key={member.id} style={styles.memberRow}>
@@ -254,7 +256,7 @@ export function GroupDetailModals({
                       <View style={styles.memberTextWrap}>
                         <Text style={styles.memberName}>
                           {member.label}
-                          {member.isCreator ? " • creator" : ""}
+                          {member.isCreator ? ` • ${t("groupDetail.creator")}` : ""}
                         </Text>
                         <Text style={styles.memberMeta}>
                           {member.username ? `@${member.username}` : member.id.slice(0, 8)}
@@ -274,7 +276,7 @@ export function GroupDetailModals({
                           activeOpacity={0.9}
                         >
                           <Text style={styles.memberActionButtonText}>
-                            {removingMemberId === member.id ? "Removing..." : "Remove"}
+                            {removingMemberId === member.id ? t("common.removing") : t("common.remove")}
                           </Text>
                         </TouchableOpacity>
                       ) : null}
@@ -285,40 +287,40 @@ export function GroupDetailModals({
 
             {isCreator ? (
               <View style={[styles.detailsSection, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Text style={[styles.detailsSectionTitle, { color: colors.textMuted }]}>Group settings</Text>
+                <Text style={[styles.detailsSectionTitle, { color: colors.textMuted }]}>{t("groupDetail.groupSettings")}</Text>
                 <Text style={[styles.settingsSubtitle, { color: colors.textSecondary }]}>
-                  Rename the group and manage the private code if this is a private group.
+                  {t("groupDetail.groupSettingsHint")}
                 </Text>
 
-                  <Text style={styles.settingsLabel}>Group name</Text>
+                  <Text style={styles.settingsLabel}>{t("groupDetail.groupName")}</Text>
                   <TextInput
                     style={styles.settingsInput}
                     value={groupNameInput}
                     onChangeText={onChangeGroupNameInput}
-                    placeholder="Group name"
+                    placeholder={t("groupDetail.groupName")}
                     placeholderTextColor="#809071"
                   />
 
-                  <Text style={styles.settingsLabel}>Description</Text>
+                  <Text style={styles.settingsLabel}>{t("groupDetail.description")}</Text>
                   <TextInput
                     multiline
                     numberOfLines={4}
                     style={[styles.settingsInput, styles.groupDescriptionInput]}
                     value={groupDescriptionInput}
                     onChangeText={onChangeGroupDescriptionInput}
-                    placeholder="Description"
+                    placeholder={t("groupDetail.description")}
                     placeholderTextColor="#809071"
                     textAlignVertical="top"
                   />
 
                   {group?.accessType === "private" ? (
                     <>
-                      <Text style={styles.settingsLabel}>Private code</Text>
+                      <Text style={styles.settingsLabel}>{t("groupDetail.privateCode")}</Text>
                       <TextInput
                         style={styles.settingsInput}
                         value={groupJoinKeyInput}
                         onChangeText={onChangeGroupJoinKeyInput}
-                        placeholder="Private code"
+                        placeholder={t("groupDetail.privateCode")}
                         placeholderTextColor="#809071"
                         autoCapitalize="characters"
                       />
@@ -335,7 +337,7 @@ export function GroupDetailModals({
                     activeOpacity={0.9}
                   >
                     <Text style={styles.settingsSaveButtonText}>
-                      {savingGroupSettings ? "Saving..." : "Save settings"}
+                      {savingGroupSettings ? t("common.saving") : t("groupDetail.saveSettings")}
                     </Text>
                   </TouchableOpacity>
               </View>
@@ -360,9 +362,9 @@ export function GroupDetailModals({
           <View style={styles.sheetCard}>
             <View style={styles.sheetHeader}>
               <View style={styles.sheetHeaderTextWrap}>
-                <Text style={styles.sheetTitle}>Share from Trips</Text>
+                <Text style={styles.sheetTitle}>{t("groupDetail.shareFromTrips")}</Text>
                 <Text style={styles.sheetSubtitle}>
-                  Избери Trip Plan, който искаш да пратиш в групата.
+                  {t("groupDetail.selectTripToShare")}
                 </Text>
               </View>
               <TouchableOpacity
@@ -376,16 +378,16 @@ export function GroupDetailModals({
 
             {savedTrips.length === 0 ? (
               <View style={styles.sheetEmptyState}>
-                <Text style={styles.sheetEmptyTitle}>You do not have Trips yet</Text>
+                <Text style={styles.sheetEmptyTitle}>{t("groupDetail.noTripsYet")}</Text>
                 <Text style={styles.sheetEmptyText}>
-                  Запази план от Home или Discover и после ще можеш да го share-неш в групата.
+                  {t("groupDetail.noTripsHint")}
                 </Text>
                 <TouchableOpacity
                   activeOpacity={0.9}
                   onPress={onNavigateToSaved}
                   style={styles.sheetPrimaryButton}
                 >
-                  <Text style={styles.sheetPrimaryButtonText}>Open Trips</Text>
+                  <Text style={styles.sheetPrimaryButtonText}>{t("groupDetail.openTrips")}</Text>
                 </TouchableOpacity>
               </View>
             ) : (
@@ -412,7 +414,7 @@ export function GroupDetailModals({
                               : styles.sharedTripDiscoverBadgeText,
                           ]}
                         >
-                          {getSharedTripSourceLabel(trip.source)}
+                          {trip.source === "home" ? t("common.homePlanner") : t("common.discover")}
                         </Text>
                       </View>
                       <Text style={styles.sheetTripDate}>
@@ -445,7 +447,7 @@ export function GroupDetailModals({
                       ]}
                     >
                       <Text style={styles.sheetShareButtonText}>
-                        {sharingTripId === trip.id ? "Sharing..." : "Share to group"}
+                        {sharingTripId === trip.id ? t("groupDetail.sharing") : t("groupDetail.shareToGroup")}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -501,7 +503,7 @@ export function GroupDetailModals({
                       : styles.sharedTripDiscoverBadgeText,
                   ]}
                 >
-                  {getSharedTripSourceLabel(previewTrip?.source ?? "discover")}
+                  {previewTrip?.source === "home" ? t("common.homePlanner") : t("common.discover")}
                 </Text>
               </View>
               {previewTrip?.duration ? <Text style={styles.previewMetaText}>{previewTrip.duration}</Text> : null}
@@ -512,7 +514,7 @@ export function GroupDetailModals({
 
             {previewTrip?.linkedTransports?.length ? (
               <View style={styles.previewLinkedTransportSection}>
-                <Text style={styles.previewLinkedTransportTitle}>Planner ticket links</Text>
+                <Text style={styles.previewLinkedTransportTitle}>{t("groupDetail.plannerTicketLinks")}</Text>
                 {previewTrip.linkedTransports.map((linkedTransport) => (
                   <View key={linkedTransport.itemKey} style={styles.previewLinkedTransportCard}>
                     <View style={styles.previewLinkedTransportTopRow}>
@@ -553,7 +555,7 @@ export function GroupDetailModals({
                       style={styles.previewLinkedTransportButton}
                     >
                       <MaterialIcons color="#6B7280" name="open-in-new" size={16} />
-                      <Text style={styles.previewLinkedTransportButtonText}>Open ticket link</Text>
+                      <Text style={styles.previewLinkedTransportButtonText}>{t("groupDetail.openTicketLink")}</Text>
                     </TouchableOpacity>
                   </View>
                 ))}
@@ -585,8 +587,8 @@ export function GroupDetailModals({
               >
                 <Text style={styles.previewSaveButtonText}>
                   {savingSharedTripKey === previewTrip.sourceKey
-                    ? "Saving..."
-                    : "Save to Home"}
+                    ? t("common.saving")
+                    : t("groupDetail.saveToHome")}
                 </Text>
               </TouchableOpacity>
             ) : null}
@@ -610,9 +612,9 @@ export function GroupDetailModals({
           <View style={styles.sheetCard}>
             <View style={styles.sheetHeader}>
               <View style={styles.sheetHeaderTextWrap}>
-                <Text style={styles.sheetTitle}>Add shared expense</Text>
+                <Text style={styles.sheetTitle}>{t("groupDetail.addExpense")}</Text>
                 <Text style={styles.sheetSubtitle}>
-                  This amount will be split equally across {membersLabel.toLowerCase()}.
+                  {`${t("groupDetail.expenseSplit")} — ${membersLabel.toLowerCase()}`}
                 </Text>
               </View>
               <TouchableOpacity
@@ -626,7 +628,7 @@ export function GroupDetailModals({
 
             <TextInput
               onChangeText={onChangeExpenseTitle}
-              placeholder="Expense title"
+              placeholder={t("groupDetail.expenseTitlePlaceholder")}
               placeholderTextColor="#809071"
               style={styles.sheetTextInput}
               value={expenseTitle}
@@ -634,18 +636,18 @@ export function GroupDetailModals({
             <TextInput
               keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
               onChangeText={onChangeExpenseAmount}
-              placeholder="Amount in EUR"
+              placeholder={t("groupDetail.expenseAmountPlaceholder")}
               placeholderTextColor="#809071"
               style={styles.sheetTextInput}
               value={expenseAmount}
             />
 
             <View style={styles.expensePreviewCard}>
-              <Text style={styles.expensePreviewKicker}>Preview</Text>
+              <Text style={styles.expensePreviewKicker}>{t("groupDetail.preview")}</Text>
               <Text style={styles.expensePreviewTitle}>
-                {expenseTitle.trim() || "Dinner, fuel, tickets..."}
+                {expenseTitle.trim() || t("groupDetail.expensePreviewDefault")}
               </Text>
-              <Text style={styles.expensePreviewMeta}>Paid by {profileName}</Text>
+              <Text style={styles.expensePreviewMeta}>{t("groupDetail.paidBy")} {profileName}</Text>
               <View style={styles.expensePreviewPills}>
                 <View style={styles.expensePreviewPill}>
                   <Text style={styles.expensePreviewPillText}>
@@ -654,7 +656,7 @@ export function GroupDetailModals({
                 </View>
                 <View style={styles.expensePreviewPill}>
                   <Text style={styles.expensePreviewPillText}>
-                    {group?.memberCount ?? 0} travelers
+                    {group?.memberCount ?? 0} {t("groupDetail.travelers")}
                   </Text>
                 </View>
               </View>
@@ -667,7 +669,7 @@ export function GroupDetailModals({
               style={[styles.sheetPrimaryButton, savingExpense && styles.sheetShareButtonDisabled]}
             >
               <Text style={styles.sheetPrimaryButtonText}>
-                {savingExpense ? "Adding..." : "Add expense"}
+                {savingExpense ? t("groupDetail.adding") : t("groupDetail.addExpense")}
               </Text>
             </TouchableOpacity>
           </View>

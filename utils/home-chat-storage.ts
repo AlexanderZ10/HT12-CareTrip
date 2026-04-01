@@ -9,6 +9,7 @@ import {
 
 export type HomePlannerStep =
   | "budget"
+  | "chatting"
   | "days"
   | "travelers"
   | "transport"
@@ -217,7 +218,7 @@ export function createEmptyPlannerState(initialAssistantMessage: string): Stored
     travelers: "",
     latestPlan: null,
     messages: [createHomeChatMessage("assistant", initialAssistantMessage)],
-    step: "budget",
+    step: "chatting",
   };
 }
 
@@ -239,7 +240,7 @@ export function createHomePlannerChat(
 
 export function isHomePlannerChatUntouched(chat: HomePlannerChatThread) {
   return (
-    chat.state.step === "budget" &&
+    chat.state.step === "chatting" &&
     !chat.state.budget &&
     !chat.state.days &&
     !chat.state.destination &&
@@ -308,14 +309,15 @@ export function createHomePlannerChatFromSharedTrip(
 }
 
 function parsePlannerStep(value: unknown): HomePlannerStep {
-  return value === "days" ||
+  return value === "chatting" ||
+    value === "days" ||
     value === "travelers" ||
     value === "transport" ||
     value === "timing" ||
     value === "destination" ||
     value === "done"
     ? value
-    : "budget";
+    : "chatting";
 }
 
 function parsePlannerMessages(value: unknown): HomeChatMessage[] {

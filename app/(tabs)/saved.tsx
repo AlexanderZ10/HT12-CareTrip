@@ -18,6 +18,7 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useAppLanguage } from "../../components/app-language-provider";
 import { useAppTheme } from "../../components/app-theme-provider";
 import { DismissKeyboard } from "../../components/dismiss-keyboard";
 import { ConfirmDialog } from "../../components/confirm-dialog";
@@ -35,14 +36,7 @@ import { getFirestoreUserMessage } from "../../utils/firestore-errors";
 import { getProfileDisplayName } from "../../utils/profile-info";
 import { parseSavedTrips, removeSavedTripForUser, type SavedTrip } from "../../utils/saved-trips";
 
-const FILTER_OPTIONS = [
-  { id: "all", label: "All" },
-  { id: "paid", label: "Paid" },
-  { id: "home", label: "Home Planner" },
-  { id: "discover", label: "Discover" },
-] as const;
-
-type SavedFilter = (typeof FILTER_OPTIONS)[number]["id"];
+type SavedFilter = "all" | "paid" | "home" | "discover";
 
 function formatSavedDate(value: number) {
   return new Intl.DateTimeFormat("bg-BG", {
@@ -84,6 +78,7 @@ function buildTripPreviewPoints(trip: SavedTrip) {
 export default function SavedTabScreen() {
   const router = useRouter();
   const { colors, isDark } = useAppTheme();
+  const { t } = useAppLanguage();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const isPhoneLayout = width < 768;
@@ -173,8 +168,18 @@ export default function SavedTabScreen() {
     }
   }
 
+  const filterOptions = useMemo(
+    () => [
+      { id: "all" as const, label: t("saved.all") },
+      { id: "paid" as const, label: t("common.paid") },
+      { id: "home" as const, label: t("common.homePlanner") },
+      { id: "discover" as const, label: t("common.discover") },
+    ],
+    [t]
+  );
+
   const selectedFilterLabel =
-    FILTER_OPTIONS.find((option) => option.id === activeFilter)?.label ?? "All";
+    filterOptions.find((option) => option.id === activeFilter)?.label ?? t("saved.all");
   const filteredBookingOrders = activeFilter === "all" || activeFilter === "paid"
     ? bookingOrders
     : [];
@@ -203,7 +208,7 @@ export default function SavedTabScreen() {
         style={[styles.loader, { backgroundColor: colors.screenSoft }]}
         edges={["top", "left", "right"]}
       >
-        <ActivityIndicator size="large" color="#2D6A4F" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </SafeAreaView>
     );
   }
@@ -226,38 +231,36 @@ export default function SavedTabScreen() {
         keyboardDismissMode="on-drag"
       >
         <View style={[styles.hero, { backgroundColor: colors.heroAlt }]}>
-          <Text style={[styles.kicker, { color: isDark ? "#B7E07C" : "#D6E8AE" }]}>Saved</Text>
-          <Text style={styles.title}>Запазени маршрути за {profileName}</Text>
-          <Text style={styles.subtitle}>
-            Тук събираме trip идеи от Discover и AI маршрутите от Home на едно място.
-          </Text>
+          <Text style={[styles.kicker, { color: isDark ? "#B7E07C" : "#D6E8AE" }]}>{t("saved.title")}</Text>
+          <Text style={[styles.title, { color: colors.heroText }]}>{t("saved.subtitle")} — {profileName}</Text>
+          <Text style={[styles.subtitle, { color: colors.heroText }]}>{t("saved.description")}</Text>
         </View>
 
-        <View style={styles.searchShell}>
-          <MaterialIcons color="#9CA3AF" name="search" size={22} />
+        <View style={[styles.searchShell, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
+          <MaterialIcons color={colors.textMuted} name="search" size={22} />
           <TextInput
-            style={styles.searchInput}
-            placeholder="Search Trips"
-            placeholderTextColor="#809071"
+            style={[styles.searchInput, { color: colors.inputText }]}
+            placeholder={t("saved.searchPlaceholder")}
+            placeholderTextColor={colors.inputPlaceholder}
             value={tripSearch}
             onChangeText={setTripSearch}
           />
         </View>
 
         <View style={styles.filterSection}>
-          <Text style={styles.filterLabel}>Filter</Text>
+          <Text style={[styles.filterLabel, { color: colors.textSecondary }]}>{t("saved.filter")}</Text>
           <TouchableOpacity
-            style={styles.filterButton}
+            style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border }]}
             onPress={() => setFilterOpen((current) => !current)}
             activeOpacity={0.9}
           >
-            <Text style={styles.filterButtonText}>{selectedFilterLabel}</Text>
-            <Text style={styles.filterButtonArrow}>{filterOpen ? "▲" : "▼"}</Text>
+            <Text style={[styles.filterButtonText, { color: colors.textPrimary }]}>{selectedFilterLabel}</Text>
+            <Text style={[styles.filterButtonArrow, { color: colors.textSecondary }]}>{filterOpen ? "▲" : "▼"}</Text>
           </TouchableOpacity>
 
           {filterOpen ? (
-            <View style={styles.filterMenu}>
-              {FILTER_OPTIONS.map((option) => {
+            <View style={[styles.filterMenu, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              {filterOptions.map((option) => {
                 const isActive = option.id === activeFilter;
 
                 return (
@@ -265,7 +268,7 @@ export default function SavedTabScreen() {
                     key={option.id}
                     style={[
                       styles.filterOption,
-                      isActive && styles.filterOptionActive,
+                      isActive && { backgroundColor: colors.screenSoft },
                     ]}
                     onPress={() => {
                       setActiveFilter(option.id);
@@ -276,7 +279,7 @@ export default function SavedTabScreen() {
                     <Text
                       style={[
                         styles.filterOptionText,
-                        isActive && styles.filterOptionTextActive,
+                        { color: colors.textPrimary },
                       ]}
                     >
                       {option.label}
@@ -295,16 +298,16 @@ export default function SavedTabScreen() {
             { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
           ]}
         >
-          <Text style={styles.errorTitle}>Не успяхме да заредим запазените трипове</Text>
+          <Text style={[styles.errorTitle, { color: colors.error }]}>{t("saved.loadError")}</Text>
           <Text style={[styles.errorText, { color: colors.errorText }]}>{error}</Text>
         </View>
       ) : null}
 
       {!error && filteredBookingOrders.length > 0 ? (
         <View style={styles.bookingsSection}>
-          <Text style={[styles.bookingsSectionTitle, { color: colors.textPrimary }]}>Booked in app</Text>
+          <Text style={[styles.bookingsSectionTitle, { color: colors.textPrimary }]}>{t("saved.bookedInApp")}</Text>
           <Text style={[styles.bookingsSectionSubtitle, { color: colors.textSecondary }]}>
-            Потвърдените transport и stay резервации се пазят тук.
+            {t("saved.bookingsDescription")}
           </Text>
 
           {filteredBookingOrders.map((booking) => (
@@ -319,47 +322,47 @@ export default function SavedTabScreen() {
               ]}
             >
               <View style={styles.bookingTopRow}>
-                <View style={styles.bookingPaidBadge}>
-                  <Text style={styles.bookingPaidBadgeText}>Paid</Text>
+                <View style={[styles.bookingPaidBadge, { backgroundColor: colors.accentMuted }]}>
+                  <Text style={[styles.bookingPaidBadgeText, { color: colors.accent }]}>{t("common.paid")}</Text>
                 </View>
-                <Text style={styles.dateText}>{formatSavedDate(booking.createdAtMs)}</Text>
+                <Text style={[styles.dateText, { color: colors.textMuted }]}>{formatSavedDate(booking.createdAtMs)}</Text>
               </View>
 
-              <Text style={styles.tripTitle}>{booking.title}</Text>
-              <Text style={styles.tripDestination}>{booking.destination}</Text>
+              <Text style={[styles.tripTitle, { color: colors.textPrimary }]}>{booking.title}</Text>
+              <Text style={[styles.tripDestination, { color: colors.textSecondary }]}>{booking.destination}</Text>
 
               <View style={styles.metaRow}>
-                {booking.days ? <Text style={styles.metaText}>{booking.days}</Text> : null}
-                {booking.travelers ? <Text style={styles.metaText}>{booking.travelers}</Text> : null}
-                {booking.budget ? <Text style={styles.metaText}>{booking.budget}</Text> : null}
+                {booking.days ? <Text style={[styles.metaText, { color: colors.textSecondary }]}>{booking.days}</Text> : null}
+                {booking.travelers ? <Text style={[styles.metaText, { color: colors.textSecondary }]}>{booking.travelers}</Text> : null}
+                {booking.budget ? <Text style={[styles.metaText, { color: colors.textSecondary }]}>{booking.budget}</Text> : null}
               </View>
 
-              <Text style={styles.bookingTotal}>{booking.totalLabel}</Text>
-              <Text style={styles.bookingPaymentMeta}>{booking.paymentMethod}</Text>
+              <Text style={[styles.bookingTotal, { color: colors.warningText }]}>{booking.totalLabel}</Text>
+              <Text style={[styles.bookingPaymentMeta, { color: colors.warningText }]}>{booking.paymentMethod}</Text>
 
               {booking.transport ? (
                 <View style={styles.bookingDetailBlock}>
-                  <Text style={styles.bookingDetailTitle}>Transport</Text>
-                  <Text style={styles.bookingDetailText}>
+                  <Text style={[styles.bookingDetailTitle, { color: colors.textSecondary }]}>{t("common.transport")}</Text>
+                  <Text style={[styles.bookingDetailText, { color: colors.textSecondary }]}>
                     {booking.transport.mode} • {booking.transport.provider}
                   </Text>
-                  <Text style={styles.bookingDetailText}>{booking.transport.route}</Text>
+                  <Text style={[styles.bookingDetailText, { color: colors.textSecondary }]}>{booking.transport.route}</Text>
                 </View>
               ) : null}
 
               {booking.stay ? (
                 <View style={styles.bookingDetailBlock}>
-                  <Text style={styles.bookingDetailTitle}>Stay</Text>
-                  <Text style={styles.bookingDetailText}>
+                  <Text style={[styles.bookingDetailTitle, { color: colors.textSecondary }]}>{t("common.stay")}</Text>
+                  <Text style={[styles.bookingDetailText, { color: colors.textSecondary }]}>
                     {booking.stay.name} • {booking.stay.type}
                   </Text>
-                  <Text style={styles.bookingDetailText}>
+                  <Text style={[styles.bookingDetailText, { color: colors.textSecondary }]}>
                     {booking.stay.area} • {booking.stay.pricePerNight}
                   </Text>
                 </View>
               ) : null}
 
-              <Text style={styles.bookingContactText}>
+              <Text style={[styles.bookingContactText, { color: colors.textMuted }]}>
                 {booking.contactName} • {booking.contactEmail}
               </Text>
             </View>
@@ -369,18 +372,18 @@ export default function SavedTabScreen() {
 
       {!error && filteredBookingOrders.length === 0 && filteredTrips.length === 0 ? (
         <View style={[styles.emptyCard, { backgroundColor: colors.cardAlt }]}>
-          <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>Няма елементи за този филтър</Text>
+          <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>{t("saved.emptyFilter")}</Text>
           <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-            Смени dropdown филтъра или запази нов trip / booking, за да се появи тук.
+            {t("saved.emptyFilterDescription")}
           </Text>
         </View>
       ) : null}
 
       {!error && savedTrips.length > 0 && filteredTrips.length === 0 && tripSearch.trim() ? (
         <View style={[styles.emptyCard, { backgroundColor: colors.cardAlt }]}>
-          <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>No matching trips</Text>
+          <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>{t("saved.noMatchingTrips")}</Text>
           <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-            Try another destination, budget, or keyword from the saved plan.
+            {t("saved.noMatchingDescription")}
           </Text>
         </View>
       ) : null}
@@ -403,22 +406,22 @@ export default function SavedTabScreen() {
             <View
               style={[
                 styles.sourceBadge,
-                trip.source === "home" ? styles.homeBadge : styles.discoverBadge,
+                trip.source === "home"
+                  ? { backgroundColor: colors.skeleton }
+                  : { backgroundColor: colors.warningBackground },
               ]}
             >
               <Text
                 style={[
                   styles.sourceBadgeText,
-                  trip.source === "home"
-                    ? styles.homeBadgeText
-                    : styles.discoverBadgeText,
+                  { color: trip.source === "home" ? colors.accent : colors.warningText },
                 ]}
               >
-                {trip.source === "home" ? "Home Planner" : "Discover"}
+                {trip.source === "home" ? t("common.homePlanner") : t("common.discover")}
               </Text>
             </View>
             <View style={styles.cardTopRowRight}>
-              <Text style={styles.dateText}>{formatSavedDate(trip.createdAtMs)}</Text>
+              <Text style={[styles.dateText, { color: colors.textMuted }]}>{formatSavedDate(trip.createdAtMs)}</Text>
               <TouchableOpacity
                 onPress={(e) => {
                   e.stopPropagation();
@@ -428,44 +431,44 @@ export default function SavedTabScreen() {
                 disabled={isDeleting}
               >
                 {isDeleting ? (
-                  <ActivityIndicator size="small" color="#DC3545" />
+                  <ActivityIndicator size="small" color={colors.error} />
                 ) : (
-                  <MaterialIcons name="delete-outline" size={20} color="#DC3545" />
+                  <MaterialIcons name="delete-outline" size={20} color={colors.error} />
                 )}
               </TouchableOpacity>
             </View>
           </View>
 
-          <Text style={styles.tripTitle}>{trip.title}</Text>
-          <Text style={styles.tripDestination}>{trip.destination}</Text>
+          <Text style={[styles.tripTitle, { color: colors.textPrimary }]}>{trip.title}</Text>
+          <Text style={[styles.tripDestination, { color: colors.textSecondary }]}>{trip.destination}</Text>
 
           <View style={[styles.previewGrid, isPhoneLayout && styles.previewGridPhone]}>
-            <View style={styles.previewInfoCard}>
-              <Text style={styles.previewInfoLabel}>Destination</Text>
-              <Text style={styles.previewInfoValue}>{trip.destination}</Text>
+            <View style={[styles.previewInfoCard, { backgroundColor: colors.screenSoft, borderColor: colors.border }]}>
+              <Text style={[styles.previewInfoLabel, { color: colors.textMuted }]}>{t("common.destination")}</Text>
+              <Text style={[styles.previewInfoValue, { color: colors.textPrimary }]}>{trip.destination}</Text>
             </View>
-            <View style={styles.previewInfoCard}>
-              <Text style={styles.previewInfoLabel}>Source</Text>
-              <Text style={styles.previewInfoValue}>
-                {trip.source === "home" ? "Home Planner" : "Discover"}
+            <View style={[styles.previewInfoCard, { backgroundColor: colors.screenSoft, borderColor: colors.border }]}>
+              <Text style={[styles.previewInfoLabel, { color: colors.textMuted }]}>{t("common.source")}</Text>
+              <Text style={[styles.previewInfoValue, { color: colors.textPrimary }]}>
+                {trip.source === "home" ? t("common.homePlanner") : t("common.discover")}
               </Text>
             </View>
             {trip.duration ? (
-              <View style={styles.previewInfoCard}>
-                <Text style={styles.previewInfoLabel}>Duration</Text>
-                <Text style={styles.previewInfoValue}>{trip.duration}</Text>
+              <View style={[styles.previewInfoCard, { backgroundColor: colors.screenSoft, borderColor: colors.border }]}>
+                <Text style={[styles.previewInfoLabel, { color: colors.textMuted }]}>{t("common.duration")}</Text>
+                <Text style={[styles.previewInfoValue, { color: colors.textPrimary }]}>{trip.duration}</Text>
               </View>
             ) : null}
             {trip.budget ? (
-              <View style={styles.previewInfoCard}>
-                <Text style={styles.previewInfoLabel}>Budget</Text>
-                <Text style={styles.previewInfoValue}>{trip.budget}</Text>
+              <View style={[styles.previewInfoCard, { backgroundColor: colors.screenSoft, borderColor: colors.border }]}>
+                <Text style={[styles.previewInfoLabel, { color: colors.textMuted }]}>{t("common.budget")}</Text>
+                <Text style={[styles.previewInfoValue, { color: colors.textPrimary }]}>{trip.budget}</Text>
               </View>
             ) : null}
           </View>
 
           {trip.summary ? (
-            <Text style={styles.summaryText} numberOfLines={isPhoneLayout ? 4 : 3}>
+            <Text style={[styles.summaryText, { color: colors.textSecondary }]} numberOfLines={isPhoneLayout ? 4 : 3}>
               {trip.summary}
             </Text>
           ) : null}
@@ -473,14 +476,14 @@ export default function SavedTabScreen() {
           {previewPoints.length > 0 ? (
             <View style={styles.previewPointsWrap}>
               {previewPoints.map((point) => (
-                <Text key={`${trip.id}-${point}`} style={styles.previewPointText}>
+                <Text key={`${trip.id}-${point}`} style={[styles.previewPointText, { color: colors.textSecondary }]}>
                   • {point}
                 </Text>
               ))}
             </View>
           ) : null}
 
-          <Text style={styles.detailsText} numberOfLines={isPhoneLayout ? 6 : 5}>
+          <Text style={[styles.detailsText, { color: colors.textSecondary }]} numberOfLines={isPhoneLayout ? 6 : 5}>
             {trip.details}
           </Text>
           </TouchableOpacity>
@@ -496,53 +499,53 @@ export default function SavedTabScreen() {
         animationType="fade"
         onRequestClose={() => setSelectedTrip(null)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+        <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.modalHeader}>
               <View style={styles.modalHeaderTextWrap}>
-                <Text style={styles.modalTitle}>{selectedTrip?.title}</Text>
-                <Text style={styles.modalDestination}>{selectedTrip?.destination}</Text>
+                <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{selectedTrip?.title}</Text>
+                <Text style={[styles.modalDestination, { color: colors.textSecondary }]}>{selectedTrip?.destination}</Text>
               </View>
               <TouchableOpacity
-                style={styles.modalCloseButton}
+                style={[styles.modalCloseButton, { backgroundColor: colors.screenSoft }]}
                 onPress={() => setSelectedTrip(null)}
                 activeOpacity={0.9}
               >
-                <MaterialIcons name="close" size={20} color="#1A1A1A" />
+                <MaterialIcons name="close" size={20} color={colors.textPrimary} />
               </TouchableOpacity>
             </View>
 
             {selectedTrip ? (
               <>
                 <View style={[styles.previewGrid, isPhoneLayout && styles.previewGridPhone]}>
-                  <View style={styles.previewInfoCard}>
-                    <Text style={styles.previewInfoLabel}>Source</Text>
-                    <Text style={styles.previewInfoValue}>
-                      {selectedTrip.source === "home" ? "Home Planner" : "Discover"}
+                  <View style={[styles.previewInfoCard, { backgroundColor: colors.screenSoft, borderColor: colors.border }]}>
+                    <Text style={[styles.previewInfoLabel, { color: colors.textMuted }]}>{t("common.source")}</Text>
+                    <Text style={[styles.previewInfoValue, { color: colors.textPrimary }]}>
+                      {selectedTrip.source === "home" ? t("common.homePlanner") : t("common.discover")}
                     </Text>
                   </View>
-                  <View style={styles.previewInfoCard}>
-                    <Text style={styles.previewInfoLabel}>Saved on</Text>
-                    <Text style={styles.previewInfoValue}>
+                  <View style={[styles.previewInfoCard, { backgroundColor: colors.screenSoft, borderColor: colors.border }]}>
+                    <Text style={[styles.previewInfoLabel, { color: colors.textMuted }]}>{t("saved.savedOn")}</Text>
+                    <Text style={[styles.previewInfoValue, { color: colors.textPrimary }]}>
                       {formatSavedDate(selectedTrip.createdAtMs)}
                     </Text>
                   </View>
                   {selectedTrip.duration ? (
-                    <View style={styles.previewInfoCard}>
-                      <Text style={styles.previewInfoLabel}>Duration</Text>
-                      <Text style={styles.previewInfoValue}>{selectedTrip.duration}</Text>
+                    <View style={[styles.previewInfoCard, { backgroundColor: colors.screenSoft, borderColor: colors.border }]}>
+                      <Text style={[styles.previewInfoLabel, { color: colors.textMuted }]}>{t("common.duration")}</Text>
+                      <Text style={[styles.previewInfoValue, { color: colors.textPrimary }]}>{selectedTrip.duration}</Text>
                     </View>
                   ) : null}
                   {selectedTrip.budget ? (
-                    <View style={styles.previewInfoCard}>
-                      <Text style={styles.previewInfoLabel}>Budget</Text>
-                      <Text style={styles.previewInfoValue}>{selectedTrip.budget}</Text>
+                    <View style={[styles.previewInfoCard, { backgroundColor: colors.screenSoft, borderColor: colors.border }]}>
+                      <Text style={[styles.previewInfoLabel, { color: colors.textMuted }]}>{t("common.budget")}</Text>
+                      <Text style={[styles.previewInfoValue, { color: colors.textPrimary }]}>{selectedTrip.budget}</Text>
                     </View>
                   ) : null}
                 </View>
 
                 {selectedTrip.summary ? (
-                  <Text style={styles.modalSummary}>{selectedTrip.summary}</Text>
+                  <Text style={[styles.modalSummary, { color: colors.textSecondary }]}>{selectedTrip.summary}</Text>
                 ) : null}
 
                 <ScrollView
@@ -551,7 +554,7 @@ export default function SavedTabScreen() {
                   showsVerticalScrollIndicator={false}
                 >
                   {getSavedTripDetailLines(selectedTrip).map((line) => (
-                    <Text key={`${selectedTrip.id}-${line}`} style={styles.modalDetailLine}>
+                    <Text key={`${selectedTrip.id}-${line}`} style={[styles.modalDetailLine, { color: colors.textSecondary }]}>
                       • {line}
                     </Text>
                   ))}
@@ -564,9 +567,9 @@ export default function SavedTabScreen() {
 
       <ConfirmDialog
         visible={!!pendingDeleteTrip}
-        title="Изтриване на трип"
-        message={`Сигурен ли си, че искаш да премахнеш "${pendingDeleteTrip?.title ?? ""}"?`}
-        confirmLabel="Изтрий"
+        title={t("saved.deleteTrip")}
+        message={t("saved.deleteTripConfirm")}
+        confirmLabel={t("common.delete")}
         onConfirm={() => {
           if (pendingDeleteTrip) handleDeleteTrip(pendingDeleteTrip);
         }}
@@ -579,7 +582,6 @@ export default function SavedTabScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#F0F0F0",
   },
   content: {
     padding: Spacing.xl,
@@ -587,20 +589,16 @@ const styles = StyleSheet.create({
   },
   loader: {
     flex: 1,
-    backgroundColor: "#F0F0F0",
     alignItems: "center",
     justifyContent: "center",
   },
   hero: {
-    backgroundColor: "#2D2D2D",
     borderRadius: Radius["3xl"],
     padding: Spacing["2xl"],
     marginBottom: Spacing.lg,
   },
   searchShell: {
     alignItems: "center",
-    backgroundColor: "#F5F5F5",
-    borderColor: "#E0E0E0",
     borderRadius: Radius.lg,
     borderWidth: 1,
     flexDirection: "row",
@@ -609,13 +607,11 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
   },
   searchInput: {
-    color: "#1A1A1A",
     flex: 1,
     ...TypeScale.titleSm,
     marginLeft: Spacing.sm,
   },
   kicker: {
-    color: "#D6E8AE",
     ...TypeScale.bodySm,
     fontWeight: FontWeight.bold,
     textTransform: "uppercase",
@@ -623,46 +619,37 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   title: {
-    color: "#FFFFFF",
     ...TypeScale.displayMd,
     marginBottom: Spacing.sm,
   },
   subtitle: {
-    color: "#F0F0F0",
     ...TypeScale.titleSm,
   },
   errorCard: {
-    backgroundColor: "#FFF1EF",
     borderRadius: Radius.xl,
     padding: Spacing.lg,
     borderWidth: 1,
-    borderColor: "#F0B6AE",
     marginBottom: Spacing.lg,
   },
   errorTitle: {
-    color: "#DC3545",
     ...TypeScale.titleLg,
     fontWeight: FontWeight.extrabold,
     marginBottom: Spacing.xs,
   },
   errorText: {
-    color: "#991B1B",
     ...TypeScale.bodyMd,
   },
   emptyCard: {
-    backgroundColor: "#F8F8F8",
     borderRadius: Radius["2xl"],
     padding: Spacing["2xl"],
     alignItems: "center",
   },
   emptyTitle: {
-    color: "#1A1A1A",
     ...TypeScale.headingMd,
     marginBottom: Spacing.sm,
     textAlign: "center",
   },
   emptyText: {
-    color: "#6B7280",
     ...TypeScale.titleSm,
     textAlign: "center",
   },
@@ -670,39 +657,32 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   filterLabel: {
-    color: "#6B7280",
     ...TypeScale.bodySm,
     fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
     marginBottom: Spacing.sm,
   },
   filterButton: {
-    backgroundColor: "#FFFFFF",
     borderRadius: Radius.lg,
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
     borderWidth: 1,
-    borderColor: "#E8E8E8",
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
   filterButtonText: {
-    color: "#1A1A1A",
     ...TypeScale.titleSm,
     fontWeight: FontWeight.bold,
   },
   filterButtonArrow: {
-    color: "#6B7280",
     ...TypeScale.labelLg,
     fontWeight: FontWeight.extrabold,
   },
   filterMenu: {
     marginTop: Spacing.sm,
-    backgroundColor: "#FFFFFF",
     borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: "#E8E8E8",
     padding: Spacing.sm,
   },
   filterOption: {
@@ -710,37 +690,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,
   },
-  filterOptionActive: {
-    backgroundColor: "#F0F0F0",
-  },
   filterOptionText: {
-    color: "#1A1A1A",
     ...TypeScale.bodyMd,
     fontWeight: FontWeight.bold,
-  },
-  filterOptionTextActive: {
-    color: "#1A1A1A",
   },
   bookingsSection: {
     marginBottom: Spacing.lg,
   },
   bookingsSectionTitle: {
-    color: "#1A1A1A",
     ...TypeScale.headingMd,
     marginBottom: Spacing.xs,
   },
   bookingsSectionSubtitle: {
-    color: "#6B7280",
     ...TypeScale.bodyMd,
     marginBottom: Spacing.md,
   },
   bookingCard: {
-    backgroundColor: "#FFFBEB",
     borderRadius: Radius["2xl"],
     padding: Spacing.xl,
     marginBottom: Spacing.md,
     borderWidth: 1,
-    borderColor: "#FCD34D",
   },
   bookingTopRow: {
     flexDirection: "row",
@@ -749,24 +718,20 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   bookingPaidBadge: {
-    backgroundColor: "#DFF1D0",
     borderRadius: Radius.full,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
   },
   bookingPaidBadgeText: {
-    color: "#1D6C4D",
     ...TypeScale.labelLg,
     fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
   },
   bookingTotal: {
-    color: "#4E3A19",
     ...TypeScale.headingMd,
     marginBottom: Spacing.xs,
   },
   bookingPaymentMeta: {
-    color: "#92400E",
     ...TypeScale.bodySm,
     fontWeight: FontWeight.bold,
     marginBottom: Spacing.sm,
@@ -775,23 +740,19 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   bookingDetailTitle: {
-    color: "#6B7280",
     ...TypeScale.labelLg,
     fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
     marginBottom: Spacing.xs,
   },
   bookingDetailText: {
-    color: "#6B7280",
     ...TypeScale.bodyMd,
   },
   bookingContactText: {
-    color: "#9CA3AF",
     ...TypeScale.bodySm,
     marginTop: Spacing.xs,
   },
   tripCard: {
-    backgroundColor: "#F8F8F8",
     borderRadius: Radius["2xl"],
     padding: Spacing.xl,
     marginBottom: Spacing.lg,
@@ -814,35 +775,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
   },
-  discoverBadge: {
-    backgroundColor: "#FFF7ED",
-  },
-  homeBadge: {
-    backgroundColor: "#E5E7EB",
-  },
   sourceBadgeText: {
     ...TypeScale.labelLg,
     fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
-  discoverBadgeText: {
-    color: "#92400E",
-  },
-  homeBadgeText: {
-    color: "#2D6A4F",
-  },
   dateText: {
-    color: "#6B7A5D",
     ...TypeScale.labelMd,
   },
   tripTitle: {
-    color: "#1A1A1A",
     ...TypeScale.headingMd,
     marginBottom: Spacing.xs,
   },
   tripDestination: {
-    color: "#6B7280",
     ...TypeScale.titleSm,
     fontWeight: FontWeight.bold,
     marginBottom: Spacing.sm,
@@ -857,8 +803,6 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   previewInfoCard: {
-    backgroundColor: "#F0F0F0",
-    borderColor: "#D1D5DB",
     borderRadius: Radius.lg,
     borderWidth: 1,
     minWidth: 132,
@@ -866,7 +810,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
   },
   previewInfoLabel: {
-    color: "#9CA3AF",
     ...TypeScale.labelSm,
     fontWeight: FontWeight.bold,
     letterSpacing: 0.4,
@@ -874,7 +817,6 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   previewInfoValue: {
-    color: "#1A1A1A",
     ...TypeScale.bodyMd,
     fontWeight: FontWeight.extrabold,
   },
@@ -884,14 +826,12 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   metaText: {
-    color: "#6B7280",
     ...TypeScale.bodySm,
     fontWeight: FontWeight.bold,
     marginRight: Spacing.md,
     marginBottom: Spacing.xs,
   },
   summaryText: {
-    color: "#3C4B30",
     ...TypeScale.titleSm,
     marginBottom: Spacing.sm,
   },
@@ -899,17 +839,14 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   previewPointText: {
-    color: "#6B7280",
     ...TypeScale.bodyMd,
     marginBottom: Spacing.xs,
   },
   detailsText: {
-    color: "#6B7280",
     ...TypeScale.bodyMd,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(16, 26, 8, 0.48)",
     alignItems: "center",
     justifyContent: "center",
     padding: Spacing.xl,
@@ -918,8 +855,6 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: Layout.modalMaxWidth + 380,
     maxHeight: "84%",
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E8E8E8",
     borderRadius: Radius["3xl"],
     borderWidth: 1,
     padding: Spacing.xl,
@@ -935,11 +870,9 @@ const styles = StyleSheet.create({
     paddingRight: Spacing.md,
   },
   modalTitle: {
-    color: "#1A1A1A",
     ...TypeScale.displayMd,
   },
   modalDestination: {
-    color: "#5D6F4D",
     ...TypeScale.titleLg,
     fontWeight: FontWeight.bold,
     marginTop: Spacing.xs,
@@ -948,12 +881,10 @@ const styles = StyleSheet.create({
     width: Layout.touchTarget,
     height: Layout.touchTarget,
     borderRadius: Radius.md,
-    backgroundColor: "#F0F0F0",
     alignItems: "center",
     justifyContent: "center",
   },
   modalSummary: {
-    color: "#3C4B30",
     ...TypeScale.bodyLg,
     marginBottom: Spacing.md,
   },
@@ -964,7 +895,6 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.xs,
   },
   modalDetailLine: {
-    color: "#6B7280",
     ...TypeScale.titleSm,
     marginBottom: Spacing.sm,
   },

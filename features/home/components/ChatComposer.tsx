@@ -2,6 +2,7 @@ import { MaterialIcons } from "@expo/vector-icons";
 import React from "react";
 import { Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
+import { useAppLanguage } from "../../../components/app-language-provider";
 import { FontWeight, Radius, Spacing, TypeScale } from "../../../constants/design-system";
 import type { HomePlannerStep } from "../../../utils/home-chat-storage";
 
@@ -29,7 +30,52 @@ type ChatComposerProps = {
   step: HomePlannerStep;
 };
 
-function getPlaceholder(step: HomePlannerStep) {
+function getPlaceholder(step: HomePlannerStep, language: "bg" | "en" | "de" | "es" | "fr") {
+  if (language === "en") {
+    if (step === "chatting") return "Write your answer...";
+    if (step === "budget") return "Write your budget in EUR...";
+    if (step === "days") return "Write the number of days...";
+    if (step === "travelers") return "Write how many people are traveling...";
+    if (step === "transport") return "Write your preferred transport...";
+    if (step === "timing") return "Write when you want to travel...";
+    if (step === "destination") return "Write the destination...";
+    return "Write a message...";
+  }
+
+  if (language === "de") {
+    if (step === "chatting") return "Schreibe deine Antwort...";
+    if (step === "budget") return "Schreibe dein Budget in EUR...";
+    if (step === "days") return "Schreibe die Anzahl der Tage...";
+    if (step === "travelers") return "Schreibe, wie viele Personen reisen...";
+    if (step === "transport") return "Schreibe dein bevorzugtes Verkehrsmittel...";
+    if (step === "timing") return "Schreibe, wann ihr reisen wollt...";
+    if (step === "destination") return "Schreibe das Reiseziel...";
+    return "Nachricht schreiben...";
+  }
+
+  if (language === "es") {
+    if (step === "chatting") return "Escribe tu respuesta...";
+    if (step === "budget") return "Escribe tu presupuesto en EUR...";
+    if (step === "days") return "Escribe el número de días...";
+    if (step === "travelers") return "Escribe cuántas personas viajarán...";
+    if (step === "transport") return "Escribe tu transporte preferido...";
+    if (step === "timing") return "Escribe cuándo quieres viajar...";
+    if (step === "destination") return "Escribe el destino...";
+    return "Escribe un mensaje...";
+  }
+
+  if (language === "fr") {
+    if (step === "chatting") return "Écris ta réponse...";
+    if (step === "budget") return "Écris ton budget en EUR...";
+    if (step === "days") return "Écris le nombre de jours...";
+    if (step === "travelers") return "Écris combien de personnes voyageront...";
+    if (step === "transport") return "Écris ton transport préféré...";
+    if (step === "timing") return "Écris quand vous voulez voyager...";
+    if (step === "destination") return "Écris la destination...";
+    return "Écris un message...";
+  }
+
+  if (step === "chatting") return "Напиши отговор...";
   if (step === "budget") return "Напиши бюджета в евро...";
   if (step === "days") return "Напиши броя дни...";
   if (step === "travelers") return "Напиши колко човека ще пътуват...";
@@ -50,6 +96,8 @@ export function ChatComposer({
   planning,
   step,
 }: ChatComposerProps) {
+  const { language, t } = useAppLanguage();
+
   return (
     <View
       style={[
@@ -66,7 +114,7 @@ export function ChatComposer({
       >
         <TextInput
           style={[styles.input, { color: colors.textPrimary }]}
-          placeholder={getPlaceholder(step)}
+          placeholder={getPlaceholder(step, language)}
           placeholderTextColor={colors.inputPlaceholder}
           value={chatInput}
           onChangeText={onChangeText}
@@ -96,7 +144,9 @@ export function ChatComposer({
         activeOpacity={0.7}
       >
         <MaterialIcons name="refresh" size={14} color={colors.textMuted} />
-        <Text style={[styles.resetButtonText, { color: colors.textMuted }]}>Нов план</Text>
+        <Text style={[styles.resetButtonText, { color: colors.textMuted }]}>
+          {t("home.newPlan")}
+        </Text>
       </TouchableOpacity>
     </View>
   );
