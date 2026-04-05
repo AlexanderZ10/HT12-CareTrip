@@ -3,6 +3,7 @@ import Constants from "expo-constants";
 import { Platform } from "react-native";
 
 import { functions } from "../firebase";
+import { callAI, getAIApiKey } from "./ai";
 import { GEMINI_MODEL, type DiscoverProfile } from "./trip-recommendations";
 
 export type LiveTravelOffer = {
@@ -320,66 +321,6 @@ function parseCheckoutVerificationResponse(data: Record<string, unknown>) {
   } satisfies TestCheckoutVerificationResponse;
 }
 
-function getResponseText(responsePayload: any) {
-  const parts = responsePayload?.candidates?.[0]?.content?.parts;
-
-  if (!Array.isArray(parts)) {
-    return "";
-  }
-
-  return parts
-    .map((part) => (typeof part?.text === "string" ? part.text : ""))
-    .join("")
-    .trim();
-}
-
-async function callGeminiGenerateContent(params: {
-  apiKey: string;
-  generationConfig?: Record<string, unknown>;
-  prompt: string;
-  tools?: Record<string, unknown>[];
-}) {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": params.apiKey,
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: params.prompt,
-              },
-            ],
-          },
-        ],
-        ...(params.generationConfig
-          ? { generationConfig: params.generationConfig }
-          : {}),
-        ...(params.tools ? { tools: params.tools } : {}),
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`gemini-offers-request-failed:${response.status}:${errorText}`);
-  }
-
-  const responsePayload = await response.json();
-  const text = getResponseText(responsePayload);
-
-  if (!text) {
-    throw new Error("empty-gemini-offers-response");
-  }
-
-  return text;
-}
-
 const GEMINI_FALLBACK_SCHEMA = {
   type: "object",
   properties: {
@@ -607,29 +548,21 @@ async function searchTravelOffersFallback(
   input: SearchTravelOffersInput,
   searchWindow: ReturnType<typeof resolveSearchWindow>
 ) {
-  const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+  const apiKey = getAIApiKey();
 
   if (!apiKey) {
-    throw new Error("missing-gemini-fallback-key");
+    throw new Error("missing-ai-fallback-key");
   }
 
-  const groundedNotes = await callGeminiGenerateContent({
+  const groundedNotes = await callAI({
     apiKey,
     prompt: buildFallbackGroundingPrompt(input, searchWindow),
-    tools: [
-      {
-        google_search: {},
-      },
-    ],
   });
 
-  const rawJson = await callGeminiGenerateContent({
+  const rawJson = await callAI({
     apiKey,
     prompt: buildFallbackStructuringPrompt(groundedNotes),
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseJsonSchema: GEMINI_FALLBACK_SCHEMA,
-    },
+    jsonMode: true,
   });
 
   const payload = JSON.parse(rawJson) as GeminiFallbackOfferPayload;

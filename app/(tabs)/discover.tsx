@@ -357,6 +357,8 @@ export default function DiscoverTabScreen() {
 
   const generateAndStoreTripsRef = useRef(generateAndStoreTrips);
   generateAndStoreTripsRef.current = generateAndStoreTrips;
+  const languageRef = useRef(language);
+  languageRef.current = language;
   const languageForPromptRef = useRef(languageForPrompt);
   languageForPromptRef.current = languageForPrompt;
 
@@ -488,7 +490,7 @@ export default function DiscoverTabScreen() {
           setLoading(false);
         },
         (nextError) => {
-          setError(getFirestoreUserMessage(nextError, "read", language));
+          setError(getFirestoreUserMessage(nextError, "read", languageRef.current));
           setLoading(false);
         }
       );

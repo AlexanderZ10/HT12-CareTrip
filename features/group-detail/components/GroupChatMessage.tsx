@@ -26,6 +26,7 @@ import {
   type GroupChatSharedTrip,
 } from "../../../utils/group-chat";
 import { type GroupExpenseRepayment } from "../../../utils/group-expense-repayments";
+import { getLanguageLocale } from "../../../utils/translations";
 import { formatMessageTime, getAvatarColor, getInitials } from "../helpers";
 import { ExpenseCard } from "./ExpenseCard";
 import { SharedTripCard } from "./SharedTripCard";
@@ -86,7 +87,7 @@ export function GroupChatMessageRow({
   settledShareCount,
   userId,
 }: GroupChatMessageProps) {
-  const { t } = useAppLanguage();
+  const { language, t } = useAppLanguage();
   const { colors } = useAppTheme();
   const [menuVisible, setMenuVisible] = useState(false);
   const [menuPosition, setMenuPosition] = useState<MenuPosition | null>(null);
@@ -186,7 +187,7 @@ export function GroupChatMessageRow({
             </Text>
           )}
           <Text style={[styles.messageTime, { color: isMine ? colors.textMuted : colors.textMuted }]}>
-            {formatMessageTime(message.createdAtMs)}
+            {formatMessageTime(message.createdAtMs, getLanguageLocale(language))}
           </Text>
         </View>
       </Pressable>

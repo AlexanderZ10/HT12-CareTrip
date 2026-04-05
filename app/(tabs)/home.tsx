@@ -25,6 +25,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 
 import { useAppLanguage } from "../../components/app-language-provider";
 import { useAppTheme } from "../../components/app-theme-provider";
+import { DismissKeyboard } from "../../components/dismiss-keyboard";
 import {
   FontWeight,
   Radius,
@@ -147,6 +148,8 @@ export default function HomeTabScreen() {
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
   const isKeyboardOpenRef = useRef(false);
   const keyboardHeightRef = useRef(0);
+  const languageRef = useRef(language);
+  languageRef.current = language;
 
   const sortedChats = useMemo(
     () => sortHomePlannerChats(homeStore.chats),
@@ -210,6 +213,7 @@ export default function HomeTabScreen() {
     ]
   );
   const messagesScrollRef = useRef<ScrollView | null>(null);
+  const scrollViewLayoutHeight = useRef(0);
   const selectedTransport =
     selectedTransportIndex !== null
       ? latestPlan?.plan.transportOptions[selectedTransportIndex] ?? null
@@ -427,13 +431,13 @@ export default function HomeTabScreen() {
           setHomeStore(
             parseStoredHomePlannerStore(
               profileData,
-              buildInitialAssistantMessage(nextProfileName, language)
+              buildInitialAssistantMessage(nextProfileName, languageRef.current)
             )
           );
           setLoading(false);
         },
         (nextError) => {
-          setError(getFirestoreUserMessage(nextError, "read", language));
+          setError(getFirestoreUserMessage(nextError, "read", languageRef.current));
           setLoading(false);
         }
       );
@@ -1271,12 +1275,13 @@ export default function HomeTabScreen() {
       style={[styles.screen, { backgroundColor: colors.screen }]}
       edges={["top", "left", "right"]}
     >
-      <KeyboardAvoidingView
-        style={styles.flex1}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={0}
-      >
-      <View style={styles.chatShell}>
+      <DismissKeyboard>
+        <KeyboardAvoidingView
+          style={styles.flex1}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={0}
+        >
+        <View style={styles.chatShell}>
             <View
               style={[
                 styles.header,
@@ -1350,8 +1355,11 @@ export default function HomeTabScreen() {
                 keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
                 onScroll={handleMessagesScroll}
                 scrollEventThrottle={16}
-                onContentSizeChange={() => {
-                  if (isKeyboardOpenRef.current || !showScrollToBottom) {
+                onLayout={(e) => {
+                  scrollViewLayoutHeight.current = e.nativeEvent.layout.height;
+                }}
+                onContentSizeChange={(_, contentHeight) => {
+                  if (contentHeight > scrollViewLayoutHeight.current && (isKeyboardOpenRef.current || !showScrollToBottom)) {
                     scrollMessagesToBottom(false);
                   }
                 }}
@@ -1439,14 +1447,15 @@ export default function HomeTabScreen() {
                 planning={planning}
                 step={currentPlannerState.step}
                 colors={colors}
-                insetBottom={isKeyboardOpen ? 0 : insets.bottom}
+                insetBottom={isKeyboardOpen ? Spacing.md : insets.bottom}
                 onChangeText={setChatInput}
                 onSend={() => { void sendPlannerMessage(chatInput); }}
                 onReset={() => { void resetConversation(); }}
               />
             </View>
           </View>
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </DismissKeyboard>
 
       <ChatDrawer
         chatMenuVisible={chatMenuVisible}
@@ -1608,8 +1617,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   messagesContent: {
-    flexGrow: 1,
-    minHeight: "100%",
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
     paddingBottom: Spacing["2xl"],

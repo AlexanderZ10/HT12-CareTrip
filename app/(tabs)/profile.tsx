@@ -55,6 +55,8 @@ import {
   translateOnboardingOption,
   type AppLanguage,
 } from "../../utils/translations";
+import { getCitiesForCountry } from "../../utils/cities";
+import { getCountriesSorted, getCountryName, type Country } from "../../utils/countries";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
 import {
   extractPersonalProfile,
@@ -132,6 +134,11 @@ export default function ProfileTabScreen() {
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const [avatarSheetVisible, setAvatarSheetVisible] = useState(false);
   const [languageMenuVisible, setLanguageMenuVisible] = useState(false);
+  const [countryPickerVisible, setCountryPickerVisible] = useState(false);
+  const [countrySearch, setCountrySearch] = useState("");
+  const [citySearch, setCitySearch] = useState("");
+  const [pickerStep, setPickerStep] = useState<"country" | "city">("country");
+  const [selectedCountryCode, setSelectedCountryCode] = useState("");
   const [floatingNotice, setFloatingNotice] = useState<FloatingNotice | null>(null);
   const [onboardingSummary, setOnboardingSummary] = useState<{
     assistance: string[];
@@ -252,6 +259,58 @@ export default function ProfileTabScreen() {
     },
     [dismissNotice]
   );
+
+  const sortedCountries = useMemo(() => getCountriesSorted(language), [language]);
+  const filteredCountries = useMemo(() => {
+    const q = countrySearch.trim().toLowerCase();
+    if (!q) return sortedCountries;
+    return sortedCountries.filter((c) =>
+      getCountryName(c, language).toLowerCase().includes(q)
+    );
+  }, [countrySearch, language, sortedCountries]);
+
+  const citiesForSelected = useMemo(
+    () => getCitiesForCountry(selectedCountryCode),
+    [selectedCountryCode]
+  );
+  const filteredCities = useMemo(() => {
+    const q = citySearch.trim().toLowerCase();
+    if (!q) return citiesForSelected;
+    return citiesForSelected.filter((c) =>
+      c.name.toLowerCase().includes(q)
+    );
+  }, [citySearch, citiesForSelected]);
+
+  const homeBaseParts = form.homeBase.split(", ");
+  const homeBaseCity = homeBaseParts.length >= 2 ? homeBaseParts[0] : "";
+  const homeBaseCountry = homeBaseParts.length >= 2 ? homeBaseParts.slice(1).join(", ") : form.homeBase;
+
+  const handleSelectCountry = (country: Country) => {
+    const countryName = getCountryName(country, language);
+    updateField("homeBase", countryName);
+    setCountrySearch("");
+    setSelectedCountryCode(country.code);
+    setPickerStep("city");
+  };
+
+  const handleSelectCity = (cityName: string) => {
+    if (homeBaseCountry) {
+      updateField("homeBase", `${cityName}, ${homeBaseCountry}`);
+    }
+    setCountryPickerVisible(false);
+    setPickerStep("country");
+    setSelectedCountryCode("");
+    setCitySearch("");
+    setCountrySearch("");
+  };
+
+  const closeHomeBasePicker = () => {
+    setCountryPickerVisible(false);
+    setPickerStep("country");
+    setSelectedCountryCode("");
+    setCitySearch("");
+    setCountrySearch("");
+  };
 
   // ── Save button press ──────────────────────────────────────────────────
   const saveBtnScale = useSharedValue(1);
@@ -907,20 +966,28 @@ export default function ProfileTabScreen() {
             <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>
               {t("profile.homeBase")}
             </Text>
-            <TextInput
+            <Pressable
               style={[
                 staticStyles.input,
+                staticStyles.homeBaseSelector,
                 {
                   backgroundColor: colors.inputBackground,
                   borderColor: colors.inputBorder,
-                  color: colors.textPrimary,
                 },
               ]}
-              placeholder={t("profile.cityPlaceholder")}
-              placeholderTextColor={colors.inputPlaceholder}
-              value={form.homeBase}
-              onChangeText={(v) => updateField("homeBase", v)}
-            />
+              onPress={() => setCountryPickerVisible(true)}
+            >
+              <Text
+                style={[
+                  staticStyles.homeBaseSelectorText,
+                  { color: form.homeBase ? colors.textPrimary : colors.inputPlaceholder },
+                ]}
+                numberOfLines={1}
+              >
+                {form.homeBase || t("profile.selectCountry")}
+              </Text>
+              <MaterialIcons name="expand-more" size={20} color={colors.textMuted} />
+            </Pressable>
 
             <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>
               {t("profile.travelPace")}
@@ -1172,6 +1239,144 @@ export default function ProfileTabScreen() {
                 </Pressable>
               );
             })}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ───────── Home base picker (country → city) ───────── */}
+      <Modal
+        animationType="none"
+        transparent
+        visible={countryPickerVisible}
+        onRequestClose={closeHomeBasePicker}
+      >
+        <Pressable
+          style={[staticStyles.modalOverlay, { backgroundColor: colors.modalOverlay }]}
+          onPress={closeHomeBasePicker}
+        >
+          <Pressable
+            style={[
+              staticStyles.countryPickerSheet,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={staticStyles.countryPickerHeader}>
+              <Text style={[staticStyles.countryPickerTitle, { color: colors.textPrimary }]}>
+                {pickerStep === "country" ? t("profile.selectCountry") : t("profile.enterCity")}
+              </Text>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={closeHomeBasePicker}
+                style={[
+                  staticStyles.countryPickerCloseButton,
+                  { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder },
+                ]}
+              >
+                <MaterialIcons name="close" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {pickerStep === "country" ? (
+              <>
+                <TextInput
+                  style={[
+                    staticStyles.countrySearchInput,
+                    {
+                      backgroundColor: colors.inputBackground,
+                      borderColor: colors.inputBorder,
+                      color: colors.textPrimary,
+                    },
+                  ]}
+                  placeholder={t("profile.searchCountry")}
+                  placeholderTextColor={colors.inputPlaceholder}
+                  value={countrySearch}
+                  onChangeText={setCountrySearch}
+                  autoFocus
+                />
+                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                  {filteredCountries.map((country) => {
+                    const name = getCountryName(country, language);
+                    const isSelected = homeBaseCountry === name;
+                    return (
+                      <Pressable
+                        key={country.code}
+                        style={[
+                          staticStyles.countryItem,
+                          isSelected && { backgroundColor: colors.accentMuted },
+                        ]}
+                        onPress={() => handleSelectCountry(country)}
+                      >
+                        <Text
+                          style={[
+                            staticStyles.countryItemText,
+                            { color: isSelected ? colors.accent : colors.textPrimary },
+                            isSelected && { fontWeight: FontWeight.semibold },
+                          ]}
+                        >
+                          {name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </>
+            ) : (
+              <>
+                <Pressable
+                  style={[staticStyles.countryItem, { backgroundColor: colors.accentMuted }]}
+                  onPress={() => {
+                    setPickerStep("country");
+                    setCitySearch("");
+                  }}
+                >
+                  <Text style={[staticStyles.countryItemText, { color: colors.accent, fontWeight: FontWeight.semibold }]}>
+                    ← {homeBaseCountry}
+                  </Text>
+                </Pressable>
+                <TextInput
+                  style={[
+                    staticStyles.countrySearchInput,
+                    {
+                      backgroundColor: colors.inputBackground,
+                      borderColor: colors.inputBorder,
+                      color: colors.textPrimary,
+                    },
+                  ]}
+                  placeholder={t("profile.searchCountry")}
+                  placeholderTextColor={colors.inputPlaceholder}
+                  value={citySearch}
+                  onChangeText={setCitySearch}
+                  autoFocus
+                />
+                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                  {filteredCities.map((city) => {
+                    const name = city.name;
+                    const isSelected = homeBaseCity === name;
+                    return (
+                      <Pressable
+                        key={name}
+                        style={[
+                          staticStyles.countryItem,
+                          isSelected && { backgroundColor: colors.accentMuted },
+                        ]}
+                        onPress={() => handleSelectCity(name)}
+                      >
+                        <Text
+                          style={[
+                            staticStyles.countryItemText,
+                            { color: isSelected ? colors.accent : colors.textPrimary },
+                            isSelected && { fontWeight: FontWeight.semibold },
+                          ]}
+                        >
+                          {name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </>
+            )}
           </Pressable>
         </Pressable>
       </Modal>
@@ -1436,5 +1641,56 @@ const staticStyles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.sm,
+  },
+  homeBaseSelector: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  homeBaseSelectorText: {
+    flex: 1,
+    ...TypeScale.bodyMd,
+  },
+  countryPickerSheet: {
+    borderRadius: Radius.xl,
+    padding: Spacing.lg,
+    maxHeight: "80%",
+    width: "92%",
+    alignSelf: "center",
+  },
+  countryPickerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: Spacing.md,
+  },
+  countryPickerTitle: {
+    ...TypeScale.titleLg,
+    fontWeight: FontWeight.bold,
+  },
+  countryPickerCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  countrySearchInput: {
+    borderWidth: 1,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginBottom: Spacing.md,
+    ...TypeScale.bodyMd,
+  },
+  countryItem: {
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: Radius.sm,
+    marginBottom: 2,
+  },
+  countryItemText: {
+    ...TypeScale.bodyMd,
   },
 });

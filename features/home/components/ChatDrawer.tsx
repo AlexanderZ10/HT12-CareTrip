@@ -17,6 +17,7 @@ import { useAppLanguage } from "../../../components/app-language-provider";
 import { FontWeight, Layout, Radius, Spacing, TypeScale, shadow } from "../../../constants/design-system";
 import type { HomePlannerChatThread } from "../../../utils/home-chat-storage";
 import { formatUpdatedDate } from "../../../utils/formatting";
+import { getLanguageLocale } from "../../../utils/translations";
 import { sortHomePlannerChats } from "../../../utils/home-chat-storage";
 
 type ChatDrawerProps = {
@@ -81,6 +82,9 @@ function ChatListItem({
   setRenameValue: (value: string) => void;
   setRenamingChatId: (id: string | null) => void;
 }) {
+  const { language: itemLanguage } = useAppLanguage();
+  const itemLocale = getLanguageLocale(itemLanguage);
+
   if (isRenaming) {
     return (
       <View style={[styles.chatListItem, isActive && styles.chatListItemActive]}>
@@ -121,7 +125,7 @@ function ChatListItem({
           </Text>
           {chat.pinned ? <MaterialIcons name="push-pin" size={16} color="#92400E" /> : null}
         </View>
-        <Text style={styles.chatItemMeta}>{formatUpdatedDate(chat.updatedAtMs)}</Text>
+        <Text style={styles.chatItemMeta}>{formatUpdatedDate(chat.updatedAtMs, itemLocale)}</Text>
       </TouchableOpacity>
       <View style={styles.chatItemActions}>
         <TouchableOpacity style={styles.iconButton} onPress={onRename} activeOpacity={0.9}>
@@ -170,6 +174,7 @@ export function ChatDrawer({
   setRenamingChatId,
 }: ChatDrawerProps) {
   const { language, t } = useAppLanguage();
+  const locale = getLanguageLocale(language);
   const savedChatsLabel =
     language === "bg"
       ? `${chats.length} запазени chat-а`

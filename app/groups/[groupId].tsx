@@ -35,6 +35,7 @@ import { Image } from "expo-image";
 
 import { useAppLanguage } from "../../components/app-language-provider";
 import { useAppTheme } from "../../components/app-theme-provider";
+import { DismissKeyboard } from "../../components/dismiss-keyboard";
 import { auth, db } from "../../firebase";
 import {
   buildGroupChatExpense,
@@ -76,6 +77,8 @@ import { styles } from "../../features/group-detail/screen-styles";
 import { GroupChatComposer } from "../../features/group-detail/components/GroupChatComposer";
 import { GroupChatMessageRow } from "../../features/group-detail/components/GroupChatMessage";
 import { GroupDetailModals } from "../../features/group-detail/components/GroupDetailModals";
+import { PhotoJournalGrid } from "../../components/photo-journal-grid";
+import { addJournalPhoto, deleteJournalPhoto, subscribeToJournalPhotos, type JournalPhoto } from "../../utils/photo-journal";
 import {
   buildInitialHomePlannerMessage,
   buildLinkedExpenseLookupKey,
@@ -140,6 +143,7 @@ export default function GroupChatScreen() {
   const [groupDescriptionInput, setGroupDescriptionInput] = useState("");
   const [groupJoinKeyInput, setGroupJoinKeyInput] = useState("");
   const [memberSearchQuery, setMemberSearchQuery] = useState("");
+  const [journalPhotos, setJournalPhotos] = useState<JournalPhoto[]>([]);
   const [updatingGroupPhoto, setUpdatingGroupPhoto] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -418,6 +422,53 @@ export default function GroupChatScreen() {
       unsubscribeRepayments();
     };
   }, [canReadMessages, groupId]);
+
+  useEffect(() => {
+    if (!groupId) {
+      setJournalPhotos([]);
+      return;
+    }
+    return subscribeToJournalPhotos(groupId, setJournalPhotos);
+  }, [groupId]);
+
+  const handleAddPhoto = async () => {
+    if (!user || !groupId) return;
+    const ImagePicker = await import("expo-image-picker");
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      quality: 0.6,
+      base64: true,
+      allowsEditing: true,
+      aspect: [9, 16],
+    });
+
+    if (result.canceled || !result.assets[0]?.base64) return;
+
+    const asset = result.assets[0];
+    const imageUri = `data:image/jpeg;base64,${asset.base64}`;
+
+    try {
+      await addJournalPhoto({
+        groupId,
+        tripId: null,
+        imageUri,
+        caption: "",
+        location: "",
+        creatorId: user.uid,
+        creatorLabel: profileName,
+      });
+    } catch {
+      setError("Could not upload photo.");
+    }
+  };
+
+  const handleDeletePhoto = async (photo: JournalPhoto) => {
+    try {
+      await deleteJournalPhoto(photo.id);
+    } catch {
+      setError("Could not delete photo.");
+    }
+  };
 
   useEffect(() => {
     if (!messages.length) {
@@ -1327,11 +1378,12 @@ export default function GroupChatScreen() {
       style={[styles.screen, { backgroundColor: colors.screenSoft }]}
       edges={["top", "left", "right"]}
     >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={0}
-        style={styles.screen}
-      >
+      <DismissKeyboard>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={0}
+          style={styles.screen}
+        >
         {/* Header */}
         <View style={[styles.header, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
           <TouchableOpacity
@@ -1376,6 +1428,16 @@ export default function GroupChatScreen() {
             </View>
           </TouchableOpacity>
         </View>
+
+        {/* Stories */}
+        {(journalPhotos.length > 0 || canReadMessages) && (
+          <PhotoJournalGrid
+            photos={journalPhotos}
+            onAddPress={canReadMessages ? handleAddPhoto : undefined}
+            onDelete={handleDeletePhoto}
+            currentUserId={user?.uid}
+          />
+        )}
 
         {/* Messages scroll */}
         <ScrollView
@@ -1590,7 +1652,8 @@ export default function GroupChatScreen() {
           savingExpense={savingExpense}
           sending={sending}
         />
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </DismissKeyboard>
 
       {/* Error toast */}
       {error ? (

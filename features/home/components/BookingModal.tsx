@@ -2,6 +2,7 @@ import { MaterialIcons } from "@expo/vector-icons";
 import React from "react";
 import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
+import { useAppLanguage } from "../../../components/app-language-provider";
 import { FontWeight, Radius, Spacing, TypeScale } from "../../../constants/design-system";
 import type { StoredHomePlan } from "../../../utils/home-chat-storage";
 import type {
@@ -10,6 +11,7 @@ import type {
 } from "../../../utils/home-travel-planner";
 import { formatCheckoutReference, getPaymentMethodDisplayLabel, getPaymentMethodIcon } from "../helpers";
 import { formatProcessedAt } from "../../../utils/formatting";
+import { getLanguageLocale } from "../../../utils/translations";
 import type { BookingCheckoutStage, BookingReceipt } from "../types";
 
 type BookingForm = {
@@ -70,6 +72,9 @@ export function BookingModal({
   setSelectedTransportIndex,
   visible,
 }: BookingModalProps) {
+  const { language } = useAppLanguage();
+  const locale = getLanguageLocale(language);
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={[styles.bookingModalOverlay, { backgroundColor: colors.modalOverlay }]}>
@@ -206,6 +211,9 @@ function SuccessView({
   destination?: string;
   onClose: () => void;
 }) {
+  const { language: successLanguage } = useAppLanguage();
+  const successLocale = getLanguageLocale(successLanguage);
+
   return (
     <View style={styles.checkoutSuccessCard}>
       <View style={styles.checkoutSuccessBadge}>
@@ -225,7 +233,7 @@ function SuccessView({
         </Text>
         <Text style={styles.checkoutReceiptLine}>Статус: Потвърдено</Text>
         <Text style={styles.checkoutReceiptLine}>
-          Обработено на: {bookingReceipt?.processedAtLabel || formatProcessedAt(Date.now())}
+          Обработено на: {bookingReceipt?.processedAtLabel || formatProcessedAt(Date.now(), successLocale)}
         </Text>
         <Text style={styles.checkoutReceiptLine}>
           Код за оторизация: {bookingReceipt?.authorizationCode || "A47K92"}

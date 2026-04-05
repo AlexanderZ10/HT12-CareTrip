@@ -32,10 +32,12 @@ import { TripRequestCard } from "../../features/groups/components/TripRequestCar
 import { TripRequestComposerModal } from "../../features/groups/components/TripRequestComposerModal";
 import { useGroupsScreen } from "../../features/groups/useGroupsScreen";
 import { formatRelativeTime } from "../../utils/formatting";
+import { getLanguageLocale } from "../../utils/translations";
 
 export default function GroupsTabScreen() {
   const { colors } = useAppTheme();
-  const { t } = useAppLanguage();
+  const { language, t } = useAppLanguage();
+  const locale = getLanguageLocale(language);
   const insets = useSafeAreaInsets();
   const vm = useGroupsScreen();
 
@@ -261,7 +263,7 @@ export default function GroupsTabScreen() {
                   preview={
                     group.description || `Created by ${group.creatorLabel}`
                   }
-                  rightMeta={formatRelativeTime(group.updatedAtMs ?? group.createdAtMs)}
+                  rightMeta={formatRelativeTime(group.updatedAtMs ?? group.createdAtMs, locale)}
                 />
               ))
             )}
@@ -325,7 +327,7 @@ export default function GroupsTabScreen() {
                 }
                 onPress={() => vm.openGroupChat(group.id)}
                 preview={previewText}
-                rightMeta={formatRelativeTime(group.updatedAtMs ?? group.createdAtMs)}
+                rightMeta={formatRelativeTime(group.updatedAtMs ?? group.createdAtMs, locale)}
               />
             );
           })
@@ -359,7 +361,7 @@ export default function GroupsTabScreen() {
                     onActionPress={() => vm.joinGroup(group.id)}
                     onPress={() => vm.openGroupChat(group.id)}
                     preview={group.description || `Created by ${group.creatorLabel}`}
-                    rightMeta={formatRelativeTime(group.updatedAtMs ?? group.createdAtMs)}
+                    rightMeta={formatRelativeTime(group.updatedAtMs ?? group.createdAtMs, locale)}
                   />
                 ))
             )}

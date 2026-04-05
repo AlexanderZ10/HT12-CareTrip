@@ -1,4 +1,4 @@
-export function formatRelativeTime(value: number | null) {
+export function formatRelativeTime(value: number | null, locale: string = "bg-BG") {
   if (!value) {
     return "just now";
   }
@@ -22,25 +22,25 @@ export function formatRelativeTime(value: number | null) {
     return `${diffDays}d ago`;
   }
 
-  return new Intl.DateTimeFormat("bg-BG", {
+  return new Intl.DateTimeFormat(locale, {
     day: "2-digit",
     month: "short",
   }).format(new Date(value));
 }
 
-export function formatMessageTime(value: number | null) {
+export function formatMessageTime(value: number | null, locale: string = "bg-BG") {
   if (!value) {
     return "just now";
   }
 
-  return new Intl.DateTimeFormat("bg-BG", {
+  return new Intl.DateTimeFormat(locale, {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
 }
 
-export function formatUpdatedDate(value: number) {
-  return new Intl.DateTimeFormat("bg-BG", {
+export function formatUpdatedDate(value: number, locale: string = "bg-BG") {
+  return new Intl.DateTimeFormat(locale, {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
@@ -48,8 +48,8 @@ export function formatUpdatedDate(value: number) {
   }).format(new Date(value));
 }
 
-export function formatProcessedAt(value: number) {
-  return new Intl.DateTimeFormat("bg-BG", {
+export function formatProcessedAt(value: number, locale: string = "bg-BG") {
+  return new Intl.DateTimeFormat(locale, {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
