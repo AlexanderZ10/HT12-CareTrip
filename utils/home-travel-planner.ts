@@ -1,9 +1,7 @@
 import { normalizeBudgetToEuro } from "./currency";
-import { sanitizeString, sanitizeStringArray } from "./sanitize";
 import type { AppLanguage } from "./translations";
 import { type DiscoverProfile } from "./trip-recommendations";
-import { callAI, getAIApiKey } from "./ai";
-import { fetchDestinationCosts, formatDailyCostSummary } from "./destination-costs";
+import { searchTravelOffers } from "./travel-offers";
 
 export type PlannerTransportOption = {
   bookingUrl?: string;
@@ -36,6 +34,7 @@ export type PlannerDayPlan = {
 
 export type GroundedTravelPlan = {
   budgetNote: string;
+  language?: AppLanguage;
   profileTip: string;
   stayOptions: PlannerStayOption[];
   summary: string;
@@ -44,588 +43,586 @@ export type GroundedTravelPlan = {
   tripDays: PlannerDayPlan[];
 };
 
-type RawGroundedTravelPlan = Partial<GroundedTravelPlan>;
+function sanitizeString(value: unknown, fallback = "") {
+  return typeof value === "string" ? value.trim() : fallback;
+}
 
-const HOME_PLAN_RESPONSE_SCHEMA = {
-  type: "object",
-  properties: {
-    title: { type: "string" },
-    summary: { type: "string" },
-    budgetNote: { type: "string" },
-    profileTip: { type: "string" },
-    transportOptions: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          mode: { type: "string" },
-          provider: { type: "string" },
-          route: { type: "string" },
-          duration: { type: "string" },
-          price: { type: "string" },
-          note: { type: "string" },
-        },
-        required: ["mode", "provider", "route", "duration", "price", "note"],
-      },
-      minItems: 2,
-      maxItems: 4,
-    },
-    stayOptions: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          type: { type: "string" },
-          area: { type: "string" },
-          pricePerNight: { type: "string" },
-          note: { type: "string" },
-        },
-        required: ["name", "type", "area", "pricePerNight", "note"],
-      },
-      minItems: 2,
-      maxItems: 3,
-    },
-    tripDays: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          dayLabel: { type: "string" },
-          title: { type: "string" },
-          items: {
-            type: "array",
-            items: { type: "string" },
-            minItems: 2,
-            maxItems: 4,
-          },
-        },
-        required: ["dayLabel", "title", "items"],
-      },
-      minItems: 2,
-      maxItems: 10,
-    },
-  },
-  required: [
-    "title",
-    "summary",
-    "budgetNote",
-    "profileTip",
-    "transportOptions",
-    "stayOptions",
-    "tripDays",
-  ],
-} as const;
+function extractFirstNumber(value: string) {
+  const match = value.match(/\d+(?:[.,]\d+)?/);
 
-function getPlannerLanguageVariant(language?: string): AppLanguage {
-  const normalized = (language || "").trim().toLowerCase();
+  if (!match) {
+    return null;
+  }
 
-  if (normalized === "en" || normalized === "english") return "en";
-  if (normalized === "de" || normalized === "german" || normalized === "deutsch") return "de";
-  if (normalized === "es" || normalized === "spanish" || normalized === "español") return "es";
-  if (normalized === "fr" || normalized === "french" || normalized === "français") return "fr";
+  const parsedValue = Number(match[0].replace(",", "."));
+  return Number.isFinite(parsedValue) ? parsedValue : null;
+}
+
+function extractCount(value: string, fallback: number) {
+  const match = value.match(/\d+/);
+
+  if (!match) {
+    return fallback;
+  }
+
+  const parsedValue = Number(match[0]);
+  return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : fallback;
+}
+
+function normalizePlannerLanguage(language?: string): AppLanguage {
+  if (
+    language === "en" ||
+    language === "de" ||
+    language === "es" ||
+    language === "fr"
+  ) {
+    return language;
+  }
+
   return "bg";
 }
 
-function getPlannerCopy(language?: string) {
-  switch (getPlannerLanguageVariant(language)) {
-    case "en":
-      return {
-        altOption: "Alternative option",
-        availabilityNote: "Check availability before booking.",
-        budgetFallback: "We are planning within the available budget and trip duration.",
-        dayLabel: (index: number) => `Day ${index + 1}`,
-        dayPlan: "Daily plan",
-        durationPending: "Duration to be confirmed",
-        fallbackMessage: "Got it! When do you want to travel?",
-        flexiblePlan:
-          "A practical trip plan focused on realistic transport, stay and a compact itinerary.",
-        mainOption: "Main option",
-        noProvider: "Check the latest operator",
-        priceOnRequest: "Price on request",
-        profileTip:
-          "We picked a more focused route with practical transport and stay options.",
-        routePending: "Route to be confirmed",
-        stayOption: "Stay option",
-        stayType: "Stay",
-        summary:
-          "Compact plan focused on concrete transport, stay and short itinerary.",
-        centralArea: "Central area",
-        stayNote: "Confirm the conditions before booking.",
-        unknownDestinationTitle: (destination: string) => `Trip plan for ${destination}`,
-      } as const;
-    case "de":
-      return {
-        altOption: "Alternative Option",
-        availabilityNote: "Prüfe die Verfügbarkeit vor der Buchung.",
-        budgetFallback:
-          "Wir planen im verfügbaren Budgetrahmen und innerhalb der Reisedauer.",
-        dayLabel: (index: number) => `Tag ${index + 1}`,
-        dayPlan: "Tagesplan",
-        durationPending: "Dauer wird noch bestätigt",
-        fallbackMessage: "Verstanden! Wann möchtest du reisen?",
-        flexiblePlan:
-          "Ein praktischer Reiseplan mit Fokus auf realistischem Transport, Unterkunft und kompaktem Ablauf.",
-        mainOption: "Hauptoption",
-        noProvider: "Prüfe den aktuellen Anbieter",
-        priceOnRequest: "Preis auf Anfrage",
-        profileTip:
-          "Wir haben eine fokussiertere Route mit praktischem Transport und Unterkunft ausgewählt.",
-        routePending: "Route wird noch bestätigt",
-        stayOption: "Unterkunftsoption",
-        stayType: "Unterkunft",
-        summary:
-          "Kompakter Plan mit Fokus auf konkretem Transport, Unterkunft und kurzem Ablauf.",
-        centralArea: "Zentrale Lage",
-        stayNote: "Bestätige die Bedingungen vor der Buchung.",
-        unknownDestinationTitle: (destination: string) => `Reiseplan für ${destination}`,
-      } as const;
-    case "es":
-      return {
-        altOption: "Opción alternativa",
-        availabilityNote: "Comprueba la disponibilidad antes de reservar.",
-        budgetFallback:
-          "Estamos planificando dentro del presupuesto disponible y la duración del viaje.",
-        dayLabel: (index: number) => `Día ${index + 1}`,
-        dayPlan: "Plan diario",
-        durationPending: "Duración por confirmar",
-        fallbackMessage: "¡Entendido! ¿Cuándo quieres viajar?",
-        flexiblePlan:
-          "Un plan de viaje práctico centrado en transporte realista, alojamiento e itinerario compacto.",
-        mainOption: "Opción principal",
-        noProvider: "Consulta el operador actual",
-        priceOnRequest: "Precio a consultar",
-        profileTip:
-          "Elegimos una ruta más enfocada con transporte y alojamiento más prácticos.",
-        routePending: "Ruta por confirmar",
-        stayOption: "Opción de alojamiento",
-        stayType: "Alojamiento",
-        summary:
-          "Plan compacto centrado en transporte concreto, alojamiento e itinerario corto.",
-        centralArea: "Zona céntrica",
-        stayNote: "Confirma las condiciones antes de reservar.",
-        unknownDestinationTitle: (destination: string) => `Plan para ${destination}`,
-      } as const;
-    case "fr":
-      return {
-        altOption: "Option alternative",
-        availabilityNote: "Vérifie la disponibilité avant de réserver.",
-        budgetFallback:
-          "Nous planifions dans le budget disponible et la durée du voyage.",
-        dayLabel: (index: number) => `Jour ${index + 1}`,
-        dayPlan: "Plan du jour",
-        durationPending: "Durée à confirmer",
-        fallbackMessage: "Compris ! Quand veux-tu voyager ?",
-        flexiblePlan:
-          "Un plan de voyage pratique axé sur un transport réaliste, l’hébergement et un itinéraire compact.",
-        mainOption: "Option principale",
-        noProvider: "Vérifie l’opérateur actuel",
-        priceOnRequest: "Prix sur demande",
-        profileTip:
-          "Nous avons choisi un itinéraire plus ciblé avec des options de transport et d’hébergement plus pratiques.",
-        routePending: "Itinéraire à confirmer",
-        stayOption: "Option d’hébergement",
-        stayType: "Hébergement",
-        summary:
-          "Plan compact axé sur un transport concret, l’hébergement et un itinéraire court.",
-        centralArea: "Zone centrale",
-        stayNote: "Confirme les conditions avant de réserver.",
-        unknownDestinationTitle: (destination: string) => `Itinéraire pour ${destination}`,
-      } as const;
-    default:
-      return {
-        altOption: "Алтернативен вариант",
-        availabilityNote: "Провери наличността преди резервация.",
-        budgetFallback: "Планираме в рамките на наличния бюджет и продължителността на пътуването.",
-        dayLabel: (index: number) => `Ден ${index + 1}`,
-        dayPlan: "Дневен план",
-        durationPending: "Времето се уточнява",
-        fallbackMessage: "Разбрах! Кога искаш да пътуваш?",
-        flexiblePlan:
-          "Стегнат план с фокус върху реалистичен транспорт, настаняване и компактен маршрут.",
-        mainOption: "Основен вариант",
-        noProvider: "Провери актуалния оператор",
-        priceOnRequest: "Цена при запитване",
-        profileTip:
-          "Избрахме по-стегнат маршрут с приоритет на по-практичен транспорт и stay.",
-        routePending: "Маршрутът се уточнява",
-        stayOption: "Настаняване",
-        stayType: "Настаняване",
-        summary:
-          "Стегнат план за дестинацията с фокус върху конкретен транспорт, stay и кратък itinerary.",
-        centralArea: "Централна зона",
-        stayNote: "Потвърди условията преди резервация.",
-        unknownDestinationTitle: (destination: string) => `Маршрут за ${destination}`,
-      } as const;
-  }
+function lowerText(value: string, language: AppLanguage) {
+  return value.toLocaleLowerCase(language);
 }
 
-function extractJsonObject(text: string) {
-  const trimmedText = text.trim();
-
-  if (!trimmedText) {
-    throw new Error("empty-json-response");
+function getPlannerCopy(language: AppLanguage) {
+  if (language === "en") {
+    return {
+      arrivalFirstWalk: (destination: string) => `An easy first walk around ${destination}`,
+      arrivalTitle: "Arrival and settling in",
+      budgetFallback: (budget: string) =>
+        `Your budget is set to ${budget}; some live offers need to be checked directly on the provider site.`,
+      budgetFit: (estimatedTotal: number, days: string, budget: string) =>
+        `With ${budget}, the best visible fit starts at around ${Math.round(estimatedTotal)} EUR total for ${days}.`,
+      budgetHeading: "Budget",
+      dayLabel: (dayNumber: number) => `Day ${dayNumber}`,
+      daysHeading: "Days",
+      departureBuffer: "Leave a buffer for transport changes",
+      departureCheckout: "Check out and head back",
+      departureMorning: "An easy morning plan with free time",
+      departureTitle: "Departure",
+      dinnerNearStay: "Dinner or a local experience near your stay",
+      durationTbd: "Duration to be confirmed",
+      errorGeneric: "We couldn't load live transport and stay offers. Please try again.",
+      errorInternal: "The backend returned an internal error while loading live offers.",
+      errorInvalidFallback: "The local fallback returned invalid travel data. Try again.",
+      errorMissingFallbackKey:
+        "The local fallback is missing an AI key. Add EXPO_PUBLIC_GEMINI_API_KEY or use the Functions backend.",
+      errorMissingFunction:
+        "The Firebase function searchOffers is missing. Deploy the backend and try again.",
+      errorMissingProviderKeys:
+        "The backend is missing provider keys for live travel offers. Check Firebase Functions env.",
+      errorUnavailable: "The live travel backend is unavailable right now. Try again in a moment.",
+      fallbackFocus: "a walk and the local vibe",
+      fullDayTitle: (destination: string) => `A full day in ${destination}`,
+      homeCityFallback: "your city",
+      hourShort: "h",
+      itineraryFocus: (focus: string) => `Focus on ${lowerText(focus, language)}`,
+      landmarkItem: "Main landmark or neighborhood",
+      minuteShort: "min",
+      priceOnRequest: "Price on request",
+      profileTipAccessibility: (homeBase: string, needs: string) =>
+        `Check transport and stay accessibility before booking. The search is tuned to your profile from ${homeBase} and these needs: ${needs}.`,
+      profileTipDefault: (homeBase: string) =>
+        `The offers are ranked around practical transport and stay options from ${homeBase}.`,
+      profileTipHeading: "Profile tip",
+      profileTipStayStyle: (stayStyle: string, homeBase: string) =>
+        `The offers are ranked with priority for ${lowerText(stayStyle, language)} stays and practical transport from ${homeBase}.`,
+      stayHeading: "Stay",
+      summary: (params: {
+        destination: string;
+        interestLabel: string;
+        stayCount: number;
+        transportCount: number;
+        windowLabel: string;
+      }) =>
+        `We found ${params.transportCount} live transport offers and ${params.stayCount} stay options for ${params.destination} in the ${params.windowLabel} window, selected around ${params.interestLabel}.`,
+      titleFallback: (destination: string) => `${destination}: live travel plan`,
+      titleWithInterest: (destination: string, interest: string) =>
+        `${destination}: live plan for ${lowerText(interest, language)}`,
+      transportCheckIn: "Check in to your selected stay",
+      transportDeparture: "Depart with your selected live transport option",
+      transportHeading: "Transport",
+    };
   }
 
-  const fencedMatch = trimmedText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  const directCandidate = fencedMatch?.[1]?.trim() || trimmedText;
-
-  try {
-    return JSON.parse(directCandidate) as Record<string, unknown>;
-  } catch {
-    // Fall through to balanced-object extraction.
+  if (language === "de") {
+    return {
+      arrivalFirstWalk: (destination: string) => `Ein erster entspannter Spaziergang in ${destination}`,
+      arrivalTitle: "Ankunft und Einleben",
+      budgetFallback: (budget: string) =>
+        `Dein Budget ist auf ${budget} gesetzt; einige Live-Angebote mussen direkt auf der Anbieterseite gepruft werden.`,
+      budgetFit: (estimatedTotal: number, days: string, budget: string) =>
+        `Mit ${budget} beginnt die beste sichtbare Option bei etwa ${Math.round(estimatedTotal)} EUR gesamt fur ${days}.`,
+      budgetHeading: "Budget",
+      dayLabel: (dayNumber: number) => `Tag ${dayNumber}`,
+      daysHeading: "Tage",
+      departureBuffer: "Plane Puffer fur Transportanderungen ein",
+      departureCheckout: "Check-out und Ruckreise",
+      departureMorning: "Ein ruhiger Morgenplan mit Freizeit",
+      departureTitle: "Abreise",
+      dinnerNearStay: "Abendessen oder lokales Erlebnis in der Nahe der Unterkunft",
+      durationTbd: "Dauer wird noch bestatigt",
+      errorGeneric: "Live-Transport- und Unterkunftsangebote konnten nicht geladen werden. Bitte versuche es erneut.",
+      errorInternal: "Das Backend hat beim Laden der Live-Angebote einen internen Fehler zuruckgegeben.",
+      errorInvalidFallback: "Der lokale Fallback hat ungueltige Reisedaten zuruckgegeben. Bitte erneut versuchen.",
+      errorMissingFallbackKey:
+        "Dem lokalen Fallback fehlt ein AI-Schlussel. Fuge EXPO_PUBLIC_GEMINI_API_KEY hinzu oder nutze das Functions-Backend.",
+      errorMissingFunction:
+        "Die Firebase-Funktion searchOffers fehlt. Deploye das Backend und versuche es erneut.",
+      errorMissingProviderKeys:
+        "Dem Backend fehlen Provider-Schlussel fur Live-Reiseangebote. Prufe die Firebase-Functions-Umgebung.",
+      errorUnavailable: "Das Live-Reise-Backend ist gerade nicht verfugbar. Bitte gleich noch einmal versuchen.",
+      fallbackFocus: "Spaziergang und lokales Flair",
+      fullDayTitle: (destination: string) => `Ein voller Tag in ${destination}`,
+      homeCityFallback: "deiner Stadt",
+      hourShort: "Std",
+      itineraryFocus: (focus: string) => `Fokus auf ${lowerText(focus, language)}`,
+      landmarkItem: "Wichtigste Sehenswurdigkeit oder Viertel",
+      minuteShort: "Min",
+      priceOnRequest: "Preis auf Anfrage",
+      profileTipAccessibility: (homeBase: string, needs: string) =>
+        `Prufe vor der Buchung die Barrierefreiheit von Transport und Unterkunft. Die Suche ist auf dein Profil aus ${homeBase} und diese Bedurfnisse abgestimmt: ${needs}.`,
+      profileTipDefault: (homeBase: string) =>
+        `Die Angebote sind nach praktischen Transport- und Unterkunftsoptionen ab ${homeBase} sortiert.`,
+      profileTipHeading: "Profil-Tipp",
+      profileTipStayStyle: (stayStyle: string, homeBase: string) =>
+        `Die Angebote sind mit Prioritat auf ${lowerText(stayStyle, language)} und praktischen Transport ab ${homeBase} sortiert.`,
+      stayHeading: "Unterkunft",
+      summary: (params: {
+        destination: string;
+        interestLabel: string;
+        stayCount: number;
+        transportCount: number;
+        windowLabel: string;
+      }) =>
+        `Wir haben ${params.transportCount} Live-Transportangebote und ${params.stayCount} Unterkunftsoptionen fur ${params.destination} im Zeitraum ${params.windowLabel} gefunden, abgestimmt auf ${params.interestLabel}.`,
+      titleFallback: (destination: string) => `${destination}: Live-Reiseplan`,
+      titleWithInterest: (destination: string, interest: string) =>
+        `${destination}: Live-Plan fur ${lowerText(interest, language)}`,
+      transportCheckIn: "Check-in in die ausgewahlte Unterkunft",
+      transportDeparture: "Abreise mit der ausgewahlten Live-Transportoption",
+      transportHeading: "Transport",
+    };
   }
 
-  let depth = 0;
-  let startIndex = -1;
-
-  for (let index = 0; index < directCandidate.length; index += 1) {
-    const character = directCandidate[index];
-
-    if (character === "{") {
-      if (depth === 0) {
-        startIndex = index;
-      }
-      depth += 1;
-    } else if (character === "}") {
-      depth -= 1;
-
-      if (depth === 0 && startIndex !== -1) {
-        const possibleJson = directCandidate.slice(startIndex, index + 1);
-        return JSON.parse(possibleJson) as Record<string, unknown>;
-      }
-    }
+  if (language === "es") {
+    return {
+      arrivalFirstWalk: (destination: string) => `Un primer paseo tranquilo por ${destination}`,
+      arrivalTitle: "Llegada y acomodo",
+      budgetFallback: (budget: string) =>
+        `Tu presupuesto esta fijado en ${budget}; algunas ofertas en vivo deben revisarse directamente en la web del proveedor.`,
+      budgetFit: (estimatedTotal: number, days: string, budget: string) =>
+        `Con ${budget}, la mejor opcion visible empieza en unos ${Math.round(estimatedTotal)} EUR en total para ${days}.`,
+      budgetHeading: "Presupuesto",
+      dayLabel: (dayNumber: number) => `Dia ${dayNumber}`,
+      daysHeading: "Dias",
+      departureBuffer: "Deja un margen para cambios en el transporte",
+      departureCheckout: "Check-out y regreso",
+      departureMorning: "Una manana tranquila con tiempo libre",
+      departureTitle: "Salida",
+      dinnerNearStay: "Cena o experiencia local cerca del alojamiento",
+      durationTbd: "Duracion por confirmar",
+      errorGeneric: "No pudimos cargar ofertas en vivo de transporte y alojamiento. Intentalo de nuevo.",
+      errorInternal: "El backend devolvio un error interno al cargar las ofertas en vivo.",
+      errorInvalidFallback: "El fallback local devolvio datos de viaje invalidos. Intentalo de nuevo.",
+      errorMissingFallbackKey:
+        "Al fallback local le falta una clave de AI. Agrega EXPO_PUBLIC_GEMINI_API_KEY o usa el backend de Functions.",
+      errorMissingFunction:
+        "Falta la funcion de Firebase searchOffers. Despliega el backend e intentalo de nuevo.",
+      errorMissingProviderKeys:
+        "Al backend le faltan claves de proveedor para ofertas de viaje en vivo. Revisa el entorno de Firebase Functions.",
+      errorUnavailable: "El backend de viajes en vivo no esta disponible ahora mismo. Intentalo en un momento.",
+      fallbackFocus: "paseo y ambiente local",
+      fullDayTitle: (destination: string) => `Un dia completo en ${destination}`,
+      homeCityFallback: "tu ciudad",
+      hourShort: "h",
+      itineraryFocus: (focus: string) => `Enfoque en ${lowerText(focus, language)}`,
+      landmarkItem: "Punto emblematico o barrio principal",
+      minuteShort: "min",
+      priceOnRequest: "Precio a consultar",
+      profileTipAccessibility: (homeBase: string, needs: string) =>
+        `Revisa la accesibilidad del transporte y del alojamiento antes de reservar. La busqueda esta ajustada a tu perfil desde ${homeBase} y a estas necesidades: ${needs}.`,
+      profileTipDefault: (homeBase: string) =>
+        `Las ofertas estan ordenadas priorizando transporte practico y alojamientos desde ${homeBase}.`,
+      profileTipHeading: "Consejo del perfil",
+      profileTipStayStyle: (stayStyle: string, homeBase: string) =>
+        `Las ofertas estan ordenadas con prioridad para ${lowerText(stayStyle, language)} y transporte practico desde ${homeBase}.`,
+      stayHeading: "Alojamiento",
+      summary: (params: {
+        destination: string;
+        interestLabel: string;
+        stayCount: number;
+        transportCount: number;
+        windowLabel: string;
+      }) =>
+        `Encontramos ${params.transportCount} ofertas en vivo de transporte y ${params.stayCount} opciones de alojamiento para ${params.destination} en la ventana ${params.windowLabel}, seleccionadas segun ${params.interestLabel}.`,
+      titleFallback: (destination: string) => `${destination}: plan de viaje en vivo`,
+      titleWithInterest: (destination: string, interest: string) =>
+        `${destination}: plan en vivo para ${lowerText(interest, language)}`,
+      transportCheckIn: "Check-in en el alojamiento elegido",
+      transportDeparture: "Salida con la opcion de transporte en vivo elegida",
+      transportHeading: "Transporte",
+    };
   }
 
-  throw new Error("invalid-json-response");
-}
-
-function dedupeByKey<T>(items: T[], getKey: (item: T) => string) {
-  const seen = new Set<string>();
-
-  return items.filter((item) => {
-    const key = getKey(item).trim().toLowerCase();
-
-    if (!key || seen.has(key)) {
-      return false;
-    }
-
-    seen.add(key);
-    return true;
-  });
-}
-
-function dedupeTextLines(lines: string[]) {
-  const seen = new Set<string>();
-
-  return lines.filter((line, index, array) => {
-    const trimmedLine = line.trim();
-
-    if (!trimmedLine) {
-      return Boolean(array[index - 1]?.trim()) && Boolean(array[index + 1]?.trim());
-    }
-
-    const normalized = trimmedLine.toLowerCase();
-
-    if (seen.has(normalized)) {
-      return false;
-    }
-
-    seen.add(normalized);
-    return true;
-  });
-}
-
-function normalizeTransportOption(
-  item: Partial<PlannerTransportOption>,
-  index: number,
-  language?: string
-) {
-  const copy = getPlannerCopy(language);
-
-  return {
-    bookingUrl: sanitizeString(item.bookingUrl),
-    duration: sanitizeString(item.duration, copy.durationPending),
-    mode: sanitizeString(item.mode, index === 0 ? copy.mainOption : copy.altOption),
-    note: sanitizeString(item.note, copy.availabilityNote),
-    price: sanitizeString(item.price, copy.priceOnRequest),
-    provider: sanitizeString(item.provider, copy.noProvider),
-    route: sanitizeString(item.route, copy.routePending),
-    sourceLabel: sanitizeString(item.sourceLabel),
-  } satisfies PlannerTransportOption;
-}
-
-function normalizeStayOption(
-  item: Partial<PlannerStayOption>,
-  index: number,
-  language?: string
-) {
-  const copy = getPlannerCopy(language);
+  if (language === "fr") {
+    return {
+      arrivalFirstWalk: (destination: string) => `Une premiere balade tranquille dans ${destination}`,
+      arrivalTitle: "Arrivee et installation",
+      budgetFallback: (budget: string) =>
+        `Ton budget est fixe a ${budget} ; certaines offres en direct doivent etre verifiees directement sur le site du fournisseur.`,
+      budgetFit: (estimatedTotal: number, days: string, budget: string) =>
+        `Avec ${budget}, la meilleure option visible commence autour de ${Math.round(estimatedTotal)} EUR au total pour ${days}.`,
+      budgetHeading: "Budget",
+      dayLabel: (dayNumber: number) => `Jour ${dayNumber}`,
+      daysHeading: "Jours",
+      departureBuffer: "Garde une marge pour les changements de transport",
+      departureCheckout: "Check-out et retour",
+      departureMorning: "Matinee legere avec temps libre",
+      departureTitle: "Depart",
+      dinnerNearStay: "Diner ou experience locale pres de l'hebergement",
+      durationTbd: "Duree a confirmer",
+      errorGeneric: "Nous n'avons pas pu charger les offres en direct de transport et d'hebergement. Reessaie.",
+      errorInternal: "Le backend a renvoye une erreur interne pendant le chargement des offres en direct.",
+      errorInvalidFallback: "Le fallback local a renvoye des donnees de voyage invalides. Reessaie.",
+      errorMissingFallbackKey:
+        "Le fallback local n'a pas de cle AI. Ajoute EXPO_PUBLIC_GEMINI_API_KEY ou utilise le backend Functions.",
+      errorMissingFunction:
+        "La fonction Firebase searchOffers est manquante. Deploie le backend puis reessaie.",
+      errorMissingProviderKeys:
+        "Le backend n'a pas les cles fournisseur pour les offres de voyage en direct. Verifie l'environnement Firebase Functions.",
+      errorUnavailable: "Le backend de voyage en direct est indisponible pour le moment. Reessaie dans un instant.",
+      fallbackFocus: "balade et ambiance locale",
+      fullDayTitle: (destination: string) => `Une journee complete a ${destination}`,
+      homeCityFallback: "ta ville",
+      hourShort: "h",
+      itineraryFocus: (focus: string) => `Focus sur ${lowerText(focus, language)}`,
+      landmarkItem: "Site principal ou quartier a voir",
+      minuteShort: "min",
+      priceOnRequest: "Prix sur demande",
+      profileTipAccessibility: (homeBase: string, needs: string) =>
+        `Verifie l'accessibilite du transport et de l'hebergement avant de reserver. La recherche est ajustee a ton profil depuis ${homeBase} et a ces besoins : ${needs}.`,
+      profileTipDefault: (homeBase: string) =>
+        `Les offres sont classees selon les options de transport et d'hebergement les plus pratiques depuis ${homeBase}.`,
+      profileTipHeading: "Conseil profil",
+      profileTipStayStyle: (stayStyle: string, homeBase: string) =>
+        `Les offres sont classees avec priorite pour ${lowerText(stayStyle, language)} et un transport pratique depuis ${homeBase}.`,
+      stayHeading: "Hebergement",
+      summary: (params: {
+        destination: string;
+        interestLabel: string;
+        stayCount: number;
+        transportCount: number;
+        windowLabel: string;
+      }) =>
+        `Nous avons trouve ${params.transportCount} offres de transport en direct et ${params.stayCount} options d'hebergement pour ${params.destination} dans la fenetre ${params.windowLabel}, selectionnees selon ${params.interestLabel}.`,
+      titleFallback: (destination: string) => `${destination} : plan de voyage en direct`,
+      titleWithInterest: (destination: string, interest: string) =>
+        `${destination} : plan en direct pour ${lowerText(interest, language)}`,
+      transportCheckIn: "Check-in dans l'hebergement choisi",
+      transportDeparture: "Depart avec l'option de transport en direct choisie",
+      transportHeading: "Transport",
+    };
+  }
 
   return {
-    area: sanitizeString(item.area, copy.centralArea),
-    bookingUrl: sanitizeString(item.bookingUrl),
-    imageUrl: sanitizeString(item.imageUrl),
-    name: sanitizeString(item.name, `${copy.stayOption} ${index + 1}`),
-    note: sanitizeString(item.note, copy.stayNote),
-    pricePerNight: sanitizeString(item.pricePerNight, copy.priceOnRequest),
-    ratingLabel: sanitizeString(item.ratingLabel),
-    sourceLabel: sanitizeString(item.sourceLabel),
-    type: sanitizeString(item.type, copy.stayType),
-  } satisfies PlannerStayOption;
-}
-
-function normalizeDayPlan(
-  item: Partial<PlannerDayPlan>,
-  index: number,
-  language?: string
-) {
-  const copy = getPlannerCopy(language);
-
-  return {
-    dayLabel: sanitizeString(item.dayLabel, copy.dayLabel(index)),
-    items: sanitizeStringArray(item.items).slice(0, 4),
-    title: sanitizeString(item.title, copy.dayPlan),
-  } satisfies PlannerDayPlan;
-}
-
-function buildFallbackPlan(params: {
-  budget: string;
-  days: string;
-  destination: string;
-  language?: string;
-}): GroundedTravelPlan {
-  const copy = getPlannerCopy(params.language);
-
-  return {
-    budgetNote: `${copy.budgetFallback} ${normalizeBudgetToEuro(params.budget)} / ${params.days}.`,
-    profileTip: copy.profileTip,
-    stayOptions: [],
-    summary: `${copy.summary} ${params.destination}.`,
-    title: copy.unknownDestinationTitle(params.destination),
-    transportOptions: [],
-    tripDays: [],
+    arrivalFirstWalk: (destination: string) => `Лека първа разходка в ${destination}`,
+    arrivalTitle: "Пристигане и настройка",
+    budgetFallback: (budget: string) =>
+      `Бюджетът е зададен като ${budget}; част от live офертите изискват директна проверка в сайта на доставчика.`,
+    budgetFit: (estimatedTotal: number, days: string, budget: string) =>
+      `При ${budget} най-добрият видим fit стартира около ${Math.round(estimatedTotal)} EUR общо за ${days}.`,
+    budgetHeading: "Бюджет",
+    dayLabel: (dayNumber: number) => `Ден ${dayNumber}`,
+    daysHeading: "Дни",
+    departureBuffer: "Запази буфер за транспортни промени",
+    departureCheckout: "Check-out и тръгване обратно",
+    departureMorning: "Сутрин с лек local план и свободно време",
+    departureTitle: "Отпътуване",
+    dinnerNearStay: "Вечеря / локално преживяване близо до stay-а",
+    durationTbd: "Времето се уточнява",
+    errorGeneric: "Не успяхме да заредим live transport и stay оферти. Опитай пак.",
+    errorInternal: "Backend-ът върна вътрешна грешка при зареждане на live оферти.",
+    errorInvalidFallback: "Локалният fallback върна невалидни travel данни. Опитай пак.",
+    errorMissingFallbackKey:
+      "Локалният fallback няма AI ключ. Добави EXPO_PUBLIC_GEMINI_API_KEY или ползвай Functions backend.",
+    errorMissingFunction:
+      "Липсва Firebase функцията searchOffers. Deploy-ни backend-а и опитай пак.",
+    errorMissingProviderKeys:
+      "Backend-ът няма настроени provider ключове. Провери Firebase Functions env променливите.",
+    errorUnavailable: "Live travel backend-ът е недостъпен в момента. Опитай пак след малко.",
+    fallbackFocus: "разходка и локална атмосфера",
+    fullDayTitle: (destination: string) => `Пълен ден в ${destination}`,
+    homeCityFallback: "твоя град",
+    hourShort: "ч",
+    itineraryFocus: (focus: string) => `Фокус върху ${lowerText(focus, language)}`,
+    landmarkItem: "Основна забележителност или квартал",
+    minuteShort: "мин",
+    priceOnRequest: "Цена при запитване",
+    profileTipAccessibility: (homeBase: string, needs: string) =>
+      `Провери преди резервация достъпността на транспорта и stay-а. Търсенето е фокусирано спрямо профила ти от ${homeBase} и нуждите: ${needs}.`,
+    profileTipDefault: (homeBase: string) =>
+      `Офертите са подредени с приоритет към по-практичен транспорт и stay варианти от ${homeBase}.`,
+    profileTipHeading: "Съвет според профила",
+    profileTipStayStyle: (stayStyle: string, homeBase: string) =>
+      `Офертите са подредени с приоритет към ${lowerText(stayStyle, language)} и практичен транспорт от ${homeBase}.`,
+    stayHeading: "Настаняване",
+    summary: (params: {
+      destination: string;
+      interestLabel: string;
+      stayCount: number;
+      transportCount: number;
+      windowLabel: string;
+    }) =>
+      `Намерихме ${params.transportCount} реални transport оферти и ${params.stayCount} stay оферти за ${params.destination} в прозореца ${params.windowLabel}, подбрани според ${params.interestLabel}.`,
+    titleFallback: (destination: string) => `${destination}: live travel план`,
+    titleWithInterest: (destination: string, interest: string) =>
+      `${destination}: live план за ${lowerText(interest, language)}`,
+    transportCheckIn: "Check-in в избрания stay",
+    transportDeparture: "Тръгване с избрания live transport вариант",
+    transportHeading: "Транспорт",
   };
 }
 
-function normalizePlan(
-  rawPlan: RawGroundedTravelPlan,
-  params: { budget: string; days: string; destination: string; language?: string }
+function formatMoney(
+  amount: number | null,
+  currency: string,
+  language: AppLanguage = "bg"
 ) {
-  const transportOptions = dedupeByKey(
-    Array.isArray(rawPlan.transportOptions)
-      ? rawPlan.transportOptions.map((item, index) =>
-          normalizeTransportOption(item, index, params.language)
-        )
-      : [],
-    (item) => `${item.mode}|${item.provider}|${item.route}|${item.price}|${item.duration}`
-  );
-  const stayOptions = dedupeByKey(
-    Array.isArray(rawPlan.stayOptions)
-      ? rawPlan.stayOptions.map((item, index) =>
-          normalizeStayOption(item, index, params.language)
-        )
-      : [],
-    (item) => `${item.name}|${item.type}|${item.area}|${item.pricePerNight}`
-  );
-  const tripDays = dedupeByKey(
-    Array.isArray(rawPlan.tripDays)
-      ? rawPlan.tripDays.map((item, index) => {
-          const normalizedDay = normalizeDayPlan(item, index, params.language);
+  const copy = getPlannerCopy(language);
 
-          return {
-            ...normalizedDay,
-            items: dedupeByKey(normalizedDay.items, (value) => value),
-          };
-        })
-      : [],
-    (item) => `${item.dayLabel}|${item.title}|${item.items.join("|")}`
-  );
-  const fallbackPlan = buildFallbackPlan(params);
+  if (amount === null) {
+    return copy.priceOnRequest;
+  }
 
-  return {
-    ...fallbackPlan,
-    budgetNote: sanitizeString(
-      rawPlan.budgetNote,
-      fallbackPlan.budgetNote
-    ),
-    profileTip: sanitizeString(
-      rawPlan.profileTip,
-      fallbackPlan.profileTip
-    ),
-    stayOptions,
-    summary: sanitizeString(rawPlan.summary, fallbackPlan.summary),
-    title: sanitizeString(rawPlan.title, fallbackPlan.title),
-    transportOptions,
-    tripDays,
-  } satisfies GroundedTravelPlan;
+  return `${Math.round(amount)} ${currency}`;
 }
 
-function buildPlannerPrompt(params: {
+function formatDuration(
+  durationMinutes: number | null | undefined,
+  language: AppLanguage = "bg"
+) {
+  const copy = getPlannerCopy(language);
+
+  if (durationMinutes === null || durationMinutes === undefined) {
+    return copy.durationTbd;
+  }
+
+  const hours = Math.floor(durationMinutes / 60);
+  const minutes = durationMinutes % 60;
+
+  if (hours <= 0) {
+    return `${minutes} ${copy.minuteShort}`;
+  }
+
+  if (minutes === 0) {
+    return `${hours} ${copy.hourShort}`;
+  }
+
+  return `${hours} ${copy.hourShort} ${minutes} ${copy.minuteShort}`;
+}
+
+function getInterestSummary(profile: DiscoverProfile) {
+  return profile.interests.selectedOptions
+    .map((interest) => interest.replace(/^[^\p{L}\p{N}]+/u, "").trim())
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+function buildPlanTitle(
+  destination: string,
+  profile: DiscoverProfile,
+  language: AppLanguage = "bg"
+) {
+  const copy = getPlannerCopy(language);
+  const topInterest = getInterestSummary(profile)[0];
+
+  if (topInterest) {
+    return copy.titleWithInterest(destination, topInterest);
+  }
+
+  return copy.titleFallback(destination);
+}
+
+function buildPlanSummary(params: {
+  destination: string;
+  language?: AppLanguage;
+  profile: DiscoverProfile;
+  stayCount: number;
+  transportCount: number;
+  windowLabel: string;
+}) {
+  const language = normalizePlannerLanguage(params.language);
+  const copy = getPlannerCopy(language);
+  const topInterests = getInterestSummary(params.profile);
+  const interestLabel =
+    topInterests.length > 0
+      ? lowerText(topInterests.join(", "), language)
+      : language === "en"
+        ? "your preferences"
+        : language === "de"
+          ? "deine Vorlieben"
+          : language === "es"
+            ? "tus preferencias"
+            : language === "fr"
+              ? "tes preferences"
+              : "твоите предпочитания";
+
+  return copy.summary({
+    destination: params.destination,
+    interestLabel,
+    stayCount: params.stayCount,
+    transportCount: params.transportCount,
+    windowLabel: params.windowLabel,
+  });
+}
+
+function buildBudgetNote(params: {
   budget: string;
   days: string;
-  destination: string;
-  language?: string;
-  timing: string;
-  transportPreference: string;
+  language?: AppLanguage;
+  stayOptions: PlannerStayOption[];
+  transportOptions: PlannerTransportOption[];
   travelers: string;
-  profile: DiscoverProfile;
 }) {
-  const {
-    budget,
-    days,
-    destination,
-    timing,
-    transportPreference,
-    travelers,
-    profile,
-  } = params;
-  const normalizedBudget = normalizeBudgetToEuro(budget);
-  const homeBase = profile.personalProfile.homeBase || "Unknown";
+  const language = normalizePlannerLanguage(params.language);
+  const copy = getPlannerCopy(language);
+  const normalizedBudget = normalizeBudgetToEuro(params.budget);
+  const travelerCount = extractCount(params.travelers, 1);
+  const nights = Math.max(extractCount(params.days, 3) - 1, 1);
+  const roomCount = Math.max(1, Math.ceil(travelerCount / 2));
+  const cheapestTransport = extractFirstNumber(params.transportOptions[0]?.price ?? "");
+  const cheapestStay = extractFirstNumber(params.stayOptions[0]?.pricePerNight ?? "");
 
-  return [
-    "You are preparing grounded travel research notes for a second planning step.",
-    "You are a premium travel planning assistant inside a mobile app.",
-    `Answer in ${params.language || "Bulgarian"}.`,
-    "Use Google Search grounding to incorporate current travel information where possible.",
-    "Return concise factual research notes only. No intro. No filler.",
-    "Use EUR for all prices, estimates, totals, and suggestions.",
-    "Treat the user's home base as the trip origin.",
-    "Always research realistic transport from the user's home base to the destination.",
-    "Include bus options and shared transport / rideshare when relevant.",
-    "Include flights only when they are a realistic fit, not by default.",
-    "Respect the user's preferred transport. If it is not practical, note the closest viable fallback.",
-    "Adapt transport and stay suggestions to the total number of travelers.",
-    "Use the timing window to prefer seasonally appropriate and realistically bookable options.",
-    "Mention operator, airport, station, route, or platform names when grounding gives enough evidence.",
-    "Prefer guesthouses and boutique stays first, then hotels if needed.",
-    "Keep notes compact and highly concrete.",
-    "Do not repeat the same recommendation, route, or sentence in different sections.",
-    "Structure the notes with these headings exactly:",
-    "TRANSPORT",
-    "STAY",
-    "DAYS",
-    "BUDGET_FIT",
-    "PROFILE_TIP",
-    "",
-    `Trip origin / home base: """${homeBase}"""`,
-    `Budget (EUR): """${normalizedBudget}"""`,
-    `Trip length: """${days}"""`,
-    `Travelers count: """${travelers}"""`,
-    `Preferred transport: """${transportPreference}"""`,
-    `Timing / period: """${timing}"""`,
-    `Destination: """${destination}"""`,
-    `Username: """${profile.username || "Not provided"}"""`,
-    `Email: """${profile.email || "Not provided"}"""`,
-    `Full name: """${profile.personalProfile.fullName || "Not provided"}"""`,
-    `About me: """${profile.personalProfile.aboutMe || "Not provided"}"""`,
-    `Dream destinations: """${profile.personalProfile.dreamDestinations || "Not provided"}"""`,
-    `Travel pace: """${profile.personalProfile.travelPace || "Not provided"}"""`,
-    `Stay style: """${profile.personalProfile.stayStyle || "Not provided"}"""`,
-    `Interests: """${profile.interests.selectedOptions.join(", ") || "None provided"}"""`,
-    `Interests note: """${profile.interests.note || "None"}"""`,
-    `Accessibility / assistance needs: """${
-      profile.assistance.selectedOptions.join(", ") || "None provided"
-    }"""`,
-    `Assistance note: """${profile.assistance.note || "None"}"""`,
-    `Skills / ways to help: """${profile.skills.selectedOptions.join(", ") || "None provided"}"""`,
-    `Skills note: """${profile.skills.note || "None"}"""`,
-  ].join("\n");
+  if (cheapestTransport === null && cheapestStay === null) {
+    return copy.budgetFallback(normalizedBudget);
+  }
+
+  const estimatedTotal =
+    (cheapestTransport !== null ? cheapestTransport * travelerCount : 0) +
+    (cheapestStay !== null ? cheapestStay * nights * roomCount : 0);
+
+  return copy.budgetFit(estimatedTotal, params.days, normalizedBudget);
 }
 
-function buildStructuredPlanPrompt(params: {
-  budget: string;
+function buildProfileTip(
+  profile: DiscoverProfile,
+  language: AppLanguage = "bg"
+) {
+  const copy = getPlannerCopy(language);
+  const accessibilityNeeds = [
+    ...profile.assistance.selectedOptions,
+    profile.assistance.note,
+  ]
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const stayStyle = sanitizeString(profile.personalProfile.stayStyle);
+  const homeBase = sanitizeString(profile.personalProfile.homeBase);
+
+  if (accessibilityNeeds.length > 0) {
+    return copy.profileTipAccessibility(
+      homeBase || copy.homeCityFallback,
+      accessibilityNeeds.slice(0, 2).join(", ")
+    );
+  }
+
+  if (stayStyle) {
+    return copy.profileTipStayStyle(
+      stayStyle,
+      homeBase || copy.homeCityFallback
+    );
+  }
+
+  return copy.profileTipDefault(homeBase || copy.homeCityFallback);
+}
+
+function buildDayPlans(params: {
   days: string;
   destination: string;
-  language?: string;
-  timing: string;
-  transportPreference: string;
-  travelers: string;
+  language?: AppLanguage;
   profile: DiscoverProfile;
-  groundedNotes: string;
 }) {
-  const {
-    budget,
-    days,
-    destination,
-    timing,
-    transportPreference,
-    travelers,
-    profile,
-    groundedNotes,
-  } = params;
+  const language = normalizePlannerLanguage(params.language);
+  const copy = getPlannerCopy(language);
+  const dayCount = Math.max(extractCount(params.days, 3), 1);
+  const interests = getInterestSummary(params.profile);
+  const fallbackFocus = interests[0] || copy.fallbackFocus;
 
-  const homeBase = profile.personalProfile.homeBase || "Sofia, Bulgaria";
-  const normalizedBudget = normalizeBudgetToEuro(budget);
+  return Array.from({ length: dayCount }, (_, index) => {
+    const dayNumber = index + 1;
 
-  return [
-    `Generate a complete structured travel plan in ${params.language || "English"}.`,
-    "",
-    "TRIP DETAILS:",
-    `- Destination: ${destination}`,
-    `- Origin / home base: ${homeBase}`,
-    `- Budget: ${normalizedBudget} EUR total`,
-    `- Duration: ${days} days`,
-    `- Travelers: ${travelers}`,
-    `- Preferred transport: ${transportPreference}`,
-    `- Timing: ${timing}`,
-    "",
-    "YOU MUST GENERATE ALL OF THESE (never leave empty):",
-    "",
-    "transportOptions (MINIMUM 2 items): Real transport options from the origin to destination.",
-    `Example for ${homeBase} → ${destination}:`,
-    "- Include the user's preferred transport mode first",
-    "- Add 1-2 alternative options (bus, train, flight, car as applicable)",
-    "- Each must have: mode, provider (real company name), route (e.g. 'Sofia → Plovdiv'), duration, price in EUR, note",
-    "- Use realistic prices and real operator names (e.g. Union Ivkoni, BlaBlaCar, Ryanair, FlixBus, BDZ)",
-    "",
-    "stayOptions (MINIMUM 2 items): Real accommodation options at the destination.",
-    `Example for ${destination}:`,
-    "- Include a budget option and a mid-range option",
-    "- Each must have: name (real or realistic hotel/hostel name), type (hotel/hostel/guesthouse/Airbnb), area (neighborhood), pricePerNight in EUR, note",
-    "- Use realistic prices for the destination",
-    "",
-    `tripDays (EXACTLY ${days} items — one per day): Day-by-day itinerary.`,
-    "- Each day must have: dayLabel (e.g. 'Day 1'), title (short theme), items (2-4 specific activities with real place names)",
-    "- Include specific restaurant/cafe names, museum names, landmark names — be concrete",
-    "",
-    "Also provide:",
-    "- title: catchy trip title",
-    "- summary: 2 sentences describing the trip",
-    "- budgetNote: 1 sentence about how the budget fits",
-    "- profileTip: 2 sentences personalized to the traveler",
-    "",
-    "All prices in EUR. Be specific with real names, not generic descriptions.",
-    groundedNotes ? `\nAdditional research notes (use if helpful):\n${groundedNotes}` : "",
-  ].join("\n");
+    if (dayNumber === 1) {
+      return {
+        dayLabel: copy.dayLabel(dayNumber),
+        items: [
+          copy.transportDeparture,
+          copy.transportCheckIn,
+          copy.arrivalFirstWalk(params.destination),
+        ],
+        title: copy.arrivalTitle,
+      } satisfies PlannerDayPlan;
+    }
+
+    if (dayNumber === dayCount) {
+      return {
+        dayLabel: copy.dayLabel(dayNumber),
+        items: [
+          copy.departureMorning,
+          copy.departureCheckout,
+          copy.departureBuffer,
+        ],
+        title: copy.departureTitle,
+      } satisfies PlannerDayPlan;
+    }
+
+    const focus = interests[(dayNumber - 2) % Math.max(interests.length, 1)] || fallbackFocus;
+
+    return {
+      dayLabel: copy.dayLabel(dayNumber),
+      items: [
+        copy.itineraryFocus(focus),
+        copy.landmarkItem,
+        copy.dinnerNearStay,
+      ],
+      title: copy.fullDayTitle(params.destination),
+    } satisfies PlannerDayPlan;
+  });
 }
 
-export function formatGroundedTravelPlan(plan: GroundedTravelPlan) {
-  return dedupeTextLines([
+export function formatGroundedTravelPlan(
+  plan: GroundedTravelPlan,
+  language?: AppLanguage
+) {
+  const selectedLanguage = normalizePlannerLanguage(language ?? plan.language);
+  const copy = getPlannerCopy(selectedLanguage);
+
+  return [
     plan.title,
     "",
     plan.summary,
-    plan.budgetNote ? `\nBudget: ${plan.budgetNote}` : "",
+    plan.budgetNote ? `\n${copy.budgetHeading}: ${plan.budgetNote}` : "",
     "",
-    "Transport:",
+    `${copy.transportHeading}:`,
     ...plan.transportOptions.map(
       (option) =>
-        `- ${option.mode}: ${option.provider} | ${option.route} | ${option.price} | ${option.duration}`
+        `- ${option.mode}: ${option.provider} | ${option.route} | ${option.price} | ${option.duration} | ${option.sourceLabel || ""}`
     ),
     "",
-    "Stay:",
+    `${copy.stayHeading}:`,
     ...plan.stayOptions.map(
       (stay) =>
-        `- ${stay.name} (${stay.type}) | ${stay.area} | ${stay.pricePerNight}`
+        `- ${stay.name} (${stay.type}) | ${stay.area} | ${stay.pricePerNight} | ${stay.sourceLabel || ""}`
     ),
     "",
-    "Days:",
+    `${copy.daysHeading}:`,
     ...plan.tripDays.map(
       (day) => `- ${day.dayLabel}: ${day.title} | ${day.items.join(" • ")}`
     ),
     "",
-    `Profile tip: ${plan.profileTip}`,
-  ])
+    `${copy.profileTipHeading}: ${plan.profileTip}`,
+  ]
     .filter(Boolean)
     .join("\n");
 }
@@ -640,402 +637,105 @@ export async function generateGroundedTravelPlan(params: {
   travelers: string;
   profile: DiscoverProfile;
 }) {
-  const apiKey = getAIApiKey();
+  const language = normalizePlannerLanguage(params.language);
+  const offers = await searchTravelOffers(params);
 
-  if (!apiKey) {
-    throw new Error("missing-api-key");
-  }
+  const transportOptions = offers.transportOptions.map((offer) => ({
+    bookingUrl: offer.bookingUrl,
+    duration: formatDuration(offer.durationMinutes, language),
+    mode: offer.mode,
+    note: offer.note,
+    price: formatMoney(offer.priceAmount, offer.priceCurrency, language),
+    provider: offer.provider,
+    route: offer.route,
+    sourceLabel: offer.sourceLabel,
+  })) satisfies PlannerTransportOption[];
 
-  // Skip research step entirely — go straight to structured plan generation.
-  // This halves the API calls and avoids rate limits.
-  const structuredPrompt = buildStructuredPlanPrompt({
-    ...params,
-    groundedNotes: "",
-  });
-
-  const structuredJsonText = await callAI({
-    apiKey,
-    prompt: structuredPrompt,
-    systemPrompt: [
-      "You are a travel plan generator. Return ONLY valid JSON matching this exact schema.",
-      "transportOptions: array of {mode, provider, route, duration, price, note} — MINIMUM 2 items",
-      "stayOptions: array of {name, type, area, pricePerNight, note} — MINIMUM 2 items",
-      "tripDays: array of {dayLabel, title, items: string[]} — one per day",
-      "Also: title (string), summary (string), budgetNote (string), profileTip (string)",
-      "ALL fields are required. NEVER return empty arrays.",
-    ].join("\n"),
-    jsonMode: true,
-  });
-
-  const parsedPlan = extractJsonObject(structuredJsonText) as RawGroundedTravelPlan;
-  const plan = normalizePlan(parsedPlan, params);
-
-  // Append daily cost estimate to the budget note when possible.
-  try {
-    const homeBase = params.profile.personalProfile.homeBase || "Europe";
-    const costs = await fetchDestinationCosts(params.destination, homeBase);
-    const costLine = `Daily expenses estimate: ${formatDailyCostSummary(costs, params.language || "English")}`;
-    plan.budgetNote = plan.budgetNote ? `${plan.budgetNote}\n${costLine}` : costLine;
-  } catch {
-    // Cost enrichment is best-effort; do not block plan generation.
-  }
-
-  return plan;
-}
-
-function buildPlannerFollowUpPrompt(params: {
-  budget: string;
-  days: string;
-  destination: string;
-  language?: string;
-  timing: string;
-  transportPreference: string;
-  travelers: string;
-  profile: DiscoverProfile;
-  currentPlanText: string;
-  recentMessages: { role: "assistant" | "user"; text: string }[];
-  userRequest: string;
-}) {
-  const {
-    budget,
-    currentPlanText,
-    days,
-    destination,
-    profile,
-    recentMessages,
-    timing,
-    transportPreference,
-    travelers,
-    userRequest,
-  } = params;
-
-  const recentConversation =
-    recentMessages.length > 0
-      ? recentMessages
-          .slice(-6)
-          .map((message) => `${message.role === "assistant" ? "AI" : "User"}: ${message.text}`)
-          .join("\n")
-      : "No previous follow-up messages.";
-
-  return [
-    "You are continuing an existing travel planning chat inside a mobile app.",
-    `Answer in ${params.language || "Bulgarian"}.`,
-    "Use Google Search grounding when helpful for current transport, stay, timing, or pricing details.",
-    "The user already has a travel plan. Answer only the follow-up request.",
-    "If the user wants changes, propose the revised direction clearly and concretely.",
-    "If exact live prices are unclear, say they are approximate instead of inventing certainty.",
-    "Do not repeat the full old plan unless it is necessary.",
-    "Avoid repeated bullets, repeated recommendations, and near-identical phrasing.",
-    "Keep the answer concise, practical, and easy to scan on mobile.",
-    "You may use short paragraphs or a few short bullet points.",
-    "",
-    `Budget: ${normalizeBudgetToEuro(budget)}`,
-    `Days: ${days}`,
-    `Destination: ${destination}`,
-    `Travelers: ${travelers}`,
-    `Preferred transport: ${transportPreference}`,
-    `Timing: ${timing}`,
-    `Username: ${profile.username || "Not provided"}`,
-    `Email: ${profile.email || "Not provided"}`,
-    `Home base: ${profile.personalProfile.homeBase || "Unknown"}`,
-    `Travel pace: ${profile.personalProfile.travelPace || "Not provided"}`,
-    `Stay style: ${profile.personalProfile.stayStyle || "Not provided"}`,
-    `About me: ${profile.personalProfile.aboutMe || "Not provided"}`,
-    `Dream destinations: ${profile.personalProfile.dreamDestinations || "Not provided"}`,
-    `Interests: ${profile.interests.selectedOptions.join(", ") || "None provided"}`,
-    `Accessibility / assistance needs: ${
-      profile.assistance.selectedOptions.join(", ") || "None provided"
-    }`,
-    "",
-    "Current plan:",
-    currentPlanText,
-    "",
-    "Recent conversation:",
-    recentConversation,
-    "",
-    `Latest user request: ${userRequest}`,
-  ].join("\n");
-}
-
-export async function generateGroundedTravelFollowUp(params: {
-  budget: string;
-  days: string;
-  destination: string;
-  language?: string;
-  timing: string;
-  transportPreference: string;
-  travelers: string;
-  profile: DiscoverProfile;
-  currentPlanText: string;
-  recentMessages: { role: "assistant" | "user"; text: string }[];
-  userRequest: string;
-}) {
-  const apiKey = getAIApiKey();
-
-  if (!apiKey) {
-    throw new Error("missing-api-key");
-  }
-
-  return callAI({
-    apiKey,
-    prompt: buildPlannerFollowUpPrompt(params),
-  });
-}
-
-export type ConversationalExtractedInfo = {
-  destination: string;
-  budget: string;
-  days: string;
-  travelers: string;
-  transportPreference: string;
-  timing: string;
-  interests: string;
-  accommodation: string;
-  specialNeeds: string;
-};
-
-export type ConversationalResponse = {
-  message: string;
-  extractedInfo: ConversationalExtractedInfo;
-  readyToGenerate: boolean;
-};
-
-const CONVERSATIONAL_RESPONSE_SCHEMA = {
-  type: "object",
-  properties: {
-    message: { type: "string" },
-    extractedInfo: {
-      type: "object",
-      properties: {
-        destination: { type: "string" },
-        budget: { type: "string" },
-        days: { type: "string" },
-        travelers: { type: "string" },
-        transportPreference: { type: "string" },
-        timing: { type: "string" },
-        interests: { type: "string" },
-        accommodation: { type: "string" },
-        specialNeeds: { type: "string" },
-      },
-      required: [
-        "destination",
-        "budget",
-        "days",
-        "travelers",
-        "transportPreference",
-        "timing",
-        "interests",
-        "accommodation",
-        "specialNeeds",
-      ],
-    },
-    readyToGenerate: { type: "boolean" },
-  },
-  required: ["message", "extractedInfo", "readyToGenerate"],
-} as const;
-
-function buildConversationalSystemPrompt(params: {
-  language?: string;
-  profile: DiscoverProfile;
-}) {
-  const { profile } = params;
-  const homeBase = profile.personalProfile.homeBase || "Unknown";
-  const lang = params.language || "Bulgarian";
-
-  return [
-    `You are a travel planning assistant. Answer ONLY in ${lang}.`,
-    "",
-    "You ask the user 7 questions, ONE per message, in this exact order:",
-    "",
-    "Q1: Where do you want to go? (already asked — the user's first message is their answer)",
-    "Q2: When do you want to travel?",
-    "Q3: How many days?",
-    "Q4: How many people are going? Solo, couple, friends, family?",
-    "Q5: What is your budget in EUR?",
-    "Q6: How do you want to get there? Flight, bus, train, car?",
-    "Q7: What do you want to do there? Beach, museums, food, nightlife, hiking?",
-    "",
-    "FORMAT OF EACH RESPONSE:",
-    '- Acknowledge the user\'s answer in 3-5 words (e.g. "Plovdiv, great choice!") then ask the NEXT question.',
-    "- Keep it to 1-2 short sentences total.",
-    "- Ask exactly ONE question per message.",
-    "",
-    "EXAMPLES of good responses:",
-    `- User says "Barcelona" → you reply: "Barcelona, great choice! When do you want to travel?"`,
-    `- User says "July" → you reply: "July it is! How many days should the trip be?"`,
-    `- User says "5" → you reply: "5 days, perfect. How many people are going — solo, couple, friends?"`,
-    `- User says "2 friends" → you reply: "A trip with friends! What's your total budget in EUR?"`,
-    `- User says "500" → you reply: "€500 total, got it. How do you want to get there — flight, bus, train, car?"`,
-    `- User says "bus" → you reply: "Bus it is! What do you want to do there — relax on the beach, visit museums, try local food, nightlife, hiking?"`,
-    `- User says "food and museums" → you reply with a summary and ask to confirm.`,
-    "",
-    "CRITICAL RULE ABOUT readyToGenerate:",
-    "- readyToGenerate MUST be false in EVERY response UNLESS the user's LAST message is an explicit confirmation like 'yes', 'go', 'generate', 'да', 'давай', 'ok', 'sure'.",
-    "- You MUST ask ALL 7 questions FIRST. After Q7 is answered, present a summary and ask for confirmation.",
-    "- If fewer than 5 extractedInfo fields are filled, readyToGenerate MUST be false. No exceptions.",
-    "- The ONLY time readyToGenerate can be true is when you already showed a summary AND the user confirmed.",
-    "",
-    "EXTRACTEDINFO RULES:",
-    "- Fill fields ONLY with what the user explicitly said. Empty string for unknown fields.",
-    "- interests = what they want to do. accommodation = their preferred stay type. specialNeeds = dietary/accessibility.",
-    `- User's profile: home base = "${homeBase}", stay style = "${profile.personalProfile.stayStyle || ""}", interests from profile = "${profile.interests.selectedOptions.join(", ") || ""}"`,
-    "- Use profile info to pre-fill accommodation/specialNeeds if relevant, but NEVER skip asking the user questions.",
-  ].join("\n");
-}
-
-function sanitizeConversationalResponse(
-  raw: Record<string, unknown>,
-  language?: string
-): ConversationalResponse {
-  const info = (raw.extractedInfo && typeof raw.extractedInfo === "object"
-    ? raw.extractedInfo
-    : {}) as Record<string, unknown>;
-  const copy = getPlannerCopy(language);
+  const stayOptions = offers.stayOptions.map((offer) => ({
+    area: offer.area,
+    bookingUrl: offer.bookingUrl,
+    imageUrl: offer.imageUrl,
+    name: offer.name,
+    note: offer.note,
+    pricePerNight: formatMoney(offer.priceAmount, offer.priceCurrency, language),
+    ratingLabel: offer.ratingLabel,
+    sourceLabel: offer.sourceLabel,
+    type: offer.type,
+  })) satisfies PlannerStayOption[];
 
   return {
-    message: sanitizeString(raw.message, copy.fallbackMessage),
-    extractedInfo: {
-      destination: sanitizeString(info.destination),
-      budget: sanitizeString(info.budget),
-      days: sanitizeString(info.days),
-      travelers: sanitizeString(info.travelers),
-      transportPreference: sanitizeString(info.transportPreference),
-      timing: sanitizeString(info.timing),
-      interests: sanitizeString(info.interests),
-      accommodation: sanitizeString(info.accommodation),
-      specialNeeds: sanitizeString(info.specialNeeds),
-    },
-    readyToGenerate: raw.readyToGenerate === true,
-  };
-}
-
-export async function generateConversationalResponse(params: {
-  conversationHistory: { role: "assistant" | "user"; text: string }[];
-  language?: string;
-  profile: DiscoverProfile;
-}): Promise<ConversationalResponse> {
-  const apiKey = getAIApiKey();
-
-  if (!apiKey) {
-    throw new Error("missing-api-key");
-  }
-
-  const systemPrompt = buildConversationalSystemPrompt({
-    language: params.language,
-    profile: params.profile,
-  });
-
-  // Pass all messages EXCEPT the last one as conversationHistory,
-  // because callAI appends `prompt` as the final user message.
-  const allMessages = params.conversationHistory;
-  const historyForApi = allMessages.slice(0, -1).map((m) => ({
-    role: m.role === "assistant" ? ("assistant" as const) : ("user" as const),
-    content: m.text,
-  }));
-  const lastUserMessage = allMessages[allMessages.length - 1]?.text || "Hello";
-
-  const jsonSchema = [
-    "You MUST respond with a JSON object with exactly these fields:",
-    '{ "message": "your reply text (the next question or summary)", "extractedInfo": { "destination": "", "budget": "", "days": "", "travelers": "", "transportPreference": "", "timing": "", "interests": "", "accommodation": "", "specialNeeds": "" }, "readyToGenerate": false }',
-    "Fill extractedInfo fields ONLY with values the user has explicitly stated. Use empty string for unknown fields.",
-    "readyToGenerate must be false unless the user just confirmed they want to generate.",
-  ].join("\n");
-
-  const text = await callAI({
-    apiKey,
-    prompt: lastUserMessage,
-    systemPrompt: systemPrompt + "\n\n" + jsonSchema,
-    conversationHistory: historyForApi,
-    jsonMode: true,
-  });
-
-  const parsed = extractJsonObject(text);
-  return sanitizeConversationalResponse(parsed, params.language);
+    budgetNote: buildBudgetNote({
+      budget: params.budget,
+      days: params.days,
+      language,
+      stayOptions,
+      transportOptions,
+      travelers: params.travelers,
+    }),
+    language,
+    profileTip: buildProfileTip(params.profile, language),
+    stayOptions,
+    summary: buildPlanSummary({
+      destination: params.destination,
+      language,
+      profile: params.profile,
+      stayCount: stayOptions.length,
+      transportCount: transportOptions.length,
+      windowLabel: offers.searchContext.windowLabel,
+    }),
+    title: buildPlanTitle(params.destination, params.profile, language),
+    transportOptions,
+    tripDays: buildDayPlans({
+      days: params.days,
+      destination: params.destination,
+      language,
+      profile: params.profile,
+    }),
+  } satisfies GroundedTravelPlan;
 }
 
 export function getHomePlannerErrorMessage(
   error: unknown,
   language: AppLanguage = "bg"
 ) {
-  if (!(error instanceof Error)) {
-    return language === "en"
-      ? "We couldn't generate a route. Please try again."
-      : language === "de"
-        ? "Wir konnten keine Route generieren. Bitte versuche es erneut."
-        : language === "es"
-          ? "No pudimos generar la ruta. Inténtalo de nuevo."
-          : language === "fr"
-            ? "Nous n'avons pas pu générer l'itinéraire. Réessaie."
-            : "Не успяхме да генерираме маршрут. Опитай пак.";
+  const copy = getPlannerCopy(language);
+  const message = error instanceof Error ? error.message : "";
+  const code =
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { code?: unknown }).code === "string"
+      ? (error as { code: string }).code
+      : "";
+
+  if (code.includes("functions/not-found")) {
+    return copy.errorMissingFunction;
   }
 
-  if (error.message === "missing-api-key") {
-    return language === "en"
-      ? "API key is missing. Add EXPO_PUBLIC_GEMINI_API_KEY and restart the app."
-      : language === "de"
-        ? "API-Schlüssel fehlt. Füge EXPO_PUBLIC_GEMINI_API_KEY hinzu und starte die App neu."
-        : language === "es"
-          ? "Falta la clave API. Añade EXPO_PUBLIC_GEMINI_API_KEY y reinicia la app."
-          : language === "fr"
-            ? "Clé API manquante. Ajoute EXPO_PUBLIC_GEMINI_API_KEY et redémarre l’application."
-            : "Липсва API ключ. Добави EXPO_PUBLIC_GEMINI_API_KEY и рестартирай приложението.";
+  if (code.includes("functions/failed-precondition") || message.includes("functions/failed-precondition")) {
+    return copy.errorMissingProviderKeys;
   }
 
-  if (error.message.startsWith("ai-request-failed:429")) {
-    return language === "en"
-      ? "AI hit the request limit. Please try again later."
-      : language === "de"
-        ? "KI hat das Anfrage-Limit erreicht. Bitte versuche es später erneut."
-        : language === "es"
-          ? "La IA alcanzó el límite de solicitudes. Inténtalo más tarde."
-          : language === "fr"
-            ? "L'IA a atteint la limite de requêtes. Réessaie plus tard."
-            : "AI достигна лимит за заявки. Опитай отново по-късно.";
+  if (
+    code.includes("functions/unavailable") ||
+    message.includes("functions/unavailable") ||
+    message.includes("Failed to fetch") ||
+    message.includes("CORS")
+  ) {
+    return copy.errorUnavailable;
   }
 
-  if (error.message.startsWith("ai-request-failed:")) {
-    return language === "en"
-      ? "We couldn't fetch fresh travel data. Check the key and your network."
-      : language === "de"
-        ? "Wir konnten keine aktuellen Reisedaten abrufen. Prüfe Schlüssel und Netzwerk."
-        : language === "es"
-          ? "No pudimos obtener datos de viaje actualizados. Revisa la clave y la red."
-          : language === "fr"
-            ? "Nous n'avons pas pu récupérer les données de voyage récentes. Vérifie la clé et le réseau."
-            : "Не успяхме да вземем актуални данни за пътуване. Провери ключа и мрежата.";
+  if (message.includes("missing-ai-fallback-key")) {
+    return copy.errorMissingFallbackKey;
   }
 
-  if (error.message === "empty-ai-response" || error.message === "empty-grounded-response") {
-    return language === "en"
-      ? "AI didn't return a route. Please try again."
-      : language === "de"
-        ? "KI hat keine Route zurückgegeben. Bitte versuche es erneut."
-        : language === "es"
-          ? "La IA no devolvió una ruta. Inténtalo de nuevo."
-          : language === "fr"
-            ? "L'IA n'a pas renvoyé d'itinéraire. Réessaie."
-            : "AI не върна маршрут. Опитай отново.";
+  if (message.includes("fallback-invalid-json")) {
+    return copy.errorInvalidFallback;
   }
 
-  if (error instanceof SyntaxError) {
-    return language === "en"
-      ? "AI returned an unexpected format. Please try again."
-      : language === "de"
-        ? "KI hat ein unerwartetes Format zurückgegeben. Bitte versuche es erneut."
-        : language === "es"
-          ? "La IA devolvió un formato inesperado. Inténtalo de nuevo."
-          : language === "fr"
-            ? "L'IA a renvoyé un format inattendu. Réessaie."
-            : "AI върна неочакван формат. Опитай пак.";
+  if (message.includes("functions/internal")) {
+    return copy.errorInternal;
   }
 
-  return language === "en"
-    ? "We couldn't generate a route. Please try again."
-    : language === "de"
-      ? "Wir konnten keine Route generieren. Bitte versuche es erneut."
-      : language === "es"
-        ? "No pudimos generar la ruta. Inténtalo de nuevo."
-        : language === "fr"
-          ? "Nous n'avons pas pu générer l'itinéraire. Réessaie."
-          : "Не успяхме да генерираме маршрут. Опитай пак.";
+  return copy.errorGeneric;
 }

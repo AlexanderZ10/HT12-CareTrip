@@ -1,4 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
+import { useIsFocused } from "@react-navigation/native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
@@ -266,6 +267,7 @@ export default function DiscoverTabScreen() {
   const router = useRouter();
   const { colors } = useAppTheme();
   const { language, languageForPrompt, t } = useAppLanguage();
+  const isFocused = useIsFocused();
 
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -461,6 +463,7 @@ export default function DiscoverTabScreen() {
           }
 
           if (
+            isFocused &&
             (!storedDiscoverData || storedDiscoverData.trips.length === 0) &&
             !hasRequestedInitialTripsRef.current
           ) {
@@ -473,6 +476,7 @@ export default function DiscoverTabScreen() {
               storedDiscoverData
             );
           } else if (
+            isFocused &&
             storedDiscoverData?.trips.length &&
             storedDiscoverData.language !== languageForPromptRef.current &&
             !hasRequestedInitialTripsRef.current
@@ -500,10 +504,11 @@ export default function DiscoverTabScreen() {
       unsubscribeProfile?.();
       unsubscribeAuth();
     };
-  }, [router]);
+  }, [isFocused, router]);
 
   // Regenerate discover trips when the UI language changes
   useEffect(() => {
+    if (!isFocused) return;
     if (!user || !profile || generating) return;
     if (!discoverData?.trips.length) return;
     if (discoverData.language === languageForPrompt) return;
@@ -515,7 +520,7 @@ export default function DiscoverTabScreen() {
       discoverData.trips,
       discoverData
     );
-  }, [discoverData, generating, languageForPrompt, profile, user]);
+  }, [discoverData, generating, isFocused, languageForPrompt, profile, user]);
 
   const handleRefresh = async () => {
     if (!user || !profile || generating || refreshUsedToday) {

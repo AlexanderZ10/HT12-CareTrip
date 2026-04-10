@@ -659,17 +659,6 @@ export async function searchTravelOffers(input: SearchTravelOffersInput) {
         : [],
     } satisfies LiveTravelOffersResponse;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-
-    if (
-      message.includes("functions/not-found") ||
-      message.includes("functions/unavailable") ||
-      message.includes("Failed to fetch") ||
-      message.includes("CORS")
-    ) {
-      return searchTravelOffersFallback(input, searchWindow);
-    }
-
     throw error;
   }
 }

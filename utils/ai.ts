@@ -3,7 +3,9 @@
  */
 
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
-const DEFAULT_AI_MODEL = "gemini-2.5-flash";
+const DEFAULT_AI_MODEL = "gemini-2.5-flash-lite";
+const RETRYABLE_AI_STATUS_CODES = new Set([429, 503]);
+const MAX_AI_RETRIES = 3;
 
 function resolveAIModel() {
   const configuredModel = process.env.EXPO_PUBLIC_GEMINI_MODEL?.trim();
@@ -11,6 +13,43 @@ function resolveAIModel() {
 }
 
 export const AI_MODEL = resolveAIModel();
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getRetryAfterDelayMs(headerValue: string | null) {
+  if (!headerValue) {
+    return null;
+  }
+
+  const seconds = Number(headerValue);
+
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+
+  const retryDateMs = Date.parse(headerValue);
+
+  if (!Number.isFinite(retryDateMs)) {
+    return null;
+  }
+
+  return Math.max(retryDateMs - Date.now(), 0);
+}
+
+function getRetryDelayMs(status: number, attempt: number, retryAfterHeader: string | null) {
+  const retryAfterDelayMs = getRetryAfterDelayMs(retryAfterHeader);
+
+  if (retryAfterDelayMs !== null) {
+    return Math.min(retryAfterDelayMs, 12000);
+  }
+
+  const baseDelayMs = status === 429 ? 2200 : 1600;
+  const jitterMs = Math.floor(Math.random() * 500);
+
+  return Math.min(baseDelayMs * 2 ** attempt + jitterMs, 12000);
+}
 
 function buildGeminiContents(params: {
   prompt: string;
@@ -105,19 +144,8 @@ export async function callAI(params: {
     };
   }
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": params.apiKey,
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (response.status === 429) {
-    // Rate limited — wait and retry once
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-    const retryResponse = await fetch(endpoint, {
+  for (let attempt = 0; attempt <= MAX_AI_RETRIES; attempt += 1) {
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -126,30 +154,36 @@ export async function callAI(params: {
       body: JSON.stringify(body),
     });
 
-    if (!retryResponse.ok) {
-      const errorText = await retryResponse.text();
-      throw new Error(`ai-request-failed:${retryResponse.status}:${errorText}`);
+    if (response.ok) {
+      const data = await response.json();
+      const text = extractGeminiText(data);
+
+      if (!text) {
+        throw new Error("empty-ai-response");
+      }
+
+      return text;
     }
 
-    const retryData = await retryResponse.json();
-    const retryText = extractGeminiText(retryData);
-    if (!retryText) throw new Error("empty-ai-response");
-    return retryText;
-  }
-
-  if (!response.ok) {
     const errorText = await response.text();
+    const shouldRetry =
+      RETRYABLE_AI_STATUS_CODES.has(response.status) && attempt < MAX_AI_RETRIES;
+
+    if (shouldRetry) {
+      const retryDelayMs = getRetryDelayMs(
+        response.status,
+        attempt,
+        response.headers.get("retry-after")
+      );
+
+      await wait(retryDelayMs);
+      continue;
+    }
+
     throw new Error(`ai-request-failed:${response.status}:${errorText}`);
   }
 
-  const data = await response.json();
-  const text = extractGeminiText(data);
-
-  if (!text) {
-    throw new Error("empty-ai-response");
-  }
-
-  return text;
+  throw new Error("empty-ai-response");
 }
 
 export function getAIApiKey(): string | null {

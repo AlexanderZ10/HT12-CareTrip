@@ -87,9 +87,18 @@ function parseStructuredPlan(value: unknown): GroundedTravelPlan | null {
   }
 
   const rawPlan = value as Record<string, unknown>;
+  const rawLanguage = sanitizeString(rawPlan.language);
 
   return {
     budgetNote: sanitizeString(rawPlan.budgetNote),
+    language:
+      rawLanguage === "en" ||
+      rawLanguage === "de" ||
+      rawLanguage === "es" ||
+      rawLanguage === "fr" ||
+      rawLanguage === "bg"
+        ? (rawLanguage as GroundedTravelPlan["language"])
+        : "bg",
     profileTip: sanitizeString(rawPlan.profileTip),
     stayOptions: Array.isArray(rawPlan.stayOptions)
       ? rawPlan.stayOptions
@@ -205,7 +214,7 @@ export function createEmptyPlannerState(initialAssistantMessage: string): Stored
     travelers: "",
     latestPlan: null,
     messages: [createHomeChatMessage("assistant", initialAssistantMessage)],
-    step: "chatting",
+    step: "budget",
   };
 }
 
@@ -227,7 +236,7 @@ export function createHomePlannerChat(
 
 export function isHomePlannerChatUntouched(chat: HomePlannerChatThread) {
   return (
-    chat.state.step === "chatting" &&
+    chat.state.step === "budget" &&
     !chat.state.budget &&
     !chat.state.days &&
     !chat.state.destination &&
@@ -296,7 +305,8 @@ export function createHomePlannerChatFromSharedTrip(
 }
 
 function parsePlannerStep(value: unknown): HomePlannerStep {
-  return value === "chatting" ||
+  return value === "budget" ||
+    value === "chatting" ||
     value === "days" ||
     value === "travelers" ||
     value === "transport" ||
@@ -304,7 +314,7 @@ function parsePlannerStep(value: unknown): HomePlannerStep {
     value === "destination" ||
     value === "done"
     ? value
-    : "chatting";
+    : "budget";
 }
 
 function parsePlannerMessages(value: unknown): HomeChatMessage[] {
@@ -333,6 +343,13 @@ function parsePlannerStateFromRaw(
   rawState: Record<string, unknown>,
   initialAssistantMessage: string
 ): StoredHomePlannerState {
+  const parsedStep = parsePlannerStep(rawState.step);
+  const parsedLatestPlan = parseStoredHomePlan(rawState.latestPlan);
+
+  if (parsedStep === "chatting" || (parsedStep === "done" && !parsedLatestPlan)) {
+    return createEmptyPlannerState(initialAssistantMessage);
+  }
+
   const messages = parsePlannerMessages(rawState.chatMessages ?? rawState.messages);
   const followUpMessages = parsePlannerMessages(rawState.followUpMessages);
 
@@ -344,12 +361,12 @@ function parsePlannerStateFromRaw(
     timing: sanitizeString(rawState.timing),
     transportPreference: sanitizeString(rawState.transportPreference),
     travelers: sanitizeString(rawState.travelers),
-    latestPlan: parseStoredHomePlan(rawState.latestPlan),
+    latestPlan: parsedLatestPlan,
     messages:
       messages.length > 0
         ? messages
         : [createHomeChatMessage("assistant", initialAssistantMessage)],
-    step: parsePlannerStep(rawState.step),
+    step: parsedStep,
   };
 }
 

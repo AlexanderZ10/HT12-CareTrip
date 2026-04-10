@@ -35,6 +35,7 @@ import {
 } from "../../constants/design-system";
 import { ConfirmDialog } from "../../components/confirm-dialog";
 import { auth, db } from "../../firebase";
+import { normalizeBudgetToEuro } from "../../utils/currency";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
 import {
   createEmptyPlannerState,
@@ -50,8 +51,6 @@ import {
 } from "../../utils/home-chat-storage";
 import {
   formatGroundedTravelPlan,
-  generateConversationalResponse,
-  generateGroundedTravelFollowUp,
   generateGroundedTravelPlan,
   getHomePlannerErrorMessage,
 } from "../../utils/home-travel-planner";
@@ -70,15 +69,29 @@ import { extractDiscoverProfile, type DiscoverProfile } from "../../utils/trip-r
 
 import type { BookingCheckoutStage, BookingReceipt } from "../../features/home/types";
 import {
+  buildDaysQuestion,
+  buildDestinationQuestion,
   buildInitialAssistantMessage,
+  buildTimingQuestion,
+  buildTransportQuestion,
+  buildTravelersQuestion,
   getAutoChatTitle,
   getDefaultChatTitle,
-  getPlannerGenerationDefaults,
+  getDestinationSuggestions,
   getStepTitle,
   normalizeLatestPlan,
+  normalizeDaysLabel,
+  normalizeTravelersLabel,
   parseCheckoutReturnState,
   wait,
 } from "../../features/home/helpers";
+import {
+  BUDGET_SUGGESTIONS,
+  DAY_SUGGESTIONS,
+  TIMING_SUGGESTIONS,
+  TRANSPORT_SUGGESTIONS,
+  TRAVELER_SUGGESTIONS,
+} from "../../features/home/constants";
 import { ChatMessageBubble } from "../../features/home/components/ChatMessageBubble";
 import { PlanCard } from "../../features/home/components/PlanCard";
 import { BookingModal } from "../../features/home/components/BookingModal";
@@ -183,10 +196,6 @@ export default function HomeTabScreen() {
   const currentPlannerState =
     currentChat?.state ??
     createEmptyPlannerState(buildInitialAssistantMessage(profileName, language));
-  const plannerDefaults = useMemo(
-    () => getPlannerGenerationDefaults(language),
-    [language]
-  );
   const paymentMethods = useMemo(
     () => [t("home.paymentBankCard"), "Apple Pay", "Google Pay"],
     [t]
@@ -467,10 +476,39 @@ export default function HomeTabScreen() {
   }, [clearTypingAnimation, currentChat?.id, scrollMessagesToBottom]);
 
   const quickReplies = useMemo(() => {
-    return [];
-  }, []);
+    if (currentPlannerState.step === "budget") {
+      return BUDGET_SUGGESTIONS;
+    }
 
-  const canSend = chatInput.trim().length > 0 && !planning;
+    if (currentPlannerState.step === "days") {
+      return DAY_SUGGESTIONS;
+    }
+
+    if (currentPlannerState.step === "travelers") {
+      return TRAVELER_SUGGESTIONS;
+    }
+
+    if (currentPlannerState.step === "transport") {
+      return TRANSPORT_SUGGESTIONS;
+    }
+
+    if (currentPlannerState.step === "timing") {
+      return TIMING_SUGGESTIONS;
+    }
+
+    if (currentPlannerState.step === "destination") {
+      return getDestinationSuggestions(
+        profile,
+        currentPlannerState.budget,
+        currentPlannerState.transportPreference
+      );
+    }
+
+    return [];
+  }, [currentPlannerState, profile]);
+
+  const canSend =
+    chatInput.trim().length > 0 && !planning && currentPlannerState.step !== "done";
 
   const persistStore = useCallback(
     async (nextStore: HomePlannerStore) => {
@@ -762,231 +800,202 @@ export default function HomeTabScreen() {
     const plannerState = currentChat.state;
     const userMessage = createHomeChatMessage("user", value);
     const messagesAfterUser = [...plannerState.messages, userMessage];
-    const followUpMessagesAfterUser = [...(plannerState.followUpMessages ?? []), userMessage];
 
-    if (plannerState.step === "done") {
-      if (!plannerState.latestPlan) {
-        const assistantMessage = createHomeChatMessage(
-          "assistant",
-          t("home.refineOrNewRoute")
-        );
+    if (plannerState.step === "budget" || plannerState.step === "chatting") {
+      const normalizedBudget = normalizeBudgetToEuro(value);
+      const assistantMessage = createHomeChatMessage(
+        "assistant",
+        buildDaysQuestion(normalizedBudget, language)
+      );
 
-        await replaceCurrentChatWithAssistant((chat) => ({
-          ...chat,
-          updatedAtMs: Date.now(),
-          state: {
-            ...chat.state,
-            followUpMessages: [...followUpMessagesAfterUser, assistantMessage],
-            step: "done",
-          },
-        }), assistantMessage);
-
-        scrollMessagesToBottom(true);
-
-        return;
-      }
-
-      setPlanning(true);
-
-      await replaceCurrentChat((chat) => ({
+      await replaceCurrentChatWithAssistant((chat) => ({
         ...chat,
         updatedAtMs: Date.now(),
         state: {
           ...chat.state,
-          followUpMessages: followUpMessagesAfterUser,
-          step: "done",
+          budget: normalizedBudget,
+          days: "",
+          destination: "",
+          followUpMessages: [],
+          timing: "",
+          transportPreference: "",
+          travelers: "",
+          latestPlan: null,
+          messages: [...messagesAfterUser, assistantMessage],
+          step: "days",
         },
-      }));
-
-      try {
-        const followUpText = await generateGroundedTravelFollowUp({
-          budget: plannerState.budget,
-          currentPlanText:
-            plannerState.latestPlan.formattedPlanText ||
-            formatGroundedTravelPlan(plannerState.latestPlan.plan),
-          days: plannerState.days,
-          destination: plannerState.destination || plannerState.latestPlan.destination,
-          language: languageForPrompt,
-          profile,
-          recentMessages: [...plannerState.messages, ...(plannerState.followUpMessages ?? [])].map((message) => ({
-            role: message.role,
-            text: message.text,
-          })),
-          timing: plannerState.timing,
-          transportPreference: plannerState.transportPreference,
-          travelers: plannerState.travelers,
-          userRequest: value,
-        });
-        const assistantMessage = createHomeChatMessage("assistant", followUpText);
-
-        await replaceCurrentChatWithAssistant((chat) => ({
-          ...chat,
-          updatedAtMs: Date.now(),
-          state: {
-            ...chat.state,
-            followUpMessages: [...followUpMessagesAfterUser, assistantMessage],
-            step: "done",
-          },
-        }), assistantMessage);
-        scrollMessagesToBottom(true);
-      } catch (nextError) {
-        const message = getHomePlannerErrorMessage(nextError, language);
-        const errorMessage = createHomeChatMessage("assistant", message);
-        setError(message);
-
-        await replaceCurrentChatWithAssistant((chat) => ({
-          ...chat,
-          updatedAtMs: Date.now(),
-          state: {
-            ...chat.state,
-            followUpMessages: [...followUpMessagesAfterUser, errorMessage],
-            step: "done",
-          },
-        }), errorMessage);
-        scrollMessagesToBottom(true);
-      } finally {
-        setPlanning(false);
-      }
+      }), assistantMessage);
+      scrollMessagesToBottom(true);
 
       return;
     }
 
-    if (plannerState.step === "chatting") {
-      setPlanning(true);
+    if (plannerState.step === "days") {
+      const normalizedDays = normalizeDaysLabel(value);
+      const assistantMessage = createHomeChatMessage(
+        "assistant",
+        buildTravelersQuestion(normalizedDays, language)
+      );
 
-      await replaceCurrentChat((chat) => ({
+      await replaceCurrentChatWithAssistant((chat) => ({
         ...chat,
         updatedAtMs: Date.now(),
         state: {
           ...chat.state,
-          messages: messagesAfterUser,
-          step: "chatting",
+          days: normalizedDays,
+          followUpMessages: [],
+          travelers: "",
+          latestPlan: null,
+          messages: [...messagesAfterUser, assistantMessage],
+          step: "travelers",
         },
-      }));
+      }), assistantMessage);
+      scrollMessagesToBottom(true);
+
+      return;
+    }
+
+    if (plannerState.step === "travelers") {
+      const normalizedTravelers = normalizeTravelersLabel(value);
+      const assistantMessage = createHomeChatMessage(
+        "assistant",
+        buildTransportQuestion(normalizedTravelers, language)
+      );
+
+      await replaceCurrentChatWithAssistant((chat) => ({
+        ...chat,
+        updatedAtMs: Date.now(),
+        state: {
+          ...chat.state,
+          travelers: normalizedTravelers,
+          followUpMessages: [],
+          transportPreference: "",
+          latestPlan: null,
+          messages: [...messagesAfterUser, assistantMessage],
+          step: "transport",
+        },
+      }), assistantMessage);
+      scrollMessagesToBottom(true);
+
+      return;
+    }
+
+    if (plannerState.step === "transport") {
+      const assistantMessage = createHomeChatMessage(
+        "assistant",
+        buildTimingQuestion(value, language)
+      );
+
+      await replaceCurrentChatWithAssistant((chat) => ({
+        ...chat,
+        updatedAtMs: Date.now(),
+        state: {
+          ...chat.state,
+          transportPreference: value,
+          followUpMessages: [],
+          timing: "",
+          latestPlan: null,
+          messages: [...messagesAfterUser, assistantMessage],
+          step: "timing",
+        },
+      }), assistantMessage);
+      scrollMessagesToBottom(true);
+
+      return;
+    }
+
+    if (plannerState.step === "timing") {
+      const assistantMessage = createHomeChatMessage(
+        "assistant",
+        buildDestinationQuestion(profile, value, plannerState.travelers, language)
+      );
+
+      await replaceCurrentChatWithAssistant((chat) => ({
+        ...chat,
+        updatedAtMs: Date.now(),
+        state: {
+          ...chat.state,
+          timing: value,
+          followUpMessages: [],
+          latestPlan: null,
+          messages: [...messagesAfterUser, assistantMessage],
+          step: "destination",
+        },
+      }), assistantMessage);
+      scrollMessagesToBottom(true);
+
+      return;
+    }
+
+    if (plannerState.step === "destination") {
+      const nextDestination = value;
+      const searchingMessage = createHomeChatMessage(
+        "assistant",
+        t("home.preparingRoute")
+      );
+      const messagesWhilePlanning = [...messagesAfterUser, searchingMessage];
+
+      setPlanning(true);
+
+      await replaceCurrentChatWithAssistant((chat) => ({
+        ...chat,
+        updatedAtMs: Date.now(),
+        state: {
+          ...chat.state,
+          destination: nextDestination,
+          followUpMessages: [],
+          latestPlan: null,
+          messages: messagesWhilePlanning,
+          step: "done",
+        },
+      }), searchingMessage);
 
       try {
-        const conversationHistory = messagesAfterUser.map((m) => ({
-          role: m.role,
-          text: m.text,
-        }));
-
-        const response = await generateConversationalResponse({
-          conversationHistory,
+        const plan = await generateGroundedTravelPlan({
+          budget: plannerState.budget,
+          days: plannerState.days,
+          destination: nextDestination,
           language: languageForPrompt,
+          timing: plannerState.timing,
+          transportPreference: plannerState.transportPreference,
+          travelers: plannerState.travelers,
           profile,
         });
-
-        const extracted = response.extractedInfo;
-
-        // Safety: require at least 5 filled fields before accepting readyToGenerate
-        const filledFields = [
-          extracted.destination,
-          extracted.timing,
-          extracted.days,
-          extracted.travelers,
-          extracted.budget,
-          extracted.transportPreference,
-          extracted.interests,
-        ].filter((f) => f && f.trim().length > 0).length;
-
-        if (response.readyToGenerate && extracted.destination && filledFields >= 5) {
-          const searchingMessage = createHomeChatMessage(
-            "assistant",
-            t("home.preparingRoute")
-          );
-          const messagesWhilePlanning = [...messagesAfterUser, searchingMessage];
-
-          await replaceCurrentChatWithAssistant((chat) => ({
-            ...chat,
-            updatedAtMs: Date.now(),
-            state: {
-              ...chat.state,
-              budget: extracted.budget || chat.state.budget,
-              days: extracted.days || chat.state.days,
-              destination: extracted.destination,
-              timing: extracted.timing || chat.state.timing,
-              transportPreference: extracted.transportPreference || chat.state.transportPreference,
-              travelers: extracted.travelers || chat.state.travelers,
-              followUpMessages: [],
-              latestPlan: null,
-              messages: messagesWhilePlanning,
-              step: "done",
-            },
-          }), searchingMessage);
-
-          const plan = await generateGroundedTravelPlan({
-            budget: extracted.budget || plannerDefaults.budget,
-            days: extracted.days || plannerDefaults.days,
-            destination: extracted.destination,
-            language: languageForPrompt,
-            timing: extracted.timing || plannerDefaults.timing,
-            transportPreference:
-              extracted.transportPreference || plannerDefaults.transportPreference,
-            travelers: extracted.travelers || plannerDefaults.travelers,
-            profile,
-          });
-
-          const readyMessage = createHomeChatMessage(
-            "assistant",
-            t("home.planReady")
-          );
-          const formattedPlanText = formatGroundedTravelPlan(plan);
-          const nextLatestPlan = normalizeLatestPlan({
-            budget: extracted.budget || plannerDefaults.budget,
-            days: extracted.days || plannerDefaults.days,
-            destination: extracted.destination,
+        const readyMessage = createHomeChatMessage(
+          "assistant",
+          t("home.planReady")
+        );
+        const formattedPlanText = formatGroundedTravelPlan(plan, language);
+        const nextLatestPlan = normalizeLatestPlan({
+          budget: plannerState.budget,
+          days: plannerState.days,
+          destination: nextDestination,
+          formattedPlanText,
+          timing: plannerState.timing,
+          transportPreference: plannerState.transportPreference,
+          travelers: plannerState.travelers,
+          plan,
+          sourceKey: getHomeSavedSourceKey({
+            budget: plannerState.budget,
+            days: plannerState.days,
+            destination: nextDestination,
             formattedPlanText,
-            timing: extracted.timing || plannerDefaults.timing,
-            transportPreference:
-              extracted.transportPreference || plannerDefaults.transportPreference,
-            travelers: extracted.travelers || plannerDefaults.travelers,
-            plan,
-            sourceKey: getHomeSavedSourceKey({
-              budget: extracted.budget || "",
-              days: extracted.days || "",
-              destination: extracted.destination,
-              formattedPlanText,
-            }),
-          });
+          }),
+        });
 
-          await replaceCurrentChatWithAssistant((chat) => ({
-            ...chat,
-            title: getAutoChatTitle(chat.title, extracted.destination, plan.title, language),
-            updatedAtMs: Date.now(),
-            state: {
-              ...chat.state,
-              destination: extracted.destination,
-              budget: extracted.budget || chat.state.budget,
-              days: extracted.days || chat.state.days,
-              timing: extracted.timing || chat.state.timing,
-              transportPreference: extracted.transportPreference || chat.state.transportPreference,
-              travelers: extracted.travelers || chat.state.travelers,
-              followUpMessages: [],
-              latestPlan: nextLatestPlan,
-              messages: [...messagesWhilePlanning, readyMessage],
-              step: "done",
-            },
-          }), readyMessage);
-        } else {
-          const assistantMessage = createHomeChatMessage("assistant", response.message);
-
-          await replaceCurrentChatWithAssistant((chat) => ({
-            ...chat,
-            updatedAtMs: Date.now(),
-            state: {
-              ...chat.state,
-              budget: extracted.budget || chat.state.budget,
-              days: extracted.days || chat.state.days,
-              destination: extracted.destination || chat.state.destination,
-              timing: extracted.timing || chat.state.timing,
-              transportPreference: extracted.transportPreference || chat.state.transportPreference,
-              travelers: extracted.travelers || chat.state.travelers,
-              messages: [...messagesAfterUser, assistantMessage],
-              step: "chatting",
-            },
-          }), assistantMessage);
-        }
-
+        await replaceCurrentChatWithAssistant((chat) => ({
+          ...chat,
+          title: getAutoChatTitle(chat.title, nextDestination, plan.title, language),
+          updatedAtMs: Date.now(),
+          state: {
+            ...chat.state,
+            destination: nextDestination,
+            followUpMessages: [],
+            latestPlan: nextLatestPlan,
+            messages: [...messagesWhilePlanning, readyMessage],
+            step: "done",
+          },
+        }), readyMessage);
         scrollMessagesToBottom(true);
       } catch (nextError) {
         const message = getHomePlannerErrorMessage(nextError, language);
@@ -998,16 +1007,17 @@ export default function HomeTabScreen() {
           updatedAtMs: Date.now(),
           state: {
             ...chat.state,
-            messages: [...messagesAfterUser, errorMessage],
-            step: "chatting",
+            destination: nextDestination,
+            followUpMessages: [],
+            latestPlan: null,
+            messages: [...messagesWhilePlanning, errorMessage],
+            step: "done",
           },
         }), errorMessage);
         scrollMessagesToBottom(true);
       } finally {
         setPlanning(false);
       }
-
-      return;
     }
   };
 

@@ -900,6 +900,18 @@ export function getTripGenerationErrorMessage(
             : "AI достигна лимит за заявки. Опитай отново по-късно.";
   }
 
+  if (error.message.startsWith("ai-request-failed:503")) {
+    return language === "en"
+      ? "Gemini is under heavy load right now. Please try again in a moment."
+      : language === "de"
+        ? "Gemini ist gerade stark ausgelastet. Bitte versuche es gleich noch einmal."
+        : language === "es"
+          ? "Gemini tiene mucha carga en este momento. Inténtalo de nuevo en un momento."
+          : language === "fr"
+            ? "Gemini est très chargé en ce moment. Réessaie dans un instant."
+            : "Gemini е претоварен в момента. Опитай пак след малко.";
+  }
+
   if (error.message.startsWith("ai-request-failed:")) {
     return copy.requestFailed;
   }
