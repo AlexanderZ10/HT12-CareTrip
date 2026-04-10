@@ -2,7 +2,12 @@ import { doc, runTransaction } from "firebase/firestore";
 
 import { db } from "../firebase";
 import { normalizeBudgetToEuro } from "./currency";
-import { formatGroundedTravelPlan, type GroundedTravelPlan } from "./home-travel-planner";
+import { sanitizeString } from "./sanitize";
+import {
+  formatGroundedTravelPlan,
+  type GroundedTravelPlan,
+  type PlannerDayPlan,
+} from "./home-travel-planner";
 import { type TripRecommendation } from "./trip-recommendations";
 
 export type SavedTrip = {
@@ -12,15 +17,14 @@ export type SavedTrip = {
   details: string;
   duration: string | null;
   id: string;
+  latitude: number | null;
+  longitude: number | null;
   source: "discover" | "home";
   sourceKey: string;
   summary: string;
   title: string;
+  tripDays: PlannerDayPlan[];
 };
-
-function sanitizeString(value: unknown, fallback = "") {
-  return typeof value === "string" ? value.trim() : fallback;
-}
 
 function dedupeDetailLines(lines: string[], excludedValues: string[] = []) {
   const excluded = new Set(
@@ -59,6 +63,30 @@ function hashValue(value: string) {
   return Math.abs(hash).toString(36);
 }
 
+function sanitizeNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function parseTripDays(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
+    .map((item, index): PlannerDayPlan => ({
+      dayLabel: sanitizeString(item.dayLabel, `Day ${index + 1}`),
+      items: Array.isArray(item.items)
+        ? item.items
+            .map((entry) => sanitizeString(entry))
+            .filter(Boolean)
+            .slice(0, 8)
+        : [],
+      title: sanitizeString(item.title, `Day ${index + 1}`),
+    }))
+    .filter((day) => day.title || day.items.length > 0);
+}
+
 export function getDiscoverSavedSourceKey(trip: TripRecommendation) {
   return `discover:${trip.id}`;
 }
@@ -77,6 +105,23 @@ export function buildSavedTripFromDiscover(trip: TripRecommendation): SavedTrip 
     ],
     [trip.whyItFits, trip.title, trip.destination]
   ).join("\n");
+  const tripDays: PlannerDayPlan[] = [
+    {
+      dayLabel: "Day 1",
+      items: uniqueItems([`Arrive in ${trip.destination}`, ...trip.highlights.slice(0, 1)]),
+      title: "Arrival",
+    },
+    {
+      dayLabel: "Day 2",
+      items: uniqueItems([...trip.highlights.slice(1, 3), ...trip.attractions.slice(0, 1)]),
+      title: "Explore",
+    },
+    {
+      dayLabel: "Day 3",
+      items: uniqueItems([...trip.attractions.slice(1, 3), "Capture your favorite memory"]),
+      title: "Favorites",
+    },
+  ].filter((day) => day.items.length > 0);
 
   return {
     budget: null,
@@ -85,11 +130,29 @@ export function buildSavedTripFromDiscover(trip: TripRecommendation): SavedTrip 
     details,
     duration: null,
     id: `saved-discover-${trip.id}`,
+    latitude: trip.latitude,
+    longitude: trip.longitude,
     source: "discover",
     sourceKey: getDiscoverSavedSourceKey(trip),
     summary: trip.whyItFits,
     title: trip.title,
+    tripDays,
   };
+}
+
+function uniqueItems(items: string[]) {
+  const seen = new Set<string>();
+
+  return items.filter((item) => {
+    const normalizedItem = item.trim().toLowerCase();
+
+    if (!normalizedItem || seen.has(normalizedItem)) {
+      return false;
+    }
+
+    seen.add(normalizedItem);
+    return true;
+  });
 }
 
 export function getHomeSavedSourceKey(params: {
@@ -122,6 +185,8 @@ export function buildSavedTripFromHome(params: {
     details: formattedPlanText,
     duration: params.days.trim(),
     id: `saved-home-${Date.now()}`,
+    latitude: null,
+    longitude: null,
     source: "home",
     sourceKey: getHomeSavedSourceKey({
       budget: params.budget,
@@ -131,6 +196,7 @@ export function buildSavedTripFromHome(params: {
     }),
     summary: `${params.days.trim()} • ${normalizeBudgetToEuro(params.budget)}`,
     title: params.plan.title || `Plan for ${params.destination.trim()}`,
+    tripDays: params.plan.tripDays,
   } satisfies SavedTrip;
 }
 
@@ -150,10 +216,13 @@ export function parseSavedTrips(profileData: Record<string, unknown>) {
         details: sanitizeString(item.details),
         duration: sanitizeString(item.duration) || null,
         id: sanitizeString(item.id, `saved-${index}`),
+        latitude: sanitizeNumber(item.latitude),
+        longitude: sanitizeNumber(item.longitude),
         source: item.source === "home" ? "home" : "discover",
         sourceKey: sanitizeString(item.sourceKey, `saved-key-${index}`),
         summary: sanitizeString(item.summary),
         title: sanitizeString(item.title, "Trip"),
+        tripDays: parseTripDays(item.tripDays),
       })
     )
     .sort((left, right) => right.createdAtMs - left.createdAtMs);

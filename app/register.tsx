@@ -254,7 +254,9 @@ export default function Register() {
           },
           { merge: true }
         );
-      } catch {}
+      } catch (profileError) {
+        console.warn("Failed to create initial profile document:", profileError);
+      }
 
       router.replace("/onboarding");
     } catch (error) {

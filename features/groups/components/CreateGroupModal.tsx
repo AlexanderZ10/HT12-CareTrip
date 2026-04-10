@@ -1,7 +1,9 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import React from "react";
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -28,22 +30,46 @@ type ComposerUserRowProps = {
 };
 
 function ComposerUserRow({ profile, selected, onPress }: ComposerUserRowProps) {
+  const { colors } = useAppTheme();
+
   return (
-    <TouchableOpacity activeOpacity={0.9} onPress={onPress} style={styles.composerUserRow}>
+    <TouchableOpacity
+      activeOpacity={0.9}
+      onPress={onPress}
+      style={[
+        styles.composerUserRow,
+        { backgroundColor: colors.cardAlt, borderColor: colors.border },
+      ]}
+    >
       <Avatar
         label={profile.displayName || profile.username || "Traveler"}
         photoUrl={profile.photoUrl}
         size={48}
       />
       <View style={styles.composerUserTextWrap}>
-        <Text style={styles.composerUserName}>{profile.displayName}</Text>
-        <Text style={styles.composerUserMeta}>
+        <Text style={[styles.composerUserName, { color: colors.textPrimary }]}>
+          {profile.displayName}
+        </Text>
+        <Text style={[styles.composerUserMeta, { color: colors.textSecondary }]}>
           @{profile.username || "traveler"}
           {profile.homeBase ? ` • ${profile.homeBase}` : ""}
         </Text>
       </View>
-      <View style={[styles.selectBubble, selected && styles.selectBubbleSelected]}>
-        {selected ? <MaterialIcons color="#FFFFFF" name="check" size={16} /> : null}
+      <View
+        style={[
+          styles.selectBubble,
+          { borderColor: colors.border },
+          selected && {
+            alignItems: "center" as const,
+            backgroundColor: colors.accent,
+            borderColor: colors.accent,
+            justifyContent: "center" as const,
+          },
+        ]}
+      >
+        {selected ? (
+          <MaterialIcons color={colors.buttonTextOnAction} name="check" size={16} />
+        ) : null}
       </View>
     </TouchableOpacity>
   );
@@ -99,21 +125,26 @@ export function CreateGroupModal({
       transparent
       visible={visible}
     >
-      <View style={[styles.modalBackdrop, { backgroundColor: colors.modalOverlay }]}>
-        <View style={styles.modalSheet}>
+      <KeyboardAvoidingView
+        style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <View style={[styles.modalSheet, { backgroundColor: colors.card }]}>
           <View style={styles.modalHeader}>
             <View>
-              <Text style={styles.modalTitle}>New group</Text>
-              <Text style={styles.modalSubtitle}>
+              <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+                New group
+              </Text>
+              <Text style={[styles.modalSubtitle, { color: colors.textSecondary }]}>
                 Pick public users, choose access, and create the chat.
               </Text>
             </View>
             <TouchableOpacity
               activeOpacity={0.9}
               onPress={onClose}
-              style={styles.modalClose}
+              style={[styles.modalClose, { backgroundColor: colors.inputBackground }]}
             >
-              <MaterialIcons color="#374151" name="close" size={22} />
+              <MaterialIcons color={colors.textSecondary} name="close" size={22} />
             </TouchableOpacity>
           </View>
 
@@ -124,8 +155,15 @@ export function CreateGroupModal({
             <TextInput
               onChangeText={onGroupNameChange}
               placeholder="Group name"
-              placeholderTextColor="#9CA3AF"
-              style={styles.modalInput}
+              placeholderTextColor={colors.inputPlaceholder}
+              style={[
+                styles.modalInput,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.inputBorder,
+                  color: colors.textPrimary,
+                },
+              ]}
               value={groupName}
             />
 
@@ -134,8 +172,16 @@ export function CreateGroupModal({
               numberOfLines={4}
               onChangeText={onGroupDescriptionChange}
               placeholder="What is this group about?"
-              placeholderTextColor="#9CA3AF"
-              style={[styles.modalInput, styles.modalTextarea]}
+              placeholderTextColor={colors.inputPlaceholder}
+              style={[
+                styles.modalInput,
+                styles.modalTextarea,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.inputBorder,
+                  color: colors.textPrimary,
+                },
+              ]}
               textAlignVertical="top"
               value={groupDescription}
             />
@@ -149,18 +195,26 @@ export function CreateGroupModal({
                 }}
                 style={[
                   styles.accessChip,
-                  groupAccess === "public" && styles.accessChipSelected,
+                  { backgroundColor: colors.inputBackground },
+                  groupAccess === "public" && { backgroundColor: colors.accent },
                 ]}
               >
                 <MaterialIcons
-                  color={groupAccess === "public" ? "#FFFFFF" : "#6B7280"}
+                  color={
+                    groupAccess === "public"
+                      ? colors.buttonTextOnAction
+                      : colors.textSecondary
+                  }
                   name="public"
                   size={16}
                 />
                 <Text
                   style={[
                     styles.accessChipText,
-                    groupAccess === "public" && styles.accessChipTextSelected,
+                    { color: colors.textSecondary },
+                    groupAccess === "public" && {
+                      color: colors.buttonTextOnAction,
+                    },
                   ]}
                 >
                   Public
@@ -177,18 +231,26 @@ export function CreateGroupModal({
                 }}
                 style={[
                   styles.accessChip,
+                  { backgroundColor: colors.inputBackground },
                   groupAccess === "private" && styles.accessChipSelectedPrivate,
                 ]}
               >
                 <MaterialIcons
-                  color={groupAccess === "private" ? "#FFFFFF" : "#6B7280"}
+                  color={
+                    groupAccess === "private"
+                      ? colors.buttonTextOnAction
+                      : colors.textSecondary
+                  }
                   name="lock-outline"
                   size={16}
                 />
                 <Text
                   style={[
                     styles.accessChipText,
-                    groupAccess === "private" && styles.accessChipTextSelected,
+                    { color: colors.textSecondary },
+                    groupAccess === "private" && {
+                      color: colors.buttonTextOnAction,
+                    },
                   ]}
                 >
                   Private
@@ -197,28 +259,57 @@ export function CreateGroupModal({
             </View>
 
             {groupAccess === "private" ? (
-              <View style={styles.privateKeyComposerCard}>
+              <View
+                style={[
+                  styles.privateKeyComposerCard,
+                  {
+                    backgroundColor: colors.warningBackground,
+                    borderColor: colors.warningBorder,
+                  },
+                ]}
+              >
                 <View style={styles.privateKeyRow}>
-                  <Text style={styles.privateKeyLabel}>Private key</Text>
+                  <Text
+                    style={[styles.privateKeyLabel, { color: colors.warningText }]}
+                  >
+                    Private key
+                  </Text>
                   <TouchableOpacity
                     activeOpacity={0.9}
-                    onPress={() => onGroupJoinKeyChange(createSuggestedGroupKey())}
+                    onPress={() =>
+                      onGroupJoinKeyChange(createSuggestedGroupKey())
+                    }
                   >
-                    <Text style={styles.privateKeyGenerate}>Generate</Text>
+                    <Text
+                      style={[styles.privateKeyGenerate, { color: colors.accent }]}
+                    >
+                      Generate
+                    </Text>
                   </TouchableOpacity>
                 </View>
                 <TextInput
                   autoCapitalize="characters"
-                  onChangeText={(value) => onGroupJoinKeyChange(normalizeGroupJoinKey(value))}
+                  onChangeText={(value) =>
+                    onGroupJoinKeyChange(normalizeGroupJoinKey(value))
+                  }
                   placeholder="TEAM2026"
-                  placeholderTextColor="#9CA3AF"
-                  style={styles.modalInput}
+                  placeholderTextColor={colors.inputPlaceholder}
+                  style={[
+                    styles.modalInput,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: colors.inputBorder,
+                      color: colors.textPrimary,
+                    },
+                  ]}
                   value={groupJoinKey}
                 />
               </View>
             ) : null}
 
-            <Text style={styles.inviteTitle}>Invite public users</Text>
+            <Text style={[styles.inviteTitle, { color: colors.textPrimary }]}>
+              Invite public users
+            </Text>
 
             {selectedInviteIds.length > 0 ? (
               <ScrollView
@@ -238,17 +329,29 @@ export function CreateGroupModal({
                       activeOpacity={0.9}
                       key={inviteId}
                       onPress={() => onToggleInvite(inviteId)}
-                      style={styles.selectedInviteChip}
+                      style={[
+                        styles.selectedInviteChip,
+                        { backgroundColor: colors.inputBackground },
+                      ]}
                     >
                       <Avatar
                         label={invitedProfile.displayName}
                         photoUrl={invitedProfile.photoUrl}
                         size={36}
                       />
-                      <Text style={styles.selectedInviteText}>
+                      <Text
+                        style={[
+                          styles.selectedInviteText,
+                          { color: colors.textPrimary },
+                        ]}
+                      >
                         {invitedProfile.username || invitedProfile.displayName}
                       </Text>
-                      <MaterialIcons color="#6B7280" name="close" size={16} />
+                      <MaterialIcons
+                        color={colors.textSecondary}
+                        name="close"
+                        size={16}
+                      />
                     </TouchableOpacity>
                   );
                 })}
@@ -258,15 +361,42 @@ export function CreateGroupModal({
             <TextInput
               onChangeText={onInviteSearchQueryChange}
               placeholder="Search public users"
-              placeholderTextColor="#9CA3AF"
-              style={styles.modalInput}
+              placeholderTextColor={colors.inputPlaceholder}
+              style={[
+                styles.modalInput,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.inputBorder,
+                  color: colors.textPrimary,
+                },
+              ]}
               value={inviteSearchQuery}
             />
 
             {filteredInviteProfiles.length === 0 ? (
-              <View style={styles.modalEmptyState}>
-                <Text style={styles.modalEmptyStateTitle}>Няма users за показване</Text>
-                <Text style={styles.modalEmptyStateText}>
+              <View
+                style={[
+                  styles.modalEmptyState,
+                  {
+                    backgroundColor: colors.cardAlt,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.modalEmptyStateTitle,
+                    { color: colors.textPrimary },
+                  ]}
+                >
+                  Няма users за показване
+                </Text>
+                <Text
+                  style={[
+                    styles.modalEmptyStateText,
+                    { color: colors.textSecondary },
+                  ]}
+                >
                   Покажи public профили от Profile таба или промени search-а.
                 </Text>
               </View>
@@ -286,26 +416,30 @@ export function CreateGroupModal({
             activeOpacity={0.9}
             disabled={saving}
             onPress={onCreatePress}
-            style={[styles.createButton, saving && styles.createButtonDisabled]}
+            style={[
+              styles.createButton,
+              { backgroundColor: colors.accent },
+              saving && styles.createButtonDisabled,
+            ]}
           >
-            <Text style={styles.createButtonText}>
+            <Text
+              style={[styles.createButtonText, { color: colors.buttonTextOnAction }]}
+            >
               {saving ? "Creating..." : "Create group"}
             </Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   modalBackdrop: {
-    backgroundColor: "rgba(0,0,0,0.25)",
     flex: 1,
     justifyContent: "flex-end",
   },
   modalSheet: {
-    backgroundColor: "#FFFFFF",
     borderTopLeftRadius: Radius["3xl"],
     borderTopRightRadius: Radius["3xl"],
     maxHeight: "88%",
@@ -321,28 +455,22 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     ...TypeScale.headingLg,
-    color: "#1A1A1A",
     fontWeight: FontWeight.extrabold,
   },
   modalSubtitle: {
     ...TypeScale.bodyMd,
-    color: "#6B7280",
     marginTop: Spacing.xs,
   },
   modalClose: {
     alignItems: "center",
-    backgroundColor: "#F5F5F5",
     borderRadius: Radius.full,
     height: 38,
     justifyContent: "center",
     width: 38,
   },
   modalInput: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E8E8E8",
     borderRadius: Radius.lg,
     borderWidth: 1,
-    color: "#1A1A1A",
     ...TypeScale.titleSm,
     marginTop: Spacing.md,
     paddingHorizontal: Spacing.md,
@@ -358,7 +486,6 @@ const styles = StyleSheet.create({
   },
   accessChip: {
     alignItems: "center",
-    backgroundColor: "#F5F5F5",
     borderRadius: Radius.full,
     flex: 1,
     flexDirection: "row",
@@ -367,23 +494,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,
   },
-  accessChipSelected: {
-    backgroundColor: "#2D6A4F",
-  },
   accessChipSelectedPrivate: {
     backgroundColor: "#BA7517",
   },
   accessChipText: {
     ...TypeScale.bodyMd,
-    color: "#6B7280",
     fontWeight: FontWeight.bold,
   },
-  accessChipTextSelected: {
-    color: "#FFFFFF",
-  },
   privateKeyComposerCard: {
-    backgroundColor: "#FFFBEB",
-    borderColor: "#FCD34D",
     borderRadius: Radius.lg,
     borderWidth: 1,
     marginTop: Spacing.md,
@@ -396,17 +514,14 @@ const styles = StyleSheet.create({
   },
   privateKeyLabel: {
     ...TypeScale.bodyMd,
-    color: "#92400E",
     fontWeight: FontWeight.extrabold,
   },
   privateKeyGenerate: {
     ...TypeScale.bodySm,
-    color: "#2D6A4F",
     fontWeight: FontWeight.bold,
   },
   inviteTitle: {
     ...TypeScale.titleMd,
-    color: "#1A1A1A",
     fontWeight: FontWeight.extrabold,
     marginTop: Spacing.lg,
   },
@@ -416,7 +531,6 @@ const styles = StyleSheet.create({
   },
   selectedInviteChip: {
     alignItems: "center",
-    backgroundColor: "#F5F5F5",
     borderRadius: Radius.full,
     flexDirection: "row",
     gap: Spacing.sm,
@@ -426,13 +540,10 @@ const styles = StyleSheet.create({
   },
   selectedInviteText: {
     ...TypeScale.bodySm,
-    color: "#1A1A1A",
     fontWeight: FontWeight.bold,
   },
   composerUserRow: {
     alignItems: "center",
-    backgroundColor: "#F8F8F8",
-    borderColor: "#E8E8E8",
     borderRadius: Radius.lg,
     borderWidth: 1,
     flexDirection: "row",
@@ -446,31 +557,20 @@ const styles = StyleSheet.create({
   },
   composerUserName: {
     ...TypeScale.titleMd,
-    color: "#1A1A1A",
     fontWeight: FontWeight.extrabold,
   },
   composerUserMeta: {
     ...TypeScale.bodySm,
-    color: "#6B7280",
     marginTop: Spacing.xs,
   },
   selectBubble: {
-    borderColor: "#D1D5DB",
     borderRadius: Radius.md,
     borderWidth: 1,
     height: Spacing["2xl"],
     width: Spacing["2xl"],
   },
-  selectBubbleSelected: {
-    alignItems: "center",
-    backgroundColor: "#2D6A4F",
-    borderColor: "#2D6A4F",
-    justifyContent: "center",
-  },
   modalEmptyState: {
     alignItems: "center",
-    backgroundColor: "#F8F8F8",
-    borderColor: "#E8E8E8",
     borderRadius: Radius.lg,
     borderWidth: 1,
     marginTop: Spacing.md,
@@ -479,19 +579,16 @@ const styles = StyleSheet.create({
   },
   modalEmptyStateTitle: {
     ...TypeScale.titleMd,
-    color: "#1A1A1A",
     fontWeight: FontWeight.extrabold,
     textAlign: "center",
   },
   modalEmptyStateText: {
     ...TypeScale.bodyMd,
-    color: "#6B7280",
     marginTop: Spacing.sm,
     textAlign: "center",
   },
   createButton: {
     alignItems: "center",
-    backgroundColor: "#2D6A4F",
     borderRadius: Radius.lg,
     justifyContent: "center",
     marginTop: Spacing.lg,
@@ -502,7 +599,6 @@ const styles = StyleSheet.create({
   },
   createButtonText: {
     ...TypeScale.titleSm,
-    color: "#FFFFFF",
     fontWeight: FontWeight.extrabold,
   },
 });

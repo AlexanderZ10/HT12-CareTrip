@@ -27,7 +27,7 @@ export const styles = StyleSheet.create({
     borderBottomWidth: 1,
     flexDirection: "row",
     paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
   headerMainPressable: {
     alignItems: "center",
@@ -440,6 +440,41 @@ export const styles = StyleSheet.create({
     gap: Spacing.sm,
     marginTop: Spacing.md,
   },
+  settlementRowsWrap: {
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+  },
+  settlementRow: {
+    alignItems: "center",
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+    flexDirection: "row",
+    padding: Spacing.md,
+  },
+  settlementRowTextWrap: {
+    flex: 1,
+    paddingRight: Spacing.md,
+  },
+  settlementRowTitle: {
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
+  },
+  settlementRowMeta: {
+    ...TypeScale.bodySm,
+    marginTop: Spacing.xs,
+  },
+  settlementPayButton: {
+    alignItems: "center",
+    borderRadius: Radius.lg,
+    justifyContent: "center",
+    minWidth: 92,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  settlementPayButtonText: {
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
+  },
   expenseSummaryChip: {
     alignItems: "center",
     borderRadius: Radius.full,
@@ -455,7 +490,7 @@ export const styles = StyleSheet.create({
   },
   messagesScroll: {
     flex: 1,
-    marginTop: Spacing.sm,
+    marginTop: 0,
     minHeight: 0,
   },
   messagesContent: {
@@ -463,7 +498,7 @@ export const styles = StyleSheet.create({
     minHeight: "100%",
     paddingBottom: Spacing.xl,
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.sm,
+    paddingTop: Spacing.xs,
   },
   messagesScrollSpacer: {
     flexGrow: 1,

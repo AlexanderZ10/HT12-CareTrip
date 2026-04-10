@@ -3,12 +3,12 @@ import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { Avatar } from "../../../components/Avatar";
+import { useAppTheme } from "../../../components/app-theme-provider";
 import {
   FontWeight,
   Radius,
   Spacing,
   TypeScale,
-  shadow,
 } from "../../../constants/design-system";
 import type { TravelGroup } from "../../../utils/groups";
 
@@ -35,56 +35,78 @@ export function GroupRow({
   preview,
   rightMeta,
 }: GroupRowProps) {
+  const { colors } = useAppTheme();
   const isPrivate = group.accessType === "private";
   const avatarLabel = group.name || "Group";
 
   return (
     <TouchableOpacity
-      activeOpacity={onPress ? 0.9 : 1}
+      activeOpacity={onPress ? 0.7 : 1}
       disabled={!onPress}
       onPress={onPress}
-      style={styles.groupRow}
+      style={styles.row}
     >
-      <Avatar imageUri={group.photoUrl} label={avatarLabel} size={58} />
-      <View style={styles.groupRowTextWrap}>
-        <View style={styles.groupRowTitleRow}>
-          <Text numberOfLines={1} style={styles.groupRowTitle}>
+      <View style={styles.avatarWrap}>
+        <Avatar photoUrl={group.photoUrl} label={avatarLabel} size={56} />
+        {isPrivate ? (
+          <View style={[styles.lockBadge, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <MaterialIcons name="lock" size={11} color={colors.textSecondary} />
+          </View>
+        ) : null}
+      </View>
+
+      <View style={styles.textWrap}>
+        <View style={styles.titleRow}>
+          <Text numberOfLines={1} style={[styles.title, { color: colors.textPrimary }]}>
             {group.name}
           </Text>
-          <Text style={styles.groupRowTime}>{rightMeta}</Text>
+          {badge ? (
+            <Text style={[styles.dot, { color: colors.textMuted }]}> · </Text>
+          ) : null}
+          {badge ? (
+            <Text numberOfLines={1} style={[styles.badgeInline, { color: colors.textMuted }]}>
+              {badge}
+            </Text>
+          ) : null}
         </View>
 
-        <Text numberOfLines={1} style={styles.groupRowPreview}>
-          {preview}
-        </Text>
-
-        <View style={styles.groupRowMetaRow}>
-          <View style={[styles.groupTypeBadge, isPrivate && styles.groupTypeBadgePrivate]}>
-            <MaterialIcons
-              color={isPrivate ? "#FCD34D" : "#9FD7FF"}
-              name={isPrivate ? "lock-outline" : "public"}
-              size={14}
-            />
-            <Text style={[styles.groupTypeBadgeText, isPrivate && styles.groupTypeBadgeTextPrivate]}>
-              {badge ?? (isPrivate ? "Private" : "Public")}
-            </Text>
-          </View>
-
-          <Text style={styles.groupMembersText}>{group.memberCount} members</Text>
+        <View style={styles.previewRow}>
+          <Text numberOfLines={1} style={[styles.preview, { color: colors.textSecondary }]}>
+            {preview}
+          </Text>
+          <Text style={[styles.metaDot, { color: colors.textMuted }]}> · </Text>
+          <Text style={[styles.timeMeta, { color: colors.textMuted }]}>{rightMeta}</Text>
         </View>
       </View>
 
       {actionLabel && onActionPress ? (
         <TouchableOpacity
-          activeOpacity={0.9}
+          activeOpacity={0.8}
           disabled={actionLoading}
           onPress={onActionPress}
           style={[
-            styles.rowActionButton,
-            actionVariant === "danger" && styles.rowActionButtonDanger,
+            styles.actionPill,
+            {
+              backgroundColor:
+                actionVariant === "danger"
+                  ? "transparent"
+                  : colors.accent,
+              borderWidth: actionVariant === "danger" ? 1 : 0,
+              borderColor: colors.border,
+            },
           ]}
         >
-          <Text style={styles.rowActionText}>
+          <Text
+            style={[
+              styles.actionText,
+              {
+                color:
+                  actionVariant === "danger"
+                    ? colors.errorText
+                    : colors.buttonTextOnAction,
+              },
+            ]}
+          >
             {actionLoading ? "..." : actionLabel}
           </Text>
         </TouchableOpacity>
@@ -94,89 +116,68 @@ export function GroupRow({
 }
 
 const styles = StyleSheet.create({
-  groupRow: {
+  row: {
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E8E8E8",
-    borderRadius: Radius["2xl"],
-    borderWidth: 1,
     flexDirection: "row",
-    marginTop: Spacing.md,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    ...shadow("sm"),
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 2,
   },
-  groupRowTextWrap: {
+  avatarWrap: {
+    position: "relative",
+  },
+  lockBadge: {
+    alignItems: "center",
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    bottom: -2,
+    height: 20,
+    justifyContent: "center",
+    position: "absolute",
+    right: -2,
+    width: 20,
+  },
+  textWrap: {
     flex: 1,
     marginLeft: Spacing.md,
   },
-  groupRowTitleRow: {
+  titleRow: {
     alignItems: "center",
     flexDirection: "row",
   },
-  groupRowTitle: {
-    ...TypeScale.titleLg,
-    color: "#1A1A1A",
-    flex: 1,
-    fontWeight: FontWeight.extrabold,
-    marginRight: Spacing.md,
-  },
-  groupRowTime: {
-    ...TypeScale.bodySm,
-    color: "#9CA3AF",
-  },
-  groupRowPreview: {
+  title: {
     ...TypeScale.bodyMd,
-    color: "#6B7280",
-    marginTop: Spacing.xs,
-  },
-  groupRowMetaRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: Spacing.sm,
-    marginTop: Spacing.sm,
-  },
-  groupTypeBadge: {
-    alignItems: "center",
-    backgroundColor: "#F0F0F0",
-    borderRadius: Radius.full,
-    flexDirection: "row",
-    gap: 6,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 6,
-  },
-  groupTypeBadgePrivate: {
-    backgroundColor: "#FFF7ED",
-  },
-  groupTypeBadgeText: {
-    ...TypeScale.labelLg,
-    color: "#2D6A4F",
-    fontWeight: FontWeight.extrabold,
-  },
-  groupTypeBadgeTextPrivate: {
-    color: "#92400E",
-  },
-  groupMembersText: {
-    ...TypeScale.labelLg,
-    color: "#6B7280",
+    flexShrink: 1,
     fontWeight: FontWeight.bold,
   },
-  rowActionButton: {
-    alignItems: "center",
-    backgroundColor: "#2D6A4F",
-    borderRadius: Radius.md,
-    justifyContent: "center",
-    marginLeft: Spacing.sm,
-    minWidth: 66,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+  dot: {
+    ...TypeScale.bodyMd,
   },
-  rowActionButtonDanger: {
-    backgroundColor: "#B84B3A",
-  },
-  rowActionText: {
+  badgeInline: {
     ...TypeScale.bodySm,
-    color: "#FFFFFF",
-    fontWeight: FontWeight.extrabold,
+  },
+  previewRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    marginTop: 2,
+  },
+  preview: {
+    ...TypeScale.bodySm,
+    flexShrink: 1,
+  },
+  metaDot: {
+    ...TypeScale.bodySm,
+  },
+  timeMeta: {
+    ...TypeScale.bodySm,
+  },
+  actionPill: {
+    borderRadius: Radius.md,
+    marginLeft: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 7,
+  },
+  actionText: {
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.bold,
   },
 });

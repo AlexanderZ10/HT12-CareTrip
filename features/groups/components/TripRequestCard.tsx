@@ -41,7 +41,7 @@ export function TripRequestCard({
         {
           backgroundColor: colors.card,
           borderColor: colors.border,
-          shadowColor: isDark ? "#000000" : "#1A1A1A",
+          shadowColor: isDark ? "#000000" : "#0D1F02",
         },
       ]}
     >
@@ -135,7 +135,7 @@ export function TripRequestCard({
                   updating && styles.requestButtonDisabled,
                 ]}
               >
-                <Text style={styles.requestPrimaryButtonText}>
+                <Text style={[styles.requestPrimaryButtonText, { color: colors.buttonTextOnAction }]}>
                   {updating ? "..." : "Create group"}
                 </Text>
               </TouchableOpacity>
@@ -175,7 +175,7 @@ export function TripRequestCard({
               <Text
                 style={[
                   styles.requestPrimaryButtonText,
-                  { color: isInterested ? colors.textPrimary : "#FFFFFF" },
+                  { color: isInterested ? colors.textPrimary : colors.buttonTextOnAction },
                 ]}
               >
                 {updating ? "..." : isInterested ? "Interested" : "I'm in"}
@@ -279,7 +279,6 @@ const styles = StyleSheet.create({
   },
   requestPrimaryButtonText: {
     ...TypeScale.bodyMd,
-    color: "#FFFFFF",
     fontWeight: FontWeight.extrabold,
   },
   requestSecondaryButton: {

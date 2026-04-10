@@ -2,9 +2,12 @@ import {
   extractPersonalProfile,
   type PersonalProfileInfo,
 } from "./profile-info";
+import { sanitizeString, sanitizeStringArray } from "./sanitize";
 import type { AppLanguage } from "./translations";
+import { callAI, getAIApiKey, AI_MODEL } from "./ai";
 
-export const GEMINI_MODEL = "gemini-2.5-flash";
+export { AI_MODEL as GEMINI_MODEL } from "./ai";
+const GEMINI_MODEL = AI_MODEL;
 export const DEFAULT_SETTLEMENT_MAP_ZOOM = 5;
 
 type OnboardingSection = {
@@ -72,10 +75,6 @@ type SettlementCoordinates = {
   longitude: number | null;
 };
 
-function sanitizeString(value: unknown, fallback = "") {
-  return typeof value === "string" ? value.trim() : fallback;
-}
-
 function getLanguageVariant(language?: string): AppLanguage {
   const normalized = (language || "").trim().toLowerCase();
 
@@ -92,12 +91,12 @@ function getDiscoverCopy(language?: string) {
       return {
         accessibilityNotes: "Check local accessibility in advance.",
         genericError: "We couldn't generate new suggestions. Please try again.",
-        invalidResponse: "Gemini returned an unexpected format. Please try refresh again.",
+        invalidResponse: "AI returned an unexpected format. Please try refresh again.",
         missingApiKey:
-          "EXPO_PUBLIC_GEMINI_API_KEY is missing. Add a Gemini API key and restart the app.",
+          "API key is missing. Add EXPO_PUBLIC_GEMINI_API_KEY and restart the app.",
         popularityNote: "Popular with visitors and packed with things to do.",
         requestFailed:
-          "Gemini could not return grounded destination data. Check your network and limits.",
+          "AI could not return destination data. Check your network and limits.",
         summary:
           "We selected popular places with interesting activities and landmarks based on your profile.",
         whyItFits: "Selected based on your interests and profile.",
@@ -108,12 +107,12 @@ function getDiscoverCopy(language?: string) {
         genericError:
           "Wir konnten keine neuen Vorschläge generieren. Bitte versuche es erneut.",
         invalidResponse:
-          "Gemini hat ein unerwartetes Format zurückgegeben. Bitte versuche die Aktualisierung erneut.",
+          "KI hat ein unerwartetes Format zurückgegeben. Bitte versuche die Aktualisierung erneut.",
         missingApiKey:
-          "EXPO_PUBLIC_GEMINI_API_KEY fehlt. Füge einen Gemini-API-Schlüssel hinzu und starte die App neu.",
+          "API-Schlüssel fehlt. Füge EXPO_PUBLIC_GEMINI_API_KEY hinzu und starte die App neu.",
         popularityNote: "Beliebt bei Besuchern und mit vielen Aktivitäten.",
         requestFailed:
-          "Gemini konnte keine fundierten Zieldaten liefern. Prüfe Netzwerk und Limits.",
+          "KI konnte keine Zieldaten liefern. Prüfe Netzwerk und Limits.",
         summary:
           "Wir haben beliebte Orte mit interessanten Aktivitäten und Sehenswürdigkeiten passend zu deinem Profil ausgewählt.",
         whyItFits: "Passend zu deinen Interessen und deinem Profil ausgewählt.",
@@ -124,12 +123,12 @@ function getDiscoverCopy(language?: string) {
         genericError:
           "No pudimos generar nuevas sugerencias. Inténtalo de nuevo.",
         invalidResponse:
-          "Gemini devolvió un formato inesperado. Intenta actualizar otra vez.",
+          "La IA devolvió un formato inesperado. Intenta actualizar otra vez.",
         missingApiKey:
-          "Falta EXPO_PUBLIC_GEMINI_API_KEY. Añade una clave de Gemini y reinicia la app.",
+          "Falta la clave API. Añade EXPO_PUBLIC_GEMINI_API_KEY y reinicia la app.",
         popularityNote: "Popular entre visitantes y con muchas cosas para hacer.",
         requestFailed:
-          "Gemini no pudo devolver datos fiables del destino. Revisa tu red y los límites.",
+          "La IA no pudo devolver datos del destino. Revisa tu red y los límites.",
         summary:
           "Seleccionamos lugares populares con actividades y atracciones interesantes según tu perfil.",
         whyItFits: "Seleccionado según tus intereses y tu perfil.",
@@ -140,12 +139,12 @@ function getDiscoverCopy(language?: string) {
         genericError:
           "Nous n'avons pas pu générer de nouvelles suggestions. Réessaie.",
         invalidResponse:
-          "Gemini a renvoyé un format inattendu. Essaie de rafraîchir à nouveau.",
+          "L'IA a renvoyé un format inattendu. Essaie de rafraîchir à nouveau.",
         missingApiKey:
-          "EXPO_PUBLIC_GEMINI_API_KEY est manquant. Ajoute une clé Gemini puis redémarre l’application.",
+          "Clé API manquante. Ajoute EXPO_PUBLIC_GEMINI_API_KEY et redémarre l’application.",
         popularityNote: "Très apprécié des visiteurs avec beaucoup de choses à faire.",
         requestFailed:
-          "Gemini n’a pas pu renvoyer des données fiables sur les destinations. Vérifie le réseau et les limites.",
+          "L’IA n’a pas pu renvoyer des données sur les destinations. Vérifie le réseau et les limites.",
         summary:
           "Nous avons sélectionné des lieux populaires avec des activités et des attractions intéressantes selon ton profil.",
         whyItFits: "Sélectionné selon tes intérêts et ton profil.",
@@ -154,13 +153,13 @@ function getDiscoverCopy(language?: string) {
       return {
         accessibilityNotes: "Провери локалната достъпност предварително.",
         genericError: "Не успяхме да генерираме нови предложения. Опитай отново.",
-        invalidResponse: "Gemini върна неочакван формат. Опитай нов refresh.",
+        invalidResponse: "AI върна неочакван формат. Опитай нов refresh.",
         missingApiKey:
-          "Липсва EXPO_PUBLIC_GEMINI_API_KEY. Добави Gemini API ключ и рестартирай приложението.",
+          "Липсва API ключ. Добави EXPO_PUBLIC_GEMINI_API_KEY и рестартирай приложението.",
         popularityNote:
           "Има активен интерес от посетители и разнообразни неща за правене.",
         requestFailed:
-          "Gemini не успя да върне grounded settlements. Провери мрежата и лимитите.",
+          "AI не успя да върне данни за дестинации. Провери мрежата и лимитите.",
         summary:
           "Подбрахме популярни селища с интересни активности и забележителности според профила ти.",
         whyItFits: "Подбрано според интересите и профила на потребителя.",
@@ -175,18 +174,6 @@ function normalizeComparableText(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
-}
-
-function sanitizeStringArray(value: unknown) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .filter((item): item is string => typeof item === "string")
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, 6);
 }
 
 function sanitizeImageUrls(value: unknown) {
@@ -277,66 +264,6 @@ function getSection(section: Partial<OnboardingSection> | undefined): Onboarding
     note: sanitizeString(section?.note),
     selectedOptions: sanitizeStringArray(section?.selectedOptions),
   };
-}
-
-function getResponseText(responsePayload: any) {
-  const parts = responsePayload?.candidates?.[0]?.content?.parts;
-
-  if (!Array.isArray(parts)) {
-    return "";
-  }
-
-  return parts
-    .map((part) => (typeof part?.text === "string" ? part.text : ""))
-    .join("")
-    .trim();
-}
-
-async function callGeminiGenerateContent(params: {
-  apiKey: string;
-  generationConfig?: Record<string, unknown>;
-  prompt: string;
-  tools?: Record<string, unknown>[];
-}) {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": params.apiKey,
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: params.prompt,
-              },
-            ],
-          },
-        ],
-        ...(params.generationConfig
-          ? { generationConfig: params.generationConfig }
-          : {}),
-        ...(params.tools ? { tools: params.tools } : {}),
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`gemini-request-failed:${response.status}:${errorText}`);
-  }
-
-  const responsePayload = await response.json();
-  const text = getResponseText(responsePayload);
-
-  if (!text) {
-    throw new Error("empty-gemini-response");
-  }
-
-  return text;
 }
 
 function normalizeTrip(
@@ -806,33 +733,25 @@ export async function generateTripsWithGemini(
   previousTrips: TripRecommendation[],
   language = "Bulgarian"
 ) {
-  const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+  const apiKey = getAIApiKey();
 
   if (!apiKey) {
     throw new Error("missing-api-key");
   }
 
-  const groundedNotes = await callGeminiGenerateContent({
+  const groundedNotes = await callAI({
     apiKey,
     prompt: buildGroundedSettlementResearchPrompt(profile, previousTrips, language),
-    tools: [
-      {
-        google_search: {},
-      },
-    ],
   });
 
-  const structuredJsonText = await callGeminiGenerateContent({
+  const structuredJsonText = await callAI({
     apiKey,
     prompt: buildStructuredDiscoverPrompt({
       groundedNotes,
       language,
       profile,
     }),
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseJsonSchema: DISCOVER_RESPONSE_SCHEMA,
-    },
+    jsonMode: true,
   });
 
   const parsedResponse = JSON.parse(structuredJsonText) as Partial<StructuredDiscoverResult>;
@@ -841,7 +760,7 @@ export async function generateTripsWithGemini(
     !Array.isArray(parsedResponse.settlements) ||
     parsedResponse.settlements.length === 0
   ) {
-    throw new Error("invalid-gemini-response");
+    throw new Error("invalid-ai-response");
   }
 
   const trips = await Promise.all(
@@ -948,9 +867,9 @@ export function isTripGenerationError(error: unknown) {
 
   return (
     error.message === "missing-api-key" ||
-    error.message.startsWith("gemini-request-failed:") ||
-    error.message === "empty-gemini-response" ||
-    error.message === "invalid-gemini-response" ||
+    error.message.startsWith("ai-request-failed:") ||
+    error.message === "empty-ai-response" ||
+    error.message === "invalid-ai-response" ||
     error instanceof SyntaxError
   );
 }
@@ -969,25 +888,25 @@ export function getTripGenerationErrorMessage(
     return copy.missingApiKey;
   }
 
-  if (error.message.startsWith("gemini-request-failed:429")) {
+  if (error.message.startsWith("ai-request-failed:429")) {
     return language === "en"
-      ? "Gemini hit the request limit. Please try again later."
+      ? "AI hit the request limit. Please try again later."
       : language === "de"
-        ? "Gemini hat das Anfrage-Limit erreicht. Bitte versuche es später erneut."
+        ? "KI hat das Anfrage-Limit erreicht. Bitte versuche es später erneut."
         : language === "es"
-          ? "Gemini alcanzó el límite de solicitudes. Inténtalo más tarde."
+          ? "La IA alcanzó el límite de solicitudes. Inténtalo más tarde."
           : language === "fr"
-            ? "Gemini a atteint la limite de requêtes. Réessaie plus tard."
-            : "Gemini достигна лимит за заявки. Опитай отново по-късно.";
+            ? "L'IA a atteint la limite de requêtes. Réessaie plus tard."
+            : "AI достигна лимит за заявки. Опитай отново по-късно.";
   }
 
-  if (error.message.startsWith("gemini-request-failed:")) {
+  if (error.message.startsWith("ai-request-failed:")) {
     return copy.requestFailed;
   }
 
   if (
-    error.message === "empty-gemini-response" ||
-    error.message === "invalid-gemini-response"
+    error.message === "empty-ai-response" ||
+    error.message === "invalid-ai-response"
   ) {
     return copy.invalidResponse;
   }

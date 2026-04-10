@@ -1,14 +1,13 @@
 import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { auth, db } from "../firebase";
 import { isFirestorePermissionError } from "../utils/firestore-errors";
-import React from "react";
 
 const CARETRIP_BACKGROUND = require("../assets/images/CareTrip-background.png");
 const CARETRIP_ICON = require("../assets/images/CareTrip.png");

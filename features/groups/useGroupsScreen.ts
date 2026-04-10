@@ -1,15 +1,20 @@
+import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import {
   collection,
+  deleteDoc,
   doc,
   onSnapshot,
+  query,
   runTransaction,
   serverTimestamp,
   setDoc,
+  where,
   writeBatch,
 } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
+import { Platform } from "react-native";
 
 import { auth, db } from "../../firebase";
 import { getGroupsErrorMessage } from "../../utils/error-messages";
@@ -21,17 +26,45 @@ import {
   type GroupAccessType,
   type TravelGroup,
 } from "../../utils/groups";
-import { extractPersonalProfile, getProfileDisplayName } from "../../utils/profile-info";
 import {
-  parsePublicProfile,
-  type PublicProfile,
-} from "../../utils/public-profiles";
+  buildSmartTripAlerts,
+  parseGroupItineraryBoard,
+  type GroupItineraryBoard,
+} from "../../utils/group-trip-collaboration";
+import { sendLocalSmartNotificationIfNeeded } from "../../utils/notifications";
+import { extractPersonalProfile, getProfileDisplayName } from "../../utils/profile-info";
+import { parsePublicProfile, type PublicProfile } from "../../utils/public-profiles";
+import {
+  buildFriendshipId,
+  getFriendshipOtherLabel,
+  getFriendshipOtherUserId,
+  getFriendshipOtherUsername,
+  parseFriendship,
+  parseSocialPost,
+  sortFriendshipsByUpdatedAt,
+  sortSocialPostsByCreatedAt,
+  type Friendship,
+  type SocialPost,
+} from "../../utils/social";
 import {
   parseTripRequest,
   sortTripRequestsByActivity,
   type TripRequest,
 } from "../../utils/trip-requests";
 import { matchesQuery } from "./helpers";
+
+const SOCIAL_POST_IMAGE_MAX_LENGTH = 620000;
+const STORY_TTL_MS = 24 * 60 * 60 * 1000;
+
+type SocialProfilePreview = {
+  aboutMe: string;
+  connection: Friendship | null;
+  homeBase: string;
+  label: string;
+  photoUrl: string;
+  uid: string;
+  username: string;
+};
 
 export function useGroupsScreen() {
   const router = useRouter();
@@ -41,20 +74,32 @@ export function useGroupsScreen() {
   const [loadingGroups, setLoadingGroups] = useState(true);
   const [loadingPublicProfiles, setLoadingPublicProfiles] = useState(true);
   const [loadingTripRequests, setLoadingTripRequests] = useState(true);
+  const [loadingFriendships, setLoadingFriendships] = useState(true);
+  const [loadingSocialPosts, setLoadingSocialPosts] = useState(true);
   const [savingGroup, setSavingGroup] = useState(false);
   const [savingTripRequest, setSavingTripRequest] = useState(false);
+  const [postingSocialPost, setPostingSocialPost] = useState(false);
+  const [pickingPostImage, setPickingPostImage] = useState(false);
   const [joiningGroupId, setJoiningGroupId] = useState<string | null>(null);
   const [joiningByKey, setJoiningByKey] = useState(false);
   const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null);
   const [updatingTripRequestId, setUpdatingTripRequestId] = useState<string | null>(null);
+  const [updatingFriendshipId, setUpdatingFriendshipId] = useState<string | null>(null);
 
   const [profileName, setProfileName] = useState("Traveler");
   const [profileAvatarUrl, setProfileAvatarUrl] = useState("");
   const [username, setUsername] = useState("");
+  const [dreamDestinations, setDreamDestinations] = useState("");
   const [groups, setGroups] = useState<TravelGroup[]>([]);
+  const [groupBoardsByGroupId, setGroupBoardsByGroupId] = useState<
+    Record<string, GroupItineraryBoard>
+  >({});
   const [publicProfiles, setPublicProfiles] = useState<PublicProfile[]>([]);
   const [tripRequests, setTripRequests] = useState<TripRequest[]>([]);
+  const [friendships, setFriendships] = useState<Friendship[]>([]);
+  const [socialPosts, setSocialPosts] = useState<SocialPost[]>([]);
 
+  const [activeSection, setActiveSection] = useState<"friends" | "groups" | "posts">("groups");
   const [searchQuery, setSearchQuery] = useState("");
   const [joinKeyValue, setJoinKeyValue] = useState("");
   const [actionMenuVisible, setActionMenuVisible] = useState(false);
@@ -75,6 +120,9 @@ export function useGroupsScreen() {
   const [requestTiming, setRequestTiming] = useState("");
   const [requestTravelers, setRequestTravelers] = useState("");
   const [requestNote, setRequestNote] = useState("");
+  const [postCaption, setPostCaption] = useState("");
+  const [postLocation, setPostLocation] = useState("");
+  const [postImageUri, setPostImageUri] = useState("");
 
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -84,26 +132,38 @@ export function useGroupsScreen() {
     let unsubscribeGroups: (() => void) | null = null;
     let unsubscribePublicProfiles: (() => void) | null = null;
     let unsubscribeTripRequests: (() => void) | null = null;
+    let unsubscribeFriendships: (() => void) | null = null;
+    let unsubscribeSocialPosts: (() => void) | null = null;
 
     const unsubscribeAuth = onAuthStateChanged(auth, (nextUser) => {
       unsubscribeProfile?.();
       unsubscribeGroups?.();
       unsubscribePublicProfiles?.();
       unsubscribeTripRequests?.();
+      unsubscribeFriendships?.();
+      unsubscribeSocialPosts?.();
       unsubscribeProfile = null;
       unsubscribeGroups = null;
       unsubscribePublicProfiles = null;
       unsubscribeTripRequests = null;
+      unsubscribeFriendships = null;
+      unsubscribeSocialPosts = null;
 
       if (!nextUser) {
         setUser(null);
+        setDreamDestinations("");
         setGroups([]);
+        setGroupBoardsByGroupId({});
         setPublicProfiles([]);
         setTripRequests([]);
+        setFriendships([]);
+        setSocialPosts([]);
         setLoadingProfile(false);
         setLoadingGroups(false);
         setLoadingPublicProfiles(false);
         setLoadingTripRequests(false);
+        setLoadingFriendships(false);
+        setLoadingSocialPosts(false);
         router.replace("/login");
         return;
       }
@@ -113,8 +173,33 @@ export function useGroupsScreen() {
       setLoadingGroups(true);
       setLoadingPublicProfiles(true);
       setLoadingTripRequests(true);
+      setLoadingFriendships(true);
+      setLoadingSocialPosts(true);
       setError("");
       setSuccessMessage("");
+
+      // Track which collections have permission errors so we can suppress
+      // the global "rules blocking" message when the user can still use the app.
+      const blockedCollections = new Set<string>();
+
+      const handleReadError = (collectionName: string, nextError: unknown) => {
+        blockedCollections.add(collectionName);
+        // Only surface the rules error if EVERY collection is blocked.
+        // Otherwise the user can still interact with the data that did load.
+        if (blockedCollections.size >= 6) {
+          setError(getGroupsErrorMessage(nextError, "read"));
+        }
+      };
+
+      const handleReadSuccess = (collectionName: string) => {
+        blockedCollections.delete(collectionName);
+        // If any collection comes through successfully, clear stale rules error.
+        if (blockedCollections.size === 0) {
+          setError((current) =>
+            current.startsWith("Firestore rules") ? "" : current
+          );
+        }
+      };
 
       unsubscribeProfile = onSnapshot(
         doc(db, "profiles", nextUser.uid),
@@ -126,6 +211,13 @@ export function useGroupsScreen() {
           }
 
           const profileData = profileSnapshot.data() as Record<string, unknown>;
+          const personalProfile =
+            profileData.profileInfo && typeof profileData.profileInfo === "object"
+              ? extractPersonalProfile({
+                  profileInfo: profileData.profileInfo as Record<string, unknown>,
+                })
+              : extractPersonalProfile({});
+
           setProfileName(
             getProfileDisplayName({
               email: nextUser.email,
@@ -137,18 +229,17 @@ export function useGroupsScreen() {
             })
           );
           setProfileAvatarUrl(
-            extractPersonalProfile({
-              profileInfo:
-                profileData.profileInfo && typeof profileData.profileInfo === "object"
-                  ? (profileData.profileInfo as Record<string, unknown>)
-                  : undefined,
-            }).avatarUrl
+            typeof profileData.profilePhotoUrl === "string" && profileData.profilePhotoUrl.trim()
+              ? profileData.profilePhotoUrl.trim()
+              : personalProfile.avatarUrl
           );
-          setUsername(typeof profileData.username === "string" ? profileData.username : "");
+          setDreamDestinations(personalProfile.dreamDestinations);
+          setUsername(typeof profileData.username === "string" ? profileData.username.trim() : "");
           setLoadingProfile(false);
+          handleReadSuccess("profile");
         },
         (nextError) => {
-          setError(getGroupsErrorMessage(nextError, "read"));
+          handleReadError("profile", nextError);
           setLoadingProfile(false);
         }
       );
@@ -163,9 +254,10 @@ export function useGroupsScreen() {
           );
           setGroups(nextGroups);
           setLoadingGroups(false);
+          handleReadSuccess("groups");
         },
         (nextError) => {
-          setError(getGroupsErrorMessage(nextError, "read"));
+          handleReadError("groups", nextError);
           setLoadingGroups(false);
         }
       );
@@ -183,9 +275,10 @@ export function useGroupsScreen() {
             .sort((left, right) => left.displayName.localeCompare(right.displayName));
           setPublicProfiles(nextProfiles);
           setLoadingPublicProfiles(false);
+          handleReadSuccess("publicProfiles");
         },
         (nextError) => {
-          setError(getGroupsErrorMessage(nextError, "read"));
+          handleReadError("publicProfiles", nextError);
           setLoadingPublicProfiles(false);
         }
       );
@@ -203,10 +296,56 @@ export function useGroupsScreen() {
           );
           setTripRequests(nextRequests);
           setLoadingTripRequests(false);
+          handleReadSuccess("tripRequests");
         },
         (nextError) => {
-          setError(getGroupsErrorMessage(nextError, "read"));
+          handleReadError("tripRequests", nextError);
           setLoadingTripRequests(false);
+        }
+      );
+
+      unsubscribeFriendships = onSnapshot(
+        query(
+          collection(db, "friendships"),
+          where("participantIds", "array-contains", nextUser.uid)
+        ),
+        (friendshipsSnapshot) => {
+          const nextFriendships = sortFriendshipsByUpdatedAt(
+            friendshipsSnapshot.docs.map((friendshipDocument) =>
+              parseFriendship(
+                friendshipDocument.id,
+                friendshipDocument.data() as Record<string, unknown>
+              )
+            )
+          );
+          setFriendships(nextFriendships);
+          setLoadingFriendships(false);
+          handleReadSuccess("friendships");
+        },
+        (nextError) => {
+          handleReadError("friendships", nextError);
+          setLoadingFriendships(false);
+        }
+      );
+
+      unsubscribeSocialPosts = onSnapshot(
+        collection(db, "socialPosts"),
+        (socialPostsSnapshot) => {
+          const nextPosts = sortSocialPostsByCreatedAt(
+            socialPostsSnapshot.docs.map((socialPostDocument) =>
+              parseSocialPost(
+                socialPostDocument.id,
+                socialPostDocument.data() as Record<string, unknown>
+              )
+            )
+          );
+          setSocialPosts(nextPosts);
+          setLoadingSocialPosts(false);
+          handleReadSuccess("socialPosts");
+        },
+        (nextError) => {
+          handleReadError("socialPosts", nextError);
+          setLoadingSocialPosts(false);
         }
       );
     });
@@ -216,6 +355,8 @@ export function useGroupsScreen() {
       unsubscribeGroups?.();
       unsubscribePublicProfiles?.();
       unsubscribeTripRequests?.();
+      unsubscribeFriendships?.();
+      unsubscribeSocialPosts?.();
       unsubscribeAuth();
     };
   }, [router]);
@@ -223,6 +364,102 @@ export function useGroupsScreen() {
   const userId = user?.uid ?? "";
   const userHandle = username || profileName.toLowerCase().replace(/\s+/g, "_");
   const publicUsers = publicProfiles.filter((profile) => profile.uid !== userId);
+
+  const publicProfilesById = useMemo(
+    () => Object.fromEntries(publicProfiles.map((profile) => [profile.uid, profile])),
+    [publicProfiles]
+  );
+
+  const friendshipsByProfileId = useMemo(
+    () =>
+      Object.fromEntries(
+        friendships
+          .map((friendship) => [getFriendshipOtherUserId(friendship, userId), friendship] as const)
+          .filter(([friendId]) => !!friendId)
+      ),
+    [friendships, userId]
+  );
+
+  const acceptedFriendships = useMemo(
+    () => friendships.filter((friendship) => friendship.status === "accepted"),
+    [friendships]
+  );
+  const pendingIncomingFriendships = useMemo(
+    () =>
+      friendships.filter(
+        (friendship) =>
+          friendship.status === "pending" && friendship.recipientId === userId
+      ),
+    [friendships, userId]
+  );
+  const pendingOutgoingFriendships = useMemo(
+    () =>
+      friendships.filter(
+        (friendship) =>
+          friendship.status === "pending" && friendship.requesterId === userId
+      ),
+    [friendships, userId]
+  );
+
+  const buildSocialProfilePreview = (targetUserId: string): SocialProfilePreview => {
+    const profile = publicProfilesById[targetUserId];
+    const connection = friendshipsByProfileId[targetUserId] ?? null;
+    const fallbackConnection = connection;
+
+    return {
+      aboutMe: profile?.aboutMe ?? "",
+      connection,
+      homeBase: profile?.homeBase ?? "",
+      label:
+        profile?.displayName ||
+        (fallbackConnection ? getFriendshipOtherLabel(fallbackConnection, userId) : "Traveler"),
+      photoUrl: profile?.photoUrl || profile?.avatarUrl || "",
+      uid: targetUserId,
+      username:
+        profile?.username ||
+        (fallbackConnection ? getFriendshipOtherUsername(fallbackConnection, userId) : ""),
+    };
+  };
+
+  const friendProfiles = useMemo(
+    () =>
+      acceptedFriendships
+        .map((friendship) => buildSocialProfilePreview(getFriendshipOtherUserId(friendship, userId)))
+        .filter((profile) => !!profile.uid),
+    [acceptedFriendships, publicProfilesById, friendshipsByProfileId, userId]
+  );
+
+  const suggestedProfiles = useMemo(() => {
+    const rankForProfile = (profileId: string) => {
+      const connection = friendshipsByProfileId[profileId];
+
+      if (!connection) {
+        return 1;
+      }
+
+      if (connection.status === "pending" && connection.recipientId === userId) {
+        return 0;
+      }
+
+      if (connection.status === "pending") {
+        return 2;
+      }
+
+      return 3;
+    };
+
+    return [...publicUsers]
+      .filter((profile) => friendshipsByProfileId[profile.uid]?.status !== "accepted")
+      .sort((left, right) => {
+        const rankDiff = rankForProfile(left.uid) - rankForProfile(right.uid);
+
+        if (rankDiff !== 0) {
+          return rankDiff;
+        }
+
+        return left.displayName.localeCompare(right.displayName);
+      });
+  }, [publicUsers, friendshipsByProfileId, userId]);
 
   const publicGroups = useMemo(
     () => groups.filter((group) => group.accessType === "public"),
@@ -244,15 +481,174 @@ export function useGroupsScreen() {
     () => tripRequests.filter((request) => request.status === "open"),
     [tripRequests]
   );
+  const joinedGroupIdsKey = useMemo(
+    () => joinedGroups.map((group) => group.id).sort().join("|"),
+    [joinedGroups]
+  );
+
+  useEffect(() => {
+    if (!userId || joinedGroups.length === 0) {
+      setGroupBoardsByGroupId({});
+      return;
+    }
+
+    const allowedGroupIds = new Set(joinedGroups.map((group) => group.id));
+    setGroupBoardsByGroupId((currentBoards) =>
+      Object.fromEntries(
+        Object.entries(currentBoards).filter(([groupId]) => allowedGroupIds.has(groupId))
+      )
+    );
+
+    const unsubscribers = joinedGroups.map((group) =>
+      onSnapshot(
+        doc(db, "groups", group.id, "tripBoards", "active"),
+        (boardSnapshot) => {
+          setGroupBoardsByGroupId((currentBoards) => {
+            const nextBoards = { ...currentBoards };
+
+            if (boardSnapshot.exists()) {
+              const parsedBoard = parseGroupItineraryBoard(
+                boardSnapshot.id,
+                boardSnapshot.data() as Record<string, unknown>
+              );
+
+              if (parsedBoard) {
+                nextBoards[group.id] = parsedBoard;
+              } else {
+                delete nextBoards[group.id];
+              }
+            } else {
+              delete nextBoards[group.id];
+            }
+
+            return nextBoards;
+          });
+        },
+        () => {
+          setGroupBoardsByGroupId((currentBoards) => {
+            const nextBoards = { ...currentBoards };
+            delete nextBoards[group.id];
+            return nextBoards;
+          });
+        }
+      )
+    );
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [joinedGroupIdsKey, joinedGroups, userId]);
+
+  const friendIds = useMemo(
+    () =>
+      acceptedFriendships
+        .map((friendship) => getFriendshipOtherUserId(friendship, userId))
+        .filter(Boolean),
+    [acceptedFriendships, userId]
+  );
+
+  const activeStories = useMemo(() => {
+    const now = Date.now();
+    const latestStoryByAuthor = new Map<string, SocialPost>();
+
+    for (const post of socialPosts) {
+      if (post.kind !== "story" || !post.authorId) {
+        continue;
+      }
+
+      const expiresAtMs = post.expiresAtMs ?? 0;
+
+      if (expiresAtMs <= now) {
+        continue;
+      }
+
+      const current = latestStoryByAuthor.get(post.authorId);
+      const nextValue = post.createdAtMs ?? 0;
+      const currentValue = current?.createdAtMs ?? 0;
+
+      if (!current || nextValue > currentValue) {
+        latestStoryByAuthor.set(post.authorId, post);
+      }
+    }
+
+    return Array.from(latestStoryByAuthor.values()).sort(
+      (left, right) => (right.createdAtMs ?? 0) - (left.createdAtMs ?? 0)
+    );
+  }, [socialPosts]);
+
+  const feedPosts = useMemo(() => {
+    const friendIdSet = new Set(friendIds);
+
+    return socialPosts
+      .filter((post) => post.kind === "post")
+      .sort((left, right) => {
+      const leftRank =
+        left.authorId === userId || friendIdSet.has(left.authorId) ? 0 : 1;
+      const rightRank =
+        right.authorId === userId || friendIdSet.has(right.authorId) ? 0 : 1;
+
+      if (leftRank !== rightRank) {
+        return leftRank - rightRank;
+      }
+
+      return (right.createdAtMs ?? 0) - (left.createdAtMs ?? 0);
+      });
+  }, [friendIds, socialPosts, userId]);
+
+  const mySocialPosts = useMemo(
+    () =>
+      socialPosts.filter((post) => post.authorId === userId && post.kind === "post"),
+    [socialPosts, userId]
+  );
+  const smartAlerts = useMemo(
+    () =>
+      buildSmartTripAlerts({
+        currentUserId: userId,
+        dreamDestinations,
+        groupBoardsByGroupId,
+        groups: joinedGroups,
+        tripRequests: openTripRequests,
+      }),
+    [dreamDestinations, groupBoardsByGroupId, joinedGroups, openTripRequests, userId]
+  );
+
+  useEffect(() => {
+    if (!userId || smartAlerts.length === 0) {
+      return;
+    }
+
+    smartAlerts.slice(0, 3).forEach((alert) => {
+      void sendLocalSmartNotificationIfNeeded({
+        body: alert.body,
+        dedupeKey: alert.id,
+        title: alert.title,
+      });
+    });
+  }, [smartAlerts, userId]);
+
   const searchedPublicGroups = useMemo(
     () =>
       publicGroups.filter((group) =>
+        matchesQuery([group.name, group.description, group.creatorLabel], searchQuery)
+      ),
+    [publicGroups, searchQuery]
+  );
+  const searchedPublicProfiles = useMemo(
+    () =>
+      publicUsers.filter((profile) =>
         matchesQuery(
-          [group.name, group.description, group.creatorLabel],
+          [profile.displayName, profile.username, profile.homeBase, profile.aboutMe],
           searchQuery
         )
       ),
-    [publicGroups, searchQuery]
+    [publicUsers, searchQuery]
+  );
+  const searchedSocialPosts = useMemo(
+    () =>
+      feedPosts.filter((post) =>
+        matchesQuery([post.authorLabel, post.authorUsername, post.caption, post.location], searchQuery)
+      ),
+    [feedPosts, searchQuery]
   );
   const filteredInviteProfiles = useMemo(
     () =>
@@ -267,11 +663,14 @@ export function useGroupsScreen() {
     [publicUsers, selectedInviteIds, inviteSearchQuery]
   );
 
-  const publicProfilesById = useMemo(
-    () =>
-      Object.fromEntries(publicProfiles.map((profile) => [profile.uid, profile])),
-    [publicProfiles]
-  );
+  const socialPostCount = mySocialPosts.length;
+  const loading =
+    loadingProfile ||
+    loadingGroups ||
+    loadingPublicProfiles ||
+    loadingTripRequests ||
+    loadingFriendships ||
+    loadingSocialPosts;
 
   const clearFeedback = () => {
     setError("");
@@ -300,6 +699,12 @@ export function useGroupsScreen() {
     setRequestTiming("");
     setRequestTravelers("");
     setRequestNote("");
+  };
+
+  const resetPostComposer = () => {
+    setPostCaption("");
+    setPostLocation("");
+    setPostImageUri("");
   };
 
   const openDeleteModal = (group: TravelGroup) => {
@@ -532,6 +937,330 @@ export function useGroupsScreen() {
     }
   };
 
+  const readAssetDataUrl = async (asset: ImagePicker.ImagePickerAsset) => {
+    const mimeType = asset.mimeType || "image/jpeg";
+
+    if (asset.base64) {
+      return `data:${mimeType};base64,${asset.base64}`;
+    }
+
+    const response = await fetch(asset.uri);
+    const blob = await response.blob();
+
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (typeof reader.result === "string") {
+          resolve(reader.result);
+          return;
+        }
+
+        reject(new Error("Could not read the selected photo."));
+      };
+      reader.onerror = () => reject(new Error("Could not read the selected photo."));
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  const pickSocialImage = async (source: "camera" | "library") => {
+    try {
+      setPickingPostImage(true);
+      clearFeedback();
+
+      const permission =
+        Platform.OS === "web"
+          ? { granted: true }
+          : source === "camera"
+            ? await ImagePicker.requestCameraPermissionsAsync()
+            : await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permission.granted) {
+        setError(
+          source === "camera"
+            ? "Allow camera access to take a photo."
+            : "Allow gallery access to attach a photo."
+        );
+        return false;
+      }
+
+      const result =
+        source === "camera"
+          ? await ImagePicker.launchCameraAsync({
+              allowsEditing: true,
+              aspect: [4, 5],
+              base64: true,
+              mediaTypes: ["images"],
+              quality: 0.55,
+            })
+          : await ImagePicker.launchImageLibraryAsync({
+              allowsEditing: true,
+              aspect: [4, 5],
+              base64: true,
+              mediaTypes: ["images"],
+              quality: 0.55,
+            });
+
+      if (result.canceled || !result.assets[0]) {
+        return false;
+      }
+
+      const imageDataUrl = await readAssetDataUrl(result.assets[0]);
+
+      if (imageDataUrl.length > SOCIAL_POST_IMAGE_MAX_LENGTH) {
+        setError("The selected image is too large for a feed post.");
+        return false;
+      }
+
+      setPostImageUri(imageDataUrl);
+      return true;
+    } catch {
+      setError(
+        source === "camera"
+          ? "Could not take a photo right now."
+          : "Could not attach the selected photo."
+      );
+      return false;
+    } finally {
+      setPickingPostImage(false);
+    }
+  };
+
+  const pickPostImage = async () => pickSocialImage("library");
+
+  const takePostPhoto = async () => pickSocialImage("camera");
+
+  const clearPostImage = () => {
+    setPostImageUri("");
+  };
+
+  const resetPostDraft = () => {
+    resetPostComposer();
+    clearFeedback();
+  };
+
+  const handleCreateSocialPost = async () => {
+    if (!user) {
+      return false;
+    }
+
+    const trimmedCaption = postCaption.trim().slice(0, 280);
+    const trimmedLocation = postLocation.trim().slice(0, 80);
+
+    if (!trimmedCaption && !postImageUri) {
+      setError("Add a caption or a photo before publishing.");
+      setSuccessMessage("");
+      return false;
+    }
+
+    try {
+      setPostingSocialPost(true);
+      clearFeedback();
+
+      const now = Date.now();
+      const newPostRef = doc(collection(db, "socialPosts"));
+
+      await setDoc(newPostRef, {
+        authorId: user.uid,
+        authorLabel: profileName,
+        authorUsername: username,
+        caption: trimmedCaption,
+        createdAtMs: now,
+        expiresAtMs: null,
+        imageUri: postImageUri,
+        kind: "post",
+        location: trimmedLocation,
+        updatedAtMs: now,
+        visibility: "public",
+      });
+
+      resetPostComposer();
+      setSuccessMessage("Your travel moment is live.");
+      return true;
+    } catch {
+      setError("Could not publish your travel moment. Try again.");
+      return false;
+    } finally {
+      setPostingSocialPost(false);
+    }
+  };
+
+  const publishStoryFromDraft = async () => {
+    if (!user) {
+      return false;
+    }
+
+    if (!postImageUri) {
+      setError("Add a photo before publishing a story.");
+      setSuccessMessage("");
+      return false;
+    }
+
+    try {
+      setPostingSocialPost(true);
+      clearFeedback();
+
+      const now = Date.now();
+      const newPostRef = doc(collection(db, "socialPosts"));
+
+      await setDoc(newPostRef, {
+        authorId: user.uid,
+        authorLabel: profileName,
+        authorUsername: username,
+        caption: "",
+        createdAtMs: now,
+        expiresAtMs: now + STORY_TTL_MS,
+        imageUri: postImageUri,
+        kind: "story",
+        location: "",
+        updatedAtMs: now,
+        visibility: "public",
+      });
+
+      resetPostComposer();
+      setSuccessMessage("Your story is live.");
+      return true;
+    } catch {
+      setError("Could not publish your story. Try again.");
+      return false;
+    } finally {
+      setPostingSocialPost(false);
+    }
+  };
+
+  const sendFriendRequest = async (profile: PublicProfile) => {
+    if (!user || profile.uid === user.uid) {
+      return;
+    }
+
+    const friendshipId = buildFriendshipId(user.uid, profile.uid);
+
+    try {
+      setUpdatingFriendshipId(friendshipId);
+      clearFeedback();
+
+      const result = await runTransaction(db, async (transaction) => {
+        const friendshipRef = doc(db, "friendships", friendshipId);
+        const friendshipSnapshot = await transaction.get(friendshipRef);
+        const now = Date.now();
+
+        if (!friendshipSnapshot.exists()) {
+          transaction.set(friendshipRef, {
+            createdAtMs: now,
+            participantIds: [user.uid, profile.uid].sort(),
+            recipientId: profile.uid,
+            recipientLabel: profile.displayName || profile.username || "Traveler",
+            recipientUsername: profile.username,
+            requesterId: user.uid,
+            requesterLabel: profileName,
+            requesterUsername: username,
+            status: "pending",
+            updatedAtMs: now,
+          });
+          return "sent";
+        }
+
+        const currentFriendship = parseFriendship(
+          friendshipSnapshot.id,
+          friendshipSnapshot.data() as Record<string, unknown>
+        );
+
+        if (currentFriendship.status === "accepted") {
+          return "accepted";
+        }
+
+        if (
+          currentFriendship.status === "pending" &&
+          currentFriendship.recipientId === user.uid
+        ) {
+          transaction.update(friendshipRef, {
+            status: "accepted",
+            updatedAtMs: now,
+          });
+          return "accepted";
+        }
+
+        return "pending";
+      });
+
+      if (result === "accepted") {
+        setSuccessMessage("You are now travel friends.");
+      } else if (result === "sent") {
+        setSuccessMessage("Friend request sent.");
+      } else {
+        setSuccessMessage("Friend request is already pending.");
+      }
+    } catch {
+      setError("Could not update the friend request right now.");
+    } finally {
+      setUpdatingFriendshipId(null);
+    }
+  };
+
+  const acceptFriendRequest = async (friendship: Friendship) => {
+    if (!user || friendship.recipientId !== user.uid) {
+      return;
+    }
+
+    try {
+      setUpdatingFriendshipId(friendship.id);
+      clearFeedback();
+
+      await runTransaction(db, async (transaction) => {
+        const friendshipRef = doc(db, "friendships", friendship.id);
+        const friendshipSnapshot = await transaction.get(friendshipRef);
+
+        if (!friendshipSnapshot.exists()) {
+          throw new Error("missing-friendship");
+        }
+
+        const currentFriendship = parseFriendship(
+          friendshipSnapshot.id,
+          friendshipSnapshot.data() as Record<string, unknown>
+        );
+
+        if (currentFriendship.status === "accepted") {
+          return;
+        }
+
+        transaction.update(friendshipRef, {
+          status: "accepted",
+          updatedAtMs: Date.now(),
+        });
+      });
+
+      setSuccessMessage("You are now travel friends.");
+    } catch {
+      setError("Could not accept this friend request.");
+    } finally {
+      setUpdatingFriendshipId(null);
+    }
+  };
+
+  const removeFriendship = async (friendship: Friendship) => {
+    if (!user || !friendship.participantIds.includes(user.uid)) {
+      return;
+    }
+
+    try {
+      setUpdatingFriendshipId(friendship.id);
+      clearFeedback();
+
+      await deleteDoc(doc(db, "friendships", friendship.id));
+
+      if (friendship.status === "accepted") {
+        setSuccessMessage("Friend removed.");
+      } else if (friendship.requesterId === user.uid) {
+        setSuccessMessage("Friend request canceled.");
+      } else {
+        setSuccessMessage("Friend request declined.");
+      }
+    } catch {
+      setError("Could not update this friendship.");
+    } finally {
+      setUpdatingFriendshipId(null);
+    }
+  };
+
   const toggleTripRequestInterest = async (request: TripRequest) => {
     if (!user) {
       return;
@@ -689,40 +1418,79 @@ export function useGroupsScreen() {
     }
   };
 
-  const loading =
-    loadingProfile || loadingGroups || loadingPublicProfiles || loadingTripRequests;
-
   return {
     // Data
     userId,
     userHandle,
     profileName,
+    profileAvatarUrl,
     publicUsers,
     publicGroups,
     joinedGroups,
     invitedGroups,
     openTripRequests,
     searchedPublicGroups,
+    searchedPublicProfiles,
+    searchedSocialPosts,
     filteredInviteProfiles,
     publicProfilesById,
+    friendProfiles,
+    pendingIncomingFriendships,
+    pendingOutgoingFriendships,
+    suggestedProfiles,
+    activeStories,
+    feedPosts,
+    mySocialPosts,
+    smartAlerts,
+    dreamDestinations,
+    groupBoardsByGroupId,
+    socialPostCount,
+    friendCount: acceptedFriendships.length,
 
     // Loading / saving flags
     loading,
     savingGroup,
     savingTripRequest,
+    postingSocialPost,
+    pickingPostImage,
     joiningGroupId,
     joiningByKey,
     deletingGroupId,
     updatingTripRequestId,
+    updatingFriendshipId,
 
     // Feedback
     error,
     successMessage,
     clearFeedback,
 
+    // Section navigation
+    activeSection,
+    setActiveSection,
+
     // Search
     searchQuery,
     setSearchQuery,
+
+    // Social composer
+    postCaption,
+    setPostCaption,
+    postLocation,
+    setPostLocation,
+    postImageUri,
+    pickPostImage,
+    takePostPhoto,
+    pickSocialImage,
+    clearPostImage,
+    resetPostDraft,
+    handleCreateSocialPost,
+    publishStoryFromDraft,
+
+    // Social actions
+    buildSocialProfilePreview,
+    sendFriendRequest,
+    acceptFriendRequest,
+    removeFriendship,
 
     // Action menu
     actionMenuVisible,

@@ -1,6 +1,8 @@
 import { normalizeBudgetToEuro } from "./currency";
+import { sanitizeString, sanitizeStringArray } from "./sanitize";
 import type { AppLanguage } from "./translations";
-import { GEMINI_MODEL, type DiscoverProfile } from "./trip-recommendations";
+import { type DiscoverProfile } from "./trip-recommendations";
+import { callAI, getAIApiKey } from "./ai";
 
 export type PlannerTransportOption = {
   bookingUrl?: string;
@@ -113,10 +115,6 @@ const HOME_PLAN_RESPONSE_SCHEMA = {
     "tripDays",
   ],
 } as const;
-
-function sanitizeString(value: unknown, fallback = "") {
-  return typeof value === "string" ? value.trim() : fallback;
-}
 
 function getPlannerLanguageVariant(language?: string): AppLanguage {
   const normalized = (language || "").trim().toLowerCase();
@@ -261,16 +259,44 @@ function getPlannerCopy(language?: string) {
   }
 }
 
-function sanitizeStringArray(value: unknown) {
-  if (!Array.isArray(value)) {
-    return [];
+function extractJsonObject(text: string) {
+  const trimmedText = text.trim();
+
+  if (!trimmedText) {
+    throw new Error("empty-json-response");
   }
 
-  return value
-    .filter((item): item is string => typeof item === "string")
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, 4);
+  const fencedMatch = trimmedText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  const directCandidate = fencedMatch?.[1]?.trim() || trimmedText;
+
+  try {
+    return JSON.parse(directCandidate) as Record<string, unknown>;
+  } catch {
+    // Fall through to balanced-object extraction.
+  }
+
+  let depth = 0;
+  let startIndex = -1;
+
+  for (let index = 0; index < directCandidate.length; index += 1) {
+    const character = directCandidate[index];
+
+    if (character === "{") {
+      if (depth === 0) {
+        startIndex = index;
+      }
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+
+      if (depth === 0 && startIndex !== -1) {
+        const possibleJson = directCandidate.slice(startIndex, index + 1);
+        return JSON.parse(possibleJson) as Record<string, unknown>;
+      }
+    }
+  }
+
+  throw new Error("invalid-json-response");
 }
 
 function dedupeByKey<T>(items: T[], getKey: (item: T) => string) {
@@ -307,66 +333,6 @@ function dedupeTextLines(lines: string[]) {
     seen.add(normalized);
     return true;
   });
-}
-
-function getResponseText(responsePayload: any) {
-  const parts = responsePayload?.candidates?.[0]?.content?.parts;
-
-  if (!Array.isArray(parts)) {
-    return "";
-  }
-
-  return parts
-    .map((part) => (typeof part?.text === "string" ? part.text : ""))
-    .join("")
-    .trim();
-}
-
-async function callGeminiGenerateContent(params: {
-  apiKey: string;
-  generationConfig?: Record<string, unknown>;
-  prompt: string;
-  tools?: Record<string, unknown>[];
-}) {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": params.apiKey,
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: params.prompt,
-              },
-            ],
-          },
-        ],
-        ...(params.generationConfig
-          ? { generationConfig: params.generationConfig }
-          : {}),
-        ...(params.tools ? { tools: params.tools } : {}),
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`gemini-grounded-request-failed:${response.status}:${errorText}`);
-  }
-
-  const responsePayload = await response.json();
-  const text = getResponseText(responsePayload);
-
-  if (!text) {
-    throw new Error("empty-grounded-response");
-  }
-
-  return text;
 }
 
 function normalizeTransportOption(
@@ -541,28 +507,28 @@ function buildPlannerPrompt(params: {
     "BUDGET_FIT",
     "PROFILE_TIP",
     "",
-    `Trip origin / home base: ${homeBase}`,
-    `Budget (EUR): ${normalizedBudget}`,
-    `Trip length: ${days}`,
-    `Travelers count: ${travelers}`,
-    `Preferred transport: ${transportPreference}`,
-    `Timing / period: ${timing}`,
-    `Destination: ${destination}`,
-    `Username: ${profile.username || "Not provided"}`,
-    `Email: ${profile.email || "Not provided"}`,
-    `Full name: ${profile.personalProfile.fullName || "Not provided"}`,
-    `About me: ${profile.personalProfile.aboutMe || "Not provided"}`,
-    `Dream destinations: ${profile.personalProfile.dreamDestinations || "Not provided"}`,
-    `Travel pace: ${profile.personalProfile.travelPace || "Not provided"}`,
-    `Stay style: ${profile.personalProfile.stayStyle || "Not provided"}`,
-    `Interests: ${profile.interests.selectedOptions.join(", ") || "None provided"}`,
-    `Interests note: ${profile.interests.note || "None"}`,
-    `Accessibility / assistance needs: ${
+    `Trip origin / home base: """${homeBase}"""`,
+    `Budget (EUR): """${normalizedBudget}"""`,
+    `Trip length: """${days}"""`,
+    `Travelers count: """${travelers}"""`,
+    `Preferred transport: """${transportPreference}"""`,
+    `Timing / period: """${timing}"""`,
+    `Destination: """${destination}"""`,
+    `Username: """${profile.username || "Not provided"}"""`,
+    `Email: """${profile.email || "Not provided"}"""`,
+    `Full name: """${profile.personalProfile.fullName || "Not provided"}"""`,
+    `About me: """${profile.personalProfile.aboutMe || "Not provided"}"""`,
+    `Dream destinations: """${profile.personalProfile.dreamDestinations || "Not provided"}"""`,
+    `Travel pace: """${profile.personalProfile.travelPace || "Not provided"}"""`,
+    `Stay style: """${profile.personalProfile.stayStyle || "Not provided"}"""`,
+    `Interests: """${profile.interests.selectedOptions.join(", ") || "None provided"}"""`,
+    `Interests note: """${profile.interests.note || "None"}"""`,
+    `Accessibility / assistance needs: """${
       profile.assistance.selectedOptions.join(", ") || "None provided"
-    }`,
-    `Assistance note: ${profile.assistance.note || "None"}`,
-    `Skills / ways to help: ${profile.skills.selectedOptions.join(", ") || "None provided"}`,
-    `Skills note: ${profile.skills.note || "None"}`,
+    }"""`,
+    `Assistance note: """${profile.assistance.note || "None"}"""`,
+    `Skills / ways to help: """${profile.skills.selectedOptions.join(", ") || "None provided"}"""`,
+    `Skills note: """${profile.skills.note || "None"}"""`,
   ].join("\n");
 }
 
@@ -654,35 +620,27 @@ export async function generateGroundedTravelPlan(params: {
   travelers: string;
   profile: DiscoverProfile;
 }) {
-  const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+  const apiKey = getAIApiKey();
 
   if (!apiKey) {
     throw new Error("missing-api-key");
   }
 
-  const groundedNotes = await callGeminiGenerateContent({
+  const groundedNotes = await callAI({
     apiKey,
     prompt: buildPlannerPrompt(params),
-    tools: [
-      {
-        google_search: {},
-      },
-    ],
   });
 
-  const structuredJsonText = await callGeminiGenerateContent({
+  const structuredJsonText = await callAI({
     apiKey,
     prompt: buildStructuredPlanPrompt({
       ...params,
       groundedNotes,
     }),
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseJsonSchema: HOME_PLAN_RESPONSE_SCHEMA,
-    },
+    jsonMode: true,
   });
 
-  const parsedPlan = JSON.parse(structuredJsonText) as RawGroundedTravelPlan;
+  const parsedPlan = extractJsonObject(structuredJsonText) as RawGroundedTravelPlan;
   return normalizePlan(parsedPlan, params);
 }
 
@@ -773,20 +731,15 @@ export async function generateGroundedTravelFollowUp(params: {
   recentMessages: { role: "assistant" | "user"; text: string }[];
   userRequest: string;
 }) {
-  const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+  const apiKey = getAIApiKey();
 
   if (!apiKey) {
     throw new Error("missing-api-key");
   }
 
-  return callGeminiGenerateContent({
+  return callAI({
     apiKey,
     prompt: buildPlannerFollowUpPrompt(params),
-    tools: [
-      {
-        google_search: {},
-      },
-    ],
   });
 }
 
@@ -937,22 +890,19 @@ export async function generateConversationalResponse(params: {
   language?: string;
   profile: DiscoverProfile;
 }): Promise<ConversationalResponse> {
-  const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+  const apiKey = getAIApiKey();
 
   if (!apiKey) {
     throw new Error("missing-api-key");
   }
 
-  const text = await callGeminiGenerateContent({
+  const text = await callAI({
     apiKey,
     prompt: buildConversationalPrompt(params),
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseJsonSchema: CONVERSATIONAL_RESPONSE_SCHEMA,
-    },
+    jsonMode: true,
   });
 
-  const parsed = JSON.parse(text) as Record<string, unknown>;
+  const parsed = extractJsonObject(text);
   return sanitizeConversationalResponse(parsed, params.language);
 }
 
@@ -974,62 +924,62 @@ export function getHomePlannerErrorMessage(
 
   if (error.message === "missing-api-key") {
     return language === "en"
-      ? "EXPO_PUBLIC_GEMINI_API_KEY is missing. Add a Gemini API key and restart the app."
+      ? "API key is missing. Add EXPO_PUBLIC_GEMINI_API_KEY and restart the app."
       : language === "de"
-        ? "EXPO_PUBLIC_GEMINI_API_KEY fehlt. Füge einen Gemini-API-Schlüssel hinzu und starte die App neu."
+        ? "API-Schlüssel fehlt. Füge EXPO_PUBLIC_GEMINI_API_KEY hinzu und starte die App neu."
         : language === "es"
-          ? "Falta EXPO_PUBLIC_GEMINI_API_KEY. Añade una clave de Gemini y reinicia la app."
+          ? "Falta la clave API. Añade EXPO_PUBLIC_GEMINI_API_KEY y reinicia la app."
           : language === "fr"
-            ? "EXPO_PUBLIC_GEMINI_API_KEY est manquant. Ajoute une clé Gemini puis redémarre l’application."
-            : "Липсва EXPO_PUBLIC_GEMINI_API_KEY. Добави Gemini API ключ и рестартирай приложението.";
+            ? "Clé API manquante. Ajoute EXPO_PUBLIC_GEMINI_API_KEY et redémarre l’application."
+            : "Липсва API ключ. Добави EXPO_PUBLIC_GEMINI_API_KEY и рестартирай приложението.";
   }
 
-  if (error.message.startsWith("gemini-grounded-request-failed:429")) {
+  if (error.message.startsWith("ai-request-failed:429")) {
     return language === "en"
-      ? "Gemini hit the request limit. Please try again later."
+      ? "AI hit the request limit. Please try again later."
       : language === "de"
-        ? "Gemini hat das Anfrage-Limit erreicht. Bitte versuche es später erneut."
+        ? "KI hat das Anfrage-Limit erreicht. Bitte versuche es später erneut."
         : language === "es"
-          ? "Gemini alcanzó el límite de solicitudes. Inténtalo más tarde."
+          ? "La IA alcanzó el límite de solicitudes. Inténtalo más tarde."
           : language === "fr"
-            ? "Gemini a atteint la limite de requêtes. Réessaie plus tard."
-            : "Gemini достигна лимит за заявки. Опитай отново по-късно.";
+            ? "L'IA a atteint la limite de requêtes. Réessaie plus tard."
+            : "AI достигна лимит за заявки. Опитай отново по-късно.";
   }
 
-  if (error.message.startsWith("gemini-grounded-request-failed:")) {
+  if (error.message.startsWith("ai-request-failed:")) {
     return language === "en"
-      ? "We couldn't fetch fresh travel data from Gemini. Check the key and your network."
+      ? "We couldn't fetch fresh travel data. Check the key and your network."
       : language === "de"
-        ? "Wir konnten keine aktuellen Reisedaten von Gemini abrufen. Prüfe Schlüssel und Netzwerk."
+        ? "Wir konnten keine aktuellen Reisedaten abrufen. Prüfe Schlüssel und Netzwerk."
         : language === "es"
-          ? "No pudimos obtener datos de viaje actualizados de Gemini. Revisa la clave y la red."
+          ? "No pudimos obtener datos de viaje actualizados. Revisa la clave y la red."
           : language === "fr"
-            ? "Nous n'avons pas pu récupérer les données de voyage récentes depuis Gemini. Vérifie la clé et le réseau."
-            : "Не успяхме да вземем актуални travel данни от Gemini. Провери ключа и мрежата.";
+            ? "Nous n'avons pas pu récupérer les données de voyage récentes. Vérifie la clé et le réseau."
+            : "Не успяхме да вземем актуални данни за пътуване. Провери ключа и мрежата.";
   }
 
-  if (error.message === "empty-grounded-response") {
+  if (error.message === "empty-ai-response" || error.message === "empty-grounded-response") {
     return language === "en"
-      ? "Gemini didn't return a route. Please try again."
+      ? "AI didn't return a route. Please try again."
       : language === "de"
-        ? "Gemini hat keine Route zurückgegeben. Bitte versuche es erneut."
+        ? "KI hat keine Route zurückgegeben. Bitte versuche es erneut."
         : language === "es"
-          ? "Gemini no devolvió una ruta. Inténtalo de nuevo."
+          ? "La IA no devolvió una ruta. Inténtalo de nuevo."
           : language === "fr"
-            ? "Gemini n'a pas renvoyé d'itinéraire. Réessaie."
-            : "Gemini не върна маршрут. Опитай отново.";
+            ? "L'IA n'a pas renvoyé d'itinéraire. Réessaie."
+            : "AI не върна маршрут. Опитай отново.";
   }
 
   if (error instanceof SyntaxError) {
     return language === "en"
-      ? "Gemini returned an unexpected format. Please try again."
+      ? "AI returned an unexpected format. Please try again."
       : language === "de"
-        ? "Gemini hat ein unerwartetes Format zurückgegeben. Bitte versuche es erneut."
+        ? "KI hat ein unerwartetes Format zurückgegeben. Bitte versuche es erneut."
         : language === "es"
-          ? "Gemini devolvió un formato inesperado. Inténtalo de nuevo."
+          ? "La IA devolvió un formato inesperado. Inténtalo de nuevo."
           : language === "fr"
-            ? "Gemini a renvoyé un format inattendu. Réessaie."
-            : "Gemini върна неочакван формат. Опитай пак.";
+            ? "L'IA a renvoyé un format inattendu. Réessaie."
+            : "AI върна неочакван формат. Опитай пак.";
   }
 
   return language === "en"

@@ -1,4 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import React from "react";
 import { Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
@@ -6,7 +7,6 @@ import { useAppLanguage } from "../../../components/app-language-provider";
 import { useAppTheme } from "../../../components/app-theme-provider";
 import {
   FontWeight,
-  Layout,
   Radius,
   Spacing,
   TypeScale,
@@ -15,7 +15,9 @@ import {
 interface GroupChatComposerProps {
   canManageExpenses: boolean;
   canOpenSharePicker: boolean;
+  canPickPhoto: boolean;
   composerBottomInset: number;
+  composerPhotoUri: string;
   composerValue: string;
   editingMessageText: string;
   isMember: boolean;
@@ -24,10 +26,14 @@ interface GroupChatComposerProps {
   joining: boolean;
   onCancelEditing: () => void;
   onChangeComposerValue: (value: string) => void;
+  onClearComposerPhoto: () => void;
   onFocusInput: () => void;
+  onOpenCamera: () => void;
   onOpenExpenseSheet: () => void;
+  onOpenPhotoLibrary: () => void;
   onOpenShareSheet: () => void;
   onSend: () => void;
+  pickingPhoto: boolean;
   savingExpense: boolean;
   sending: boolean;
 }
@@ -35,7 +41,9 @@ interface GroupChatComposerProps {
 export function GroupChatComposer({
   canManageExpenses,
   canOpenSharePicker,
+  canPickPhoto,
   composerBottomInset,
+  composerPhotoUri,
   composerValue,
   editingMessageText,
   isMember,
@@ -44,10 +52,14 @@ export function GroupChatComposer({
   joining,
   onCancelEditing,
   onChangeComposerValue,
+  onClearComposerPhoto,
   onFocusInput,
+  onOpenCamera,
   onOpenExpenseSheet,
+  onOpenPhotoLibrary,
   onOpenShareSheet,
   onSend,
+  pickingPhoto,
   savingExpense,
   sending,
 }: GroupChatComposerProps) {
@@ -57,17 +69,16 @@ export function GroupChatComposer({
   const isSendDisabled =
     sending ||
     joining ||
-    composerValue.trim().length === 0 ||
+    (composerValue.trim().length === 0 && !composerPhotoUri) ||
     !canWrite;
 
   return (
     <View
       pointerEvents="box-none"
       style={[
-        styles.composerBar,
+        styles.composerShell,
         {
           backgroundColor: colors.card,
-          borderTopColor: colors.border,
           paddingBottom: composerBottomInset,
         },
       ]}
@@ -85,75 +96,117 @@ export function GroupChatComposer({
           </TouchableOpacity>
         </View>
       ) : null}
-      <TouchableOpacity
-        activeOpacity={0.9}
-        disabled={!canOpenSharePicker || sending || joining}
-        onPress={onOpenShareSheet}
-        style={[
-          styles.shareSavedButton,
-          { backgroundColor: colors.accentMuted, borderColor: colors.border },
-          (!canOpenSharePicker || sending || joining) && styles.shareSavedButtonDisabled,
-        ]}
-      >
-        <MaterialIcons color={colors.accent} name="bookmark-added" size={20} />
-      </TouchableOpacity>
-      <TouchableOpacity
-        activeOpacity={0.9}
-        disabled={!canManageExpenses || sending || joining || savingExpense}
-        onPress={onOpenExpenseSheet}
-        style={[
-          styles.shareSavedButton,
-          { backgroundColor: colors.accentMuted, borderColor: colors.border },
-          (!canManageExpenses || sending || joining || savingExpense) &&
-            styles.shareSavedButtonDisabled,
-        ]}
-      >
-        <MaterialIcons color={colors.accent} name="receipt-long" size={20} />
-      </TouchableOpacity>
-      <TextInput
-        multiline
-        onChangeText={onChangeComposerValue}
-        onFocus={onFocusInput}
-        editable={canWrite}
-        placeholder={
-          canWrite
-            ? t("groups.writeMessage")
-            : t("groupDetail.needAccessToWrite")
-        }
-        placeholderTextColor={colors.inputPlaceholder}
-        style={[styles.composerInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.textPrimary }]}
-        value={composerValue}
-        returnKeyType={Platform.OS === "web" ? undefined : "send"}
-        blurOnSubmit={false}
-        onSubmitEditing={() => {
-          if (Platform.OS !== "web") {
-            onSend();
+      {composerPhotoUri ? (
+        <View
+          style={[
+            styles.photoPreviewBanner,
+            { backgroundColor: colors.cardAlt, borderColor: colors.border },
+          ]}
+        >
+          <Image source={{ uri: composerPhotoUri }} style={styles.photoPreviewImage} contentFit="cover" />
+          <View style={styles.photoPreviewTextWrap}>
+            <Text style={[styles.editingKicker, { color: colors.textSecondary }]}>Photo attached</Text>
+            <Text numberOfLines={1} style={[styles.editingPreview, { color: colors.textPrimary }]}>
+              Add a caption or send it as-is.
+            </Text>
+          </View>
+          <View style={styles.photoPreviewActions}>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={onOpenCamera}
+              style={[styles.photoPreviewActionButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
+              <MaterialIcons color={colors.textSecondary} name="photo-camera" size={16} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={onClearComposerPhoto}
+              style={[styles.photoPreviewActionButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
+              <MaterialIcons color={colors.textSecondary} name="close" size={16} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
+      <View style={[styles.composerInputRow, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
+        <View style={styles.actionStrip}>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            disabled={!canPickPhoto || sending || joining || pickingPhoto}
+            onPress={onOpenPhotoLibrary}
+            onLongPress={onOpenCamera}
+            style={[
+              styles.actionIcon,
+              (!canPickPhoto || sending || joining || pickingPhoto) && styles.actionIconDisabled,
+            ]}
+          >
+            <MaterialIcons color={colors.accent} name="add-photo-alternate" size={22} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            disabled={!canOpenSharePicker || sending || joining}
+            onPress={onOpenShareSheet}
+            style={[
+              styles.actionIcon,
+              (!canOpenSharePicker || sending || joining) && styles.actionIconDisabled,
+            ]}
+          >
+            <MaterialIcons color={colors.textSecondary} name="bookmark-added" size={22} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            disabled={!canManageExpenses || sending || joining || savingExpense}
+            onPress={onOpenExpenseSheet}
+            style={[
+              styles.actionIcon,
+              (!canManageExpenses || sending || joining || savingExpense) && styles.actionIconDisabled,
+            ]}
+          >
+            <MaterialIcons color={colors.textSecondary} name="receipt-long" size={22} />
+          </TouchableOpacity>
+        </View>
+        <TextInput
+          multiline
+          onChangeText={onChangeComposerValue}
+          onFocus={onFocusInput}
+          editable={canWrite}
+          placeholder={
+            canWrite
+              ? t("groups.writeMessage")
+              : t("groupDetail.needAccessToWrite")
           }
-        }}
-      />
-      <TouchableOpacity
-        activeOpacity={0.9}
-        disabled={isSendDisabled}
-        onPress={onSend}
-        style={[
-          styles.sendButton,
-          { backgroundColor: colors.accent },
-          isSendDisabled && styles.sendButtonDisabled,
-        ]}
-      >
-        <MaterialIcons color={colors.buttonTextOnAction} name="north-east" size={20} />
-      </TouchableOpacity>
+          placeholderTextColor={colors.inputPlaceholder}
+          style={[styles.composerInput, { color: colors.textPrimary }]}
+          value={composerValue}
+          returnKeyType={Platform.OS === "web" ? undefined : "send"}
+          blurOnSubmit={false}
+          onSubmitEditing={() => {
+            if (Platform.OS !== "web") {
+              onSend();
+            }
+          }}
+        />
+        <TouchableOpacity
+          activeOpacity={0.9}
+          disabled={isSendDisabled}
+          onPress={onSend}
+          style={[
+            styles.sendButton,
+            { backgroundColor: colors.accent },
+            isSendDisabled && styles.sendButtonDisabled,
+          ]}
+        >
+          <MaterialIcons color={colors.buttonTextOnAction} name="arrow-upward" size={20} />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  composerBar: {
-    alignItems: "flex-end",
-    borderTopWidth: 1,
-    flexDirection: "row",
+  composerShell: {
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.md,
+    paddingTop: Spacing.sm,
     paddingBottom: Spacing.md,
   },
   editingBanner: {
@@ -161,7 +214,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.xl,
     borderWidth: 1,
     flexDirection: "row",
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.sm,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     width: "100%",
@@ -187,38 +240,79 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 32,
   },
-  shareSavedButton: {
+  photoPreviewBanner: {
     alignItems: "center",
     borderRadius: Radius.xl,
     borderWidth: 1,
-    height: Layout.touchTarget,
-    justifyContent: "center",
-    marginRight: Spacing.sm,
-    width: Layout.touchTarget,
+    flexDirection: "row",
+    marginBottom: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    width: "100%",
   },
-  shareSavedButtonDisabled: {
-    opacity: 0.55,
+  photoPreviewImage: {
+    borderRadius: Radius.md,
+    height: 52,
+    width: 52,
+  },
+  photoPreviewTextWrap: {
+    flex: 1,
+    marginLeft: Spacing.sm,
+    paddingRight: Spacing.sm,
+  },
+  photoPreviewActions: {
+    flexDirection: "row",
+    gap: Spacing.xs,
+  },
+  photoPreviewActionButton: {
+    alignItems: "center",
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    height: 32,
+    justifyContent: "center",
+    width: 32,
+  },
+  composerInputRow: {
+    alignItems: "flex-end",
+    borderRadius: Radius["2xl"],
+    borderWidth: 1,
+    flexDirection: "row",
+    paddingLeft: Spacing.xs,
+    paddingRight: Spacing.xs,
+    paddingVertical: Spacing.xs,
+  },
+  actionStrip: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingBottom: Platform.OS === "ios" ? 6 : 4,
+  },
+  actionIcon: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: 36,
+    height: 36,
+    borderRadius: Radius.full,
+  },
+  actionIconDisabled: {
+    opacity: 0.35,
   },
   composerInput: {
-    borderRadius: Radius.xl,
-    borderWidth: 1,
     flex: 1,
-    ...TypeScale.titleSm,
+    ...TypeScale.bodyMd,
     maxHeight: 120,
-    minHeight: Layout.touchTarget,
-    paddingHorizontal: Spacing.md,
-    paddingTop: Spacing.md,
-    paddingVertical: Spacing.md,
+    minHeight: 36,
+    paddingHorizontal: Spacing.sm,
+    paddingTop: Platform.OS === "ios" ? 9 : 7,
+    paddingBottom: Platform.OS === "ios" ? 9 : 7,
   },
   sendButton: {
     alignItems: "center",
-    borderRadius: Radius.xl,
-    height: Layout.touchTarget,
+    borderRadius: Radius.full,
+    height: 36,
     justifyContent: "center",
-    marginLeft: Spacing.sm,
-    width: Layout.touchTarget,
+    width: 36,
   },
   sendButtonDisabled: {
-    opacity: 0.55,
+    opacity: 0.4,
   },
 });

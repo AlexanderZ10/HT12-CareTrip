@@ -2,12 +2,13 @@ import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Modal,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -33,7 +34,6 @@ import {
 import { auth, db } from "../../firebase";
 import { parseBookingOrders, type BookingOrder } from "../../utils/bookings";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
-import { getProfileDisplayName } from "../../utils/profile-info";
 import { parseSavedTrips, removeSavedTripForUser, type SavedTrip } from "../../utils/saved-trips";
 
 type SavedFilter = "all" | "paid" | "home" | "discover";
@@ -77,14 +77,13 @@ function buildTripPreviewPoints(trip: SavedTrip) {
 
 export default function SavedTabScreen() {
   const router = useRouter();
-  const { colors, isDark } = useAppTheme();
+  const { colors } = useAppTheme();
   const { t } = useAppLanguage();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const isPhoneLayout = width < 768;
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [profileName, setProfileName] = useState("Traveler");
   const [bookingOrders, setBookingOrders] = useState<BookingOrder[]>([]);
   const [savedTrips, setSavedTrips] = useState<SavedTrip[]>([]);
   const [error, setError] = useState("");
@@ -94,6 +93,11 @@ export default function SavedTabScreen() {
   const [selectedTrip, setSelectedTrip] = useState<SavedTrip | null>(null);
   const [pendingDeleteTrip, setPendingDeleteTrip] = useState<SavedTrip | null>(null);
   const [deletingTripKey, setDeletingTripKey] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 500);
+  }, []);
 
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
@@ -126,16 +130,6 @@ export default function SavedTabScreen() {
           }
 
           const profileData = profileSnapshot.data() as Record<string, unknown>;
-          setProfileName(
-            getProfileDisplayName({
-              email: nextUser.email,
-              profileInfo:
-                profileData.profileInfo && typeof profileData.profileInfo === "object"
-                  ? (profileData.profileInfo as Record<string, unknown>)
-                  : undefined,
-              username: typeof profileData.username === "string" ? profileData.username : null,
-            })
-          );
           setBookingOrders(parseBookingOrders(profileData));
           setSavedTrips(parseSavedTrips(profileData));
           setLoading(false);
@@ -229,19 +223,23 @@ export default function SavedTabScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        <View style={[styles.hero, { backgroundColor: colors.heroAlt }]}>
-          <Text style={[styles.kicker, { color: isDark ? "#B7E07C" : "#D6E8AE" }]}>{t("saved.title")}</Text>
-          <Text style={[styles.title, { color: colors.heroText }]}>{t("saved.subtitle")} — {profileName}</Text>
-          <Text style={[styles.subtitle, { color: colors.heroText }]}>{t("saved.description")}</Text>
+        {/* ── Instagram-style minimal top bar ── */}
+        <View style={styles.topBar}>
+          <Text style={[styles.brandTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+            {t("saved.title")}
+          </Text>
         </View>
 
-        <View style={[styles.searchShell, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
-          <MaterialIcons color={colors.textMuted} name="search" size={22} />
+        {/* ── Instagram-style rounded gray search pill ── */}
+        <View style={[styles.searchShell, { backgroundColor: colors.inputBackground }]}>
+          <MaterialIcons color={colors.textMuted} name="search" size={20} />
           <TextInput
+            accessibilityLabel="Search saved trips"
             style={[styles.searchInput, { color: colors.inputText }]}
             placeholder={t("saved.searchPlaceholder")}
-            placeholderTextColor={colors.inputPlaceholder}
+            placeholderTextColor={colors.textMuted}
             value={tripSearch}
             onChangeText={setTripSearch}
           />
@@ -592,38 +590,32 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  hero: {
-    borderRadius: Radius["3xl"],
-    padding: Spacing["2xl"],
-    marginBottom: Spacing.lg,
+  // ── Instagram-style top bar ──
+  topBar: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: Spacing.md,
+    minHeight: 48,
+  },
+  brandTitle: {
+    fontSize: 28,
+    fontWeight: FontWeight.black,
+    letterSpacing: 0.3,
   },
   searchShell: {
     alignItems: "center",
-    borderRadius: Radius.lg,
-    borderWidth: 1,
+    borderRadius: Radius.md,
     flexDirection: "row",
     marginBottom: Spacing.lg,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 9,
   },
   searchInput: {
+    ...TypeScale.bodyMd,
     flex: 1,
-    ...TypeScale.titleSm,
     marginLeft: Spacing.sm,
-  },
-  kicker: {
-    ...TypeScale.bodySm,
-    fontWeight: FontWeight.bold,
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-    marginBottom: Spacing.sm,
-  },
-  title: {
-    ...TypeScale.displayMd,
-    marginBottom: Spacing.sm,
-  },
-  subtitle: {
-    ...TypeScale.titleSm,
+    padding: 0,
   },
   errorCard: {
     borderRadius: Radius.xl,

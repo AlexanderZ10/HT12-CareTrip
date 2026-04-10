@@ -357,6 +357,8 @@ export default function DiscoverTabScreen() {
 
   const generateAndStoreTripsRef = useRef(generateAndStoreTrips);
   generateAndStoreTripsRef.current = generateAndStoreTrips;
+  const languageRef = useRef(language);
+  languageRef.current = language;
   const languageForPromptRef = useRef(languageForPrompt);
   languageForPromptRef.current = languageForPrompt;
 
@@ -488,7 +490,7 @@ export default function DiscoverTabScreen() {
           setLoading(false);
         },
         (nextError) => {
-          setError(getFirestoreUserMessage(nextError, "read", language));
+          setError(getFirestoreUserMessage(nextError, "read", languageRef.current));
           setLoading(false);
         }
       );
@@ -583,49 +585,42 @@ export default function DiscoverTabScreen() {
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
         >
-          {/* Clean header — no dark hero */}
+          {/* ── Instagram-style minimal top bar ── */}
           <Animated.View
             entering={FadeInDown.duration(400).springify()}
-            style={styles.header}
+            style={styles.topBar}
           >
-            <View style={styles.headerTop}>
-              <View>
-                <Text style={[styles.greeting, { color: colors.textSecondary }]}>
-                  {t("discover.welcomeBack")}
-                </Text>
-                <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
-                  {t("tab.discover")}
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={[
-                  styles.refreshButton,
-                  { backgroundColor: colors.textPrimary },
-                  (generating || refreshUsedToday) && styles.refreshButtonDisabled,
-                ]}
-                onPress={handleRefresh}
-                disabled={generating || refreshUsedToday}
-                activeOpacity={0.85}
-              >
-                {generating ? (
-                  <ActivityIndicator size="small" color={colors.textInverse} />
-                ) : (
-                  <MaterialIcons name="refresh" size={20} color={colors.textInverse} />
-                )}
-              </TouchableOpacity>
-            </View>
-
-            <Text style={[styles.headerSubtitle, { color: colors.textMuted }]}>
-              {discoverData?.generatedAtMs
-                ? `${t("discover.updated")} ${formatGeneratedDate(
-                    discoverData.generatedAtMs,
-                    locale,
-                    t("discover.notGeneratedYet")
-                  )}`
-                : t("discover.aiCurated")}
-              {refreshUsedToday ? `  ·  ${t("discover.refreshTomorrow")}` : ""}
+            <Text style={[styles.brandTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+              {t("tab.discover")}
             </Text>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={handleRefresh}
+              disabled={generating || refreshUsedToday}
+              style={[
+                styles.topBarIconButton,
+                (generating || refreshUsedToday) && styles.topBarIconButtonDisabled,
+              ]}
+            >
+              {generating ? (
+                <ActivityIndicator size="small" color={colors.textPrimary} />
+              ) : (
+                <MaterialIcons name="refresh" size={26} color={colors.textPrimary} />
+              )}
+            </TouchableOpacity>
           </Animated.View>
+
+          {/* Optional update timestamp under the title */}
+          <Text style={[styles.topBarSubtitle, { color: colors.textMuted }]}>
+            {discoverData?.generatedAtMs
+              ? `${t("discover.updated")} ${formatGeneratedDate(
+                  discoverData.generatedAtMs,
+                  locale,
+                  t("discover.notGeneratedYet")
+                )}`
+              : t("discover.aiCurated")}
+            {refreshUsedToday ? `  ·  ${t("discover.refreshTomorrow")}` : ""}
+          </Text>
 
           {/* Status messages */}
           {error ? (
@@ -980,35 +975,29 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
-  // Header
-  header: {
-    paddingTop: Spacing.lg,
-    paddingBottom: Spacing.md,
-  },
-  headerTop: {
+  // ── Instagram-style top bar ──
+  topBar: {
+    alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-start",
+    minHeight: 48,
+    paddingTop: Spacing.sm,
   },
-  greeting: {
-    ...TypeScale.bodySm,
-    marginBottom: 2,
-  },
-  headerTitle: {
-    fontSize: 32,
+  brandTitle: {
+    fontSize: 28,
     fontWeight: FontWeight.black,
-    lineHeight: 38,
+    letterSpacing: 0.3,
   },
-  headerSubtitle: {
-    ...TypeScale.bodySm,
-    marginTop: Spacing.xs,
+  topBarIconButton: {
+    padding: 4,
   },
-  refreshButton: {
-    width: 44,
-    height: 44,
-    borderRadius: Radius.full,
-    alignItems: "center",
-    justifyContent: "center",
+  topBarIconButtonDisabled: {
+    opacity: 0.35,
+  },
+  topBarSubtitle: {
+    ...TypeScale.labelSm,
+    marginBottom: Spacing.md,
+    marginTop: 4,
   },
   refreshButtonDisabled: {
     opacity: 0.35,

@@ -153,6 +153,97 @@ service cloud.firestore {
         && request.resource.data.groupId == resource.data.groupId;
     }
 
+    function validFriendshipStatus(data) {
+      return data.status == "pending" || data.status == "accepted";
+    }
+
+    function validFriendshipShape(data) {
+      return data.requesterId is string
+        && data.requesterId.size() >= 1
+        && data.requesterId.size() <= 128
+        && data.requesterLabel is string
+        && data.requesterLabel.size() >= 1
+        && data.requesterLabel.size() <= 80
+        && data.requesterUsername is string
+        && data.requesterUsername.size() <= 40
+        && data.recipientId is string
+        && data.recipientId.size() >= 1
+        && data.recipientId.size() <= 128
+        && data.recipientLabel is string
+        && data.recipientLabel.size() >= 1
+        && data.recipientLabel.size() <= 80
+        && data.recipientUsername is string
+        && data.recipientUsername.size() <= 40
+        && data.requesterId != data.recipientId
+        && data.participantIds is list
+        && data.participantIds.size() == 2
+        && data.participantIds.hasAll([data.requesterId, data.recipientId])
+        && validFriendshipStatus(data)
+        && data.createdAtMs is number
+        && data.updatedAtMs is number;
+    }
+
+    function isFriendshipParticipant() {
+      return signedIn()
+        && resource.data.participantIds is list
+        && resource.data.participantIds.hasAny([request.auth.uid]);
+    }
+
+    function validFriendshipCreate() {
+      return signedIn()
+        && validFriendshipShape(request.resource.data)
+        && request.resource.data.requesterId == request.auth.uid
+        && request.resource.data.status == "pending"
+        && request.resource.data.participantIds.hasAny([request.auth.uid]);
+    }
+
+    function validFriendshipAccept() {
+      return signedIn()
+        && validFriendshipShape(resource.data)
+        && validFriendshipShape(request.resource.data)
+        && resource.data.status == "pending"
+        && request.resource.data.status == "accepted"
+        && resource.data.recipientId == request.auth.uid
+        && request.resource.data.requesterId == resource.data.requesterId
+        && request.resource.data.requesterLabel == resource.data.requesterLabel
+        && request.resource.data.requesterUsername == resource.data.requesterUsername
+        && request.resource.data.recipientId == resource.data.recipientId
+        && request.resource.data.recipientLabel == resource.data.recipientLabel
+        && request.resource.data.recipientUsername == resource.data.recipientUsername
+        && request.resource.data.participantIds == resource.data.participantIds
+        && request.resource.data.createdAtMs == resource.data.createdAtMs
+        && request.resource.data.updatedAtMs >= resource.data.updatedAtMs;
+    }
+
+    function validSocialPostShape(data) {
+      return data.authorId is string
+        && data.authorId.size() >= 1
+        && data.authorId.size() <= 128
+        && data.authorLabel is string
+        && data.authorLabel.size() >= 1
+        && data.authorLabel.size() <= 80
+        && data.authorUsername is string
+        && data.authorUsername.size() <= 40
+        && data.caption is string
+        && data.caption.size() <= 280
+        && data.location is string
+        && data.location.size() <= 80
+        && data.imageUri is string
+        && data.imageUri.size() <= 650000
+        && (data.kind == "post" || data.kind == "story")
+        && (
+          data.kind == "story"
+            ? data.imageUri.size() >= 1
+              && data.expiresAtMs is number
+              && data.expiresAtMs > data.createdAtMs
+            : (data.caption.size() >= 1 || data.imageUri.size() >= 1)
+              && data.expiresAtMs == null
+        )
+        && data.visibility == "public"
+        && data.createdAtMs is number
+        && data.updatedAtMs is number;
+    }
+
     function validExpenseRepaymentShape(data) {
       return data.amountLabel is string
         && data.amountLabel.size() >= 1
@@ -190,7 +281,8 @@ service cloud.firestore {
       return data.messageType == null
         || data.messageType == "text"
         || data.messageType == "shared-trip"
-        || data.messageType == "expense";
+        || data.messageType == "expense"
+        || data.messageType == "photo";
     }
 
     function validGroupSharedTripShape(data) {
@@ -207,11 +299,93 @@ service cloud.firestore {
         && (data.sharedTrip.summary == null || data.sharedTrip.summary is string)
         && (data.sharedTrip.budget == null || data.sharedTrip.budget is string)
         && (data.sharedTrip.duration == null || data.sharedTrip.duration is string)
+        && (data.sharedTrip.latitude == null || data.sharedTrip.latitude is number)
+        && (data.sharedTrip.longitude == null || data.sharedTrip.longitude is number)
         && (data.sharedTrip.source == "home" || data.sharedTrip.source == "discover")
         && data.sharedTrip.sourceKey is string
         && data.sharedTrip.sourceKey.size() >= 1
         && data.sharedTrip.sourceKey.size() <= 160
-        && data.sharedTrip.linkedTransports is list;
+        && data.sharedTrip.linkedTransports is list
+        && data.sharedTrip.tripDays is list
+        && data.sharedTrip.tripDays.size() <= 12;
+    }
+
+    function validTripPresenceShape(data) {
+      return data.userId is string
+        && data.userId.size() >= 1
+        && data.userId.size() <= 128
+        && data.label is string
+        && data.label.size() >= 1
+        && data.label.size() <= 80
+        && data.avatarUrl is string
+        && data.avatarUrl.size() <= 650000
+        && data.note is string
+        && data.note.size() <= 120
+        && (
+          data.status == "airport"
+          || data.status == "checked-in"
+          || data.status == "exploring"
+          || data.status == "in-transit"
+        )
+        && (data.latitude == null || data.latitude is number)
+        && (data.longitude == null || data.longitude is number)
+        && data.sharingEnabled is bool
+        && data.createdAtMs is number
+        && data.updatedAtMs is number;
+    }
+
+    function validTripBoardShape(data) {
+      return data.title is string
+        && data.title.size() >= 1
+        && data.title.size() <= 120
+        && data.destination is string
+        && data.destination.size() >= 1
+        && data.destination.size() <= 120
+        && data.startDateKey is string
+        && data.startDateKey.size() <= 10
+        && data.endDateKey is string
+        && data.endDateKey.size() <= 10
+        && (data.latitude == null || data.latitude is number)
+        && (data.longitude == null || data.longitude is number)
+        && data.tripDays is list
+        && data.tripDays.size() <= 12
+        && data.entryCount is number
+        && data.entryCount >= 0
+        && data.updatedById is string
+        && data.updatedById.size() >= 1
+        && data.updatedById.size() <= 128
+        && data.updatedByLabel is string
+        && data.updatedByLabel.size() >= 1
+        && data.updatedByLabel.size() <= 80
+        && data.createdAtMs is number
+        && data.updatedAtMs is number;
+    }
+
+    function validTripRecapShape(data) {
+      return data.title is string
+        && data.title.size() >= 1
+        && data.title.size() <= 120
+        && data.destination is string
+        && data.destination.size() <= 120
+        && data.coverCaption is string
+        && data.coverCaption.size() <= 200
+        && data.coverImageUri is string
+        && data.coverImageUri.size() <= 650000
+        && data.chatHighlights is list
+        && data.chatHighlights.size() <= 4
+        && data.photoMoments is list
+        && data.photoMoments.size() <= 4
+        && data.visitedPlaces is list
+        && data.visitedPlaces.size() <= 8
+        && data.spendSummaryLabel is string
+        && data.spendSummaryLabel.size() <= 120
+        && data.memberCount is number
+        && data.memberCount >= 0
+        && data.totalPhotos is number
+        && data.totalPhotos >= 0
+        && data.totalExpenses is number
+        && data.totalExpenses >= 0
+        && data.createdAtMs is number;
     }
 
     function validGroupExpenseShape(data) {
@@ -240,6 +414,15 @@ service cloud.firestore {
         && (data.expense.linkedSourceKey == null || data.expense.linkedSourceKey is string);
     }
 
+    function validGroupPhotoShape(data) {
+      return data.photo is map
+        && data.photo.imageUri is string
+        && data.photo.imageUri.size() >= 1
+        && data.photo.imageUri.size() <= 650000
+        && data.photo.caption is string
+        && data.photo.caption.size() <= 280;
+    }
+
     function validGroupMessageShape(data) {
       return data.senderId is string
         && data.senderId.size() >= 1
@@ -248,7 +431,6 @@ service cloud.firestore {
         && data.senderLabel.size() >= 1
         && data.senderLabel.size() <= 80
         && data.text is string
-        && data.text.size() >= 1
         && data.text.size() <= 1000
         && validGroupMessageType(data)
         && (
@@ -256,7 +438,9 @@ service cloud.firestore {
             ? validGroupSharedTripShape(data)
             : data.messageType == "expense"
               ? validGroupExpenseShape(data)
-              : true
+              : data.messageType == "photo"
+                ? validGroupPhotoShape(data)
+                : data.text.size() >= 1
         );
     }
 
@@ -275,9 +459,84 @@ service cloud.firestore {
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.sharedTrip == resource.data.sharedTrip
         && request.resource.data.expense == resource.data.expense
+        && request.resource.data.photo == resource.data.photo
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["text"])
         && validGroupMessageShape(request.resource.data);
     }
+
+    // ─── publicProfiles shape validation ───
+    // Lenient on optional fields (displayName/username/aboutMe/etc may be empty
+    // strings for new accounts), strict on size limits to prevent abuse.
+    function validPublicProfileShape(data) {
+      return data.uid is string
+        && data.uid.size() >= 1
+        && data.uid.size() <= 128
+        && data.displayName is string
+        && data.displayName.size() <= 100
+        && data.username is string
+        && data.username.size() <= 40
+        && data.usernameLower is string
+        && data.usernameLower.size() <= 40
+        && data.aboutMe is string
+        && data.aboutMe.size() <= 300
+        && data.homeBase is string
+        && data.homeBase.size() <= 100
+        && data.avatarUrl is string
+        && data.avatarUrl.size() <= 650000
+        && data.photoUrl is string
+        && data.photoUrl.size() <= 650000;
+    }
+
+    // ─── budgetEntries shape validation ───
+    function validBudgetEntryShape(data) {
+      return data.creatorId is string
+        && data.creatorId.size() >= 1
+        && data.creatorId.size() <= 128
+        && data.creatorLabel is string
+        && data.creatorLabel.size() >= 1
+        && data.creatorLabel.size() <= 80
+        && data.tripId is string
+        && data.tripId.size() >= 1
+        && data.tripId.size() <= 160
+        && (data.groupId == null || data.groupId is string)
+        && data.category is string
+        && data.category.size() >= 1
+        && data.category.size() <= 40
+        && data.amountValue is number
+        && data.amountValue >= 0
+        && data.amountCurrency is string
+        && data.amountCurrency.size() >= 1
+        && data.amountCurrency.size() <= 10
+        && data.description is string
+        && data.description.size() <= 200
+        && data.createdAtMs is number;
+    }
+
+    // ─── journalPhotos shape validation ───
+    function validJournalPhotoShape(data) {
+      return data.creatorId is string
+        && data.creatorId.size() >= 1
+        && data.creatorId.size() <= 128
+        && data.creatorLabel is string
+        && data.creatorLabel.size() >= 1
+        && data.creatorLabel.size() <= 80
+        && data.groupId is string
+        && data.groupId.size() >= 1
+        && data.groupId.size() <= 160
+        && (data.tripId == null || data.tripId is string)
+        && data.imageUri is string
+        && data.imageUri.size() >= 1
+        && data.imageUri.size() <= 650000
+        && data.caption is string
+        && data.caption.size() <= 280
+        && data.location is string
+        && data.location.size() <= 100
+        && data.createdAtMs is number;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Collection rules
+    // ═══════════════════════════════════════════════════════════════════════════
 
     match /profiles/{userId} {
       allow read, create, update: if isOwner(userId);
@@ -285,8 +544,9 @@ service cloud.firestore {
     }
 
     match /usernames/{username} {
-      // Demo setup: public read is needed because email/password auth resolves
-      // username -> email before the user is signed in.
+      // Public read required: email/password auth resolves username -> email
+      // before the user is signed in. In production, consider moving this
+      // lookup to a Cloud Function to avoid public enumeration.
       allow read: if true;
 
       allow create: if signedIn()
@@ -328,7 +588,8 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create: if validCreatedGroup();
       allow update: if validCreatorGroupEdit() || validSelfJoin() || validSelfLeave() || validCreatorMemberRemoval();
-      allow delete: if resource.data.creatorId == request.auth.uid;
+      // FIX: added explicit signedIn() check for delete
+      allow delete: if signedIn() && resource.data.creatorId == request.auth.uid;
 
       match /messages/{messageId} {
         allow read: if isGroupMember(groupId) || isPublicGroup(groupId);
@@ -337,7 +598,7 @@ service cloud.firestore {
           && (
             (isPublicGroup(groupId) && isTextGroupMessage(request.resource.data))
             || isGroupMember(groupId)
-                      )
+          )
           && request.resource.data.senderId == request.auth.uid
           && validGroupMessageShape(request.resource.data);
 
@@ -356,11 +617,79 @@ service cloud.firestore {
         allow update: if false;
         allow delete: if canManageGroup(groupId);
       }
+
+      match /tripPresence/{userId} {
+        allow read: if isGroupMember(groupId) || isPublicGroup(groupId);
+        allow create, update: if isGroupMember(groupId)
+          && request.auth.uid == userId
+          && request.resource.data.userId == request.auth.uid
+          && validTripPresenceShape(request.resource.data);
+        allow delete: if canManageGroup(groupId) || (signedIn() && request.auth.uid == userId);
+      }
+
+      match /tripBoards/{boardId} {
+        allow read: if isGroupMember(groupId) || isPublicGroup(groupId);
+        allow create, update: if isGroupMember(groupId)
+          && validTripBoardShape(request.resource.data)
+          && request.resource.data.updatedById == request.auth.uid;
+        allow delete: if canManageGroup(groupId);
+      }
+
+      match /tripRecaps/{recapId} {
+        allow read: if isGroupMember(groupId) || isPublicGroup(groupId);
+        allow create, update: if isGroupMember(groupId)
+          && validTripRecapShape(request.resource.data);
+        allow delete: if canManageGroup(groupId);
+      }
+    }
+
+    match /budgetEntries/{entryId} {
+      // FIX: owner-only read + shape validation on create
+      allow read: if signedIn() && resource.data.creatorId == request.auth.uid;
+      allow create: if signedIn()
+        && request.resource.data.creatorId == request.auth.uid
+        && validBudgetEntryShape(request.resource.data);
+      allow delete: if signedIn() && resource.data.creatorId == request.auth.uid;
+      allow update: if false;
+    }
+
+    match /journalPhotos/{photoId} {
+      // FIX: restricted read to group members or owner (was any signed-in user)
+      allow read: if signedIn()
+        && (
+          resource.data.creatorId == request.auth.uid
+          || isGroupMember(resource.data.groupId)
+        );
+      allow create: if signedIn()
+        && request.resource.data.creatorId == request.auth.uid
+        && validJournalPhotoShape(request.resource.data);
+      allow delete: if signedIn() && resource.data.creatorId == request.auth.uid;
+      allow update: if false;
+    }
+
+    match /friendships/{friendshipId} {
+      allow read: if isFriendshipParticipant();
+      allow create: if validFriendshipCreate();
+      allow update: if validFriendshipAccept();
+      allow delete: if isFriendshipParticipant();
+    }
+
+    match /socialPosts/{postId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.authorId == request.auth.uid
+        && validSocialPostShape(request.resource.data);
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
     }
 
     match /publicProfiles/{userId} {
       allow read: if signedIn();
-      allow create, update, delete: if isOwner(userId);
+      // FIX: added shape validation to prevent arbitrary data writes
+      allow create, update: if isOwner(userId)
+        && validPublicProfileShape(request.resource.data)
+        && request.resource.data.uid == userId;
+      allow delete: if isOwner(userId);
     }
   }
 }

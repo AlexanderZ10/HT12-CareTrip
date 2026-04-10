@@ -24,7 +24,7 @@
         "monochromeImage": "./assets/images/CareTrip-non.png"
       },
       "edgeToEdgeEnabled": true,
-      "softwareKeyboardLayoutMode": "adjustResize",
+      "softwareKeyboardLayoutMode": "resize",
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -48,6 +48,13 @@
           "dark": {
             "backgroundColor": "#ffffff"
           }
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/CareTrip-non.png",
+          "color": "#E6F4FE"
         }
       ]
     ],

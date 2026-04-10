@@ -9,6 +9,9 @@ import {
   View,
 } from "react-native";
 
+import { useAppTheme } from "./app-theme-provider";
+import { FontWeight, Radius, Spacing, TypeScale } from "../constants/design-system";
+
 type ConfirmDialogProps = {
   cancelLabel?: string;
   confirmLabel?: string;
@@ -32,6 +35,8 @@ export function ConfirmDialog({
   title,
   visible,
 }: ConfirmDialogProps) {
+  const { colors } = useAppTheme();
+
   return (
     <Modal
       visible={visible}
@@ -39,25 +44,29 @@ export function ConfirmDialog({
       animationType="fade"
       onRequestClose={onCancel}
     >
-      <Pressable style={styles.overlay} onPress={onCancel}>
-        <Pressable style={styles.card} onPress={(event) => event.stopPropagation()}>
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.message}>{message}</Text>
+      <Pressable style={[styles.overlay, { backgroundColor: colors.modalOverlay }]} onPress={onCancel}>
+        <Pressable style={[styles.card, { backgroundColor: colors.card }]} onPress={(event) => event.stopPropagation()}>
+          <Text style={[styles.title, { color: colors.textPrimary }]}>{title}</Text>
+          <Text style={[styles.message, { color: colors.textSecondary }]}>{message}</Text>
 
           <View style={styles.actions}>
             <TouchableOpacity
-              style={[styles.button, styles.cancelButton]}
+              style={[styles.button, styles.cancelButton, { backgroundColor: colors.cardAlt }]}
               onPress={onCancel}
               disabled={loading}
               activeOpacity={0.9}
             >
-              <Text style={styles.cancelLabel}>{cancelLabel}</Text>
+              <Text style={[styles.cancelLabel, { color: colors.textSecondary }]}>{cancelLabel}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={[
                 styles.button,
-                destructive ? styles.deleteButton : styles.confirmButton,
+                {
+                  backgroundColor: destructive
+                    ? colors.destructive
+                    : colors.primaryAction,
+                },
                 loading && styles.buttonDisabled,
               ]}
               onPress={onConfirm}
@@ -65,9 +74,9 @@ export function ConfirmDialog({
               activeOpacity={0.9}
             >
               {loading ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
+                <ActivityIndicator size="small" color={colors.buttonTextOnAction} />
               ) : (
-                <Text style={styles.confirmLabel}>{confirmLabel}</Text>
+                <Text style={[styles.confirmLabel, { color: colors.buttonTextOnAction }]}>{confirmLabel}</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -82,59 +91,45 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    padding: 20,
-    backgroundColor: "rgba(18, 27, 10, 0.54)",
+    padding: Spacing.xl,
   },
   card: {
     width: "100%",
     maxWidth: 420,
-    borderRadius: 24,
-    padding: 20,
-    backgroundColor: "#FFFFFF",
+    borderRadius: Radius["2xl"],
+    padding: Spacing.xl,
   },
   title: {
-    color: "#1A1A1A",
-    fontSize: 22,
-    fontWeight: "800",
-    marginBottom: 8,
+    ...TypeScale.headingMd,
+    fontWeight: FontWeight.extrabold,
+    marginBottom: Spacing.sm,
   },
   message: {
-    color: "#56664A",
-    fontSize: 15,
-    lineHeight: 22,
+    ...TypeScale.bodyMd,
   },
   actions: {
     flexDirection: "row",
-    marginTop: 18,
+    marginTop: Spacing.lg,
   },
   button: {
     flex: 1,
     minHeight: 48,
-    borderRadius: 16,
+    borderRadius: Radius.lg,
     alignItems: "center",
     justifyContent: "center",
   },
   cancelButton: {
-    marginRight: 10,
-    backgroundColor: "#F5F5F5",
-  },
-  confirmButton: {
-    backgroundColor: "#2D6A4F",
-  },
-  deleteButton: {
-    backgroundColor: "#A63C2F",
+    marginRight: Spacing.md,
   },
   buttonDisabled: {
     opacity: 0.7,
   },
   cancelLabel: {
-    color: "#4F6240",
-    fontSize: 15,
-    fontWeight: "700",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.bold,
   },
   confirmLabel: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "800",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
   },
 });

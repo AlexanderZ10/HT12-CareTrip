@@ -1,9 +1,12 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import React from "react";
+import { useIsFocused } from "@react-navigation/native";
+import { useRouter } from "expo-router";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -21,23 +24,53 @@ import {
   Radius,
   Spacing,
   TypeScale,
-  shadow,
 } from "../../constants/design-system";
 import { ActionMenu } from "../../features/groups/components/ActionMenu";
 import { CreateGroupModal } from "../../features/groups/components/CreateGroupModal";
 import { DeleteGroupModal } from "../../features/groups/components/DeleteGroupModal";
+import { FriendProfileCard } from "../../features/groups/components/FriendProfileCard";
 import { GroupRow } from "../../features/groups/components/GroupRow";
 import { JoinGroupModal } from "../../features/groups/components/JoinGroupModal";
 import { TripRequestCard } from "../../features/groups/components/TripRequestCard";
 import { TripRequestComposerModal } from "../../features/groups/components/TripRequestComposerModal";
 import { useGroupsScreen } from "../../features/groups/useGroupsScreen";
+import {
+  getLastSocialTab,
+  SOCIAL_DOCK_BOTTOM_GAP,
+  SOCIAL_DOCK_CONTENT_SPACER,
+  SOCIAL_DOCK_HEIGHT,
+  SocialTabsDock,
+} from "../../features/social/components/SocialTabsDock";
 import { formatRelativeTime } from "../../utils/formatting";
+import { getLanguageLocale } from "../../utils/translations";
+
+const noop = () => {};
 
 export default function GroupsTabScreen() {
   const { colors } = useAppTheme();
-  const { t } = useAppLanguage();
+  const { language, t } = useAppLanguage();
+  const locale = getLanguageLocale(language);
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const isFocused = useIsFocused();
+  const hasRestoredTab = useRef(false);
   const vm = useGroupsScreen();
+  const isSearching = vm.searchQuery.trim().length > 0;
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 500);
+  }, []);
+
+  useEffect(() => {
+    if (!isFocused || hasRestoredTab.current) return;
+    hasRestoredTab.current = true;
+    getLastSocialTab().then((tab) => {
+      if (tab !== "/groups") {
+        router.replace(tab);
+      }
+    });
+  }, [isFocused, router]);
 
   if (vm.loading) {
     return (
@@ -50,6 +83,133 @@ export default function GroupsTabScreen() {
     );
   }
 
+  const buildPeopleCard = (
+    profile: {
+      aboutMe?: string;
+      avatarUrl?: string;
+      displayName?: string;
+      homeBase?: string;
+      photoUrl?: string;
+      uid: string;
+      username?: string;
+    },
+    fullWidth = false
+  ) => {
+    const preview = vm.buildSocialProfilePreview(profile.uid);
+    const connection = preview.connection;
+
+    if (connection?.status === "accepted") {
+      return (
+        <FriendProfileCard
+          actionLabel="Write"
+          badge="Friend"
+          fullWidth={fullWidth}
+          key={profile.uid}
+          label={preview.label}
+          loading={vm.updatingFriendshipId === connection.id}
+          onActionPress={() => vm.openComposer(preview.uid)}
+          onSecondaryActionPress={() => {
+            void vm.removeFriendship(connection);
+          }}
+          photoUrl={preview.photoUrl}
+          secondaryActionLabel="Remove"
+          username={preview.username}
+          aboutMe={preview.aboutMe}
+          homeBase={preview.homeBase}
+        />
+      );
+    }
+
+    if (connection?.status === "pending" && connection.recipientId === vm.userId) {
+      return (
+        <FriendProfileCard
+          actionLabel="Accept"
+          badge="Request"
+          fullWidth={fullWidth}
+          key={profile.uid}
+          label={preview.label}
+          loading={vm.updatingFriendshipId === connection.id}
+          onActionPress={() => {
+            void vm.acceptFriendRequest(connection);
+          }}
+          onSecondaryActionPress={() => {
+            void vm.removeFriendship(connection);
+          }}
+          photoUrl={preview.photoUrl}
+          secondaryActionLabel="Decline"
+          username={preview.username}
+          aboutMe={preview.aboutMe}
+          homeBase={preview.homeBase}
+        />
+      );
+    }
+
+    if (connection?.status === "pending") {
+      return (
+        <FriendProfileCard
+          actionDisabled
+          actionLabel="Pending"
+          badge="Pending"
+          fullWidth={fullWidth}
+          key={profile.uid}
+          label={preview.label}
+          loading={vm.updatingFriendshipId === connection.id}
+          onActionPress={noop}
+          onSecondaryActionPress={() => {
+            void vm.removeFriendship(connection);
+          }}
+          photoUrl={preview.photoUrl}
+          secondaryActionLabel="Cancel"
+          username={preview.username}
+          aboutMe={preview.aboutMe}
+          homeBase={preview.homeBase}
+        />
+      );
+    }
+
+    return (
+      <FriendProfileCard
+        actionLabel="Add friend"
+        badge="Public profile"
+        fullWidth={fullWidth}
+        key={profile.uid}
+        label={preview.label}
+        onActionPress={() => {
+          void vm.sendFriendRequest({
+            aboutMe: profile.aboutMe ?? "",
+            avatarUrl: profile.avatarUrl ?? "",
+            displayName: profile.displayName ?? preview.label,
+            homeBase: profile.homeBase ?? "",
+            id: profile.uid,
+            photoUrl: profile.photoUrl ?? "",
+            uid: profile.uid,
+            updatedAtMs: null,
+            username: profile.username ?? "",
+            usernameLower: (profile.username ?? "").toLowerCase(),
+          });
+        }}
+        onSecondaryActionPress={() => vm.openComposer(preview.uid)}
+        photoUrl={preview.photoUrl}
+        secondaryActionLabel="Write"
+        username={preview.username}
+        aboutMe={preview.aboutMe}
+        homeBase={preview.homeBase}
+      />
+    );
+  };
+
+  const renderEmptyState = (title: string, text: string) => (
+    <View
+      style={[
+        styles.emptyState,
+        { backgroundColor: colors.cardAlt, borderColor: colors.border },
+      ]}
+    >
+      <Text style={[styles.emptyStateTitle, { color: colors.textPrimary }]}>{title}</Text>
+      <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>{text}</Text>
+    </View>
+  );
+
   return (
     <SafeAreaView
       style={[styles.screen, { backgroundColor: colors.screenSoft }]}
@@ -60,313 +220,379 @@ export default function GroupsTabScreen() {
         behavior="padding"
         keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 8 : 0}
       >
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-      >
-        <View style={styles.topBar}>
-          <View style={styles.topBarTextWrap}>
-            <Text style={[styles.pageTitle, { color: colors.textPrimary }]}>{t("groups.title")}</Text>
-            <Text style={[styles.pageSubtitle, { color: colors.textSecondary }]}>
-              @{vm.userHandle} • {vm.profileName}
-            </Text>
-          </View>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={() => vm.setActionMenuVisible(true)}
-            style={[
-              styles.topBarCircleButton,
-              {
-                backgroundColor: colors.accent,
-                borderColor: colors.centerButtonBorder,
-              },
-            ]}
-          >
-            <MaterialIcons color={colors.buttonTextOnAction} name="add" size={28} />
-          </TouchableOpacity>
-        </View>
-
-        <View
-          style={[
-            styles.searchShell,
+        <ScrollView
+          automaticallyAdjustContentInsets={false}
+          contentInsetAdjustmentBehavior="never"
+          contentContainerStyle={[
+            styles.content,
             {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
+              paddingBottom:
+                SOCIAL_DOCK_HEIGHT + SOCIAL_DOCK_BOTTOM_GAP + SOCIAL_DOCK_CONTENT_SPACER,
             },
           ]}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
-          <MaterialIcons color={colors.textMuted} name="search" size={24} />
-          <TextInput
-            onChangeText={(value) => {
-              vm.setSearchQuery(value);
-              vm.clearFeedback();
-            }}
-            placeholder={t("groups.searchPublic")}
-            placeholderTextColor={colors.inputPlaceholder}
-            style={[styles.searchInput, { color: colors.textPrimary }]}
-            value={vm.searchQuery}
-          />
-        </View>
-
-        {vm.error ? (
-          <View
-            style={[
-              styles.feedbackCardError,
-              { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
-            ]}
-          >
-            <Text style={[styles.feedbackTextError, { color: colors.errorText }]}>{vm.error}</Text>
-          </View>
-        ) : null}
-
-        {vm.successMessage ? (
-          <View
-            style={[
-              styles.feedbackCardSuccess,
-              { backgroundColor: colors.successBackground, borderColor: colors.successBorder },
-            ]}
-          >
-            <Text style={[styles.feedbackTextSuccess, { color: colors.successText }]}>
-              {vm.successMessage}
-            </Text>
-          </View>
-        ) : null}
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.storiesRow}
-          contentContainerStyle={styles.storiesContent}
-        >
-          {vm.publicUsers.map((profile) => (
+          {/* ── Instagram DM-style topbar: handle + new chat icon ── */}
+          <View style={styles.topBar}>
+            <View style={styles.topBarHandleWrap}>
+              <Text numberOfLines={1} style={[styles.handle, { color: colors.textPrimary }]}>
+                @{vm.userHandle}
+              </Text>
+              <MaterialIcons name="keyboard-arrow-down" size={24} color={colors.textPrimary} />
+            </View>
             <TouchableOpacity
-              activeOpacity={0.9}
-              key={profile.id}
-              onPress={() => vm.openComposer(profile.uid)}
-              style={styles.storyButton}
+              accessibilityLabel="Create new group or trip request"
+              activeOpacity={0.7}
+              onPress={() => vm.setActionMenuVisible(true)}
+              style={styles.topBarIconButton}
             >
-              <Avatar
-                label={profile.displayName || profile.username || "Traveler"}
-                photoUrl={profile.photoUrl}
-                size={74}
-                subtitle=""
-              />
-              <Text numberOfLines={1} style={[styles.storyLabel, { color: colors.textPrimary }]}>
-                {profile.username ? profile.username : profile.displayName}
-              </Text>
-              <Text numberOfLines={1} style={[styles.storyHint, { color: colors.textMuted }]}>
-                {profile.homeBase || "Public profile"}
-              </Text>
+              <MaterialIcons color={colors.textPrimary} name="add-box" size={28} />
             </TouchableOpacity>
-          ))}
-        </ScrollView>
-
-        {!vm.searchQuery.trim() ? (
-          <View style={styles.sectionBlock}>
-            <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{t("groups.tripRequests")}</Text>
-              <Text style={[styles.sectionMeta, { color: colors.textSecondary }]}>{vm.openTripRequests.length} {t("groups.open")}</Text>
-            </View>
-            <Text style={[styles.sectionSupportText, { color: colors.textSecondary }]}>
-              {t("groups.tripRequestsHint")}
-            </Text>
-
-            {vm.openTripRequests.length === 0 ? (
-              <View
-                style={[
-                  styles.requestEmptyState,
-                  {
-                    backgroundColor: colors.card,
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
-                <View
-                  style={[
-                    styles.requestEmptyIcon,
-                    { backgroundColor: colors.accentMuted, borderColor: colors.border },
-                  ]}
-                >
-                  <MaterialIcons color={colors.accent} name="travel-explore" size={28} />
-                </View>
-                <Text style={[styles.requestEmptyTitle, { color: colors.textPrimary }]}>
-                  {t("groups.noTripRequests")}
-                </Text>
-                <Text style={[styles.requestEmptyText, { color: colors.textSecondary }]}>
-                  {t("groups.noTripRequestsHint")}
-                </Text>
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  onPress={vm.openRequestComposer}
-                  style={[styles.inlineCreateRequestButton, { backgroundColor: colors.accent }]}
-                >
-                  <MaterialIcons color={colors.buttonTextOnAction} name="add" size={18} />
-                  <Text style={[styles.inlineCreateRequestButtonText, { color: colors.buttonTextOnAction }]}>{t("groups.newTripRequest")}</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.requestCardsContent}
-              >
-                {vm.openTripRequests.map((request) => (
-                  <TripRequestCard
-                    currentUserId={vm.userId}
-                    key={request.id}
-                    onClosePress={() => {
-                      void vm.closeTripRequest(request);
-                    }}
-                    onCreateGroupPress={() => {
-                      void vm.createGroupFromRequest(request);
-                    }}
-                    onToggleInterestPress={() => {
-                      void vm.toggleTripRequestInterest(request);
-                    }}
-                    request={request}
-                    updating={vm.updatingTripRequestId === request.id}
-                  />
-                ))}
-              </ScrollView>
-            )}
           </View>
-        ) : null}
 
-        {vm.searchQuery.trim() ? (
-          <View style={styles.sectionBlock}>
-            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{t("groups.searchResults")}</Text>
-            <Text style={[styles.sectionMeta, { color: colors.textSecondary }]}>{vm.searchedPublicGroups.length} {t("groups.publicGroups")}</Text>
-
-            {vm.searchedPublicGroups.length === 0 ? (
-              <View style={[styles.emptyState, { backgroundColor: colors.cardAlt, borderColor: colors.border }]}>
-                <Text style={[styles.emptyStateTitle, { color: colors.textPrimary }]}>{t("groups.noMatches")}</Text>
-                <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>
-                  {t("groups.noMatchesHint")}
-                </Text>
-              </View>
-            ) : (
-              vm.searchedPublicGroups.map((group) => (
-                <GroupRow
-                  actionLabel={group.memberIds.includes(vm.userId) ? t("common.joined") : t("common.join")}
-                  actionLoading={vm.joiningGroupId === group.id}
-                  badge={t("common.public")}
-                  group={group}
-                  key={group.id}
-                  onActionPress={
-                    group.memberIds.includes(vm.userId) ? undefined : () => vm.joinGroup(group.id)
-                  }
-                  onPress={() => vm.openGroupChat(group.id)}
-                  preview={
-                    group.description || `Created by ${group.creatorLabel}`
-                  }
-                  rightMeta={formatRelativeTime(group.updatedAtMs ?? group.createdAtMs)}
-                />
-              ))
-            )}
-          </View>
-        ) : null}
-
-        <View style={styles.sectionHeader}>
-          <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{t("groups.messages")}</Text>
-          <Text style={[styles.sectionMeta, { color: colors.textSecondary }]}>
-            {t("groups.requests")} {vm.invitedGroups.length ? `(${vm.invitedGroups.length})` : ""}
-          </Text>
-        </View>
-
-        {vm.invitedGroups.length > 0 ? (
-          vm.invitedGroups.map((group) => (
-            <GroupRow
-              actionLabel={t("groups.accept")}
-              actionLoading={vm.joiningGroupId === group.id}
-              badge={t("groups.invite")}
-              group={group}
-              key={`invite-${group.id}`}
-              onActionPress={() => vm.joinGroup(group.id)}
-              preview={`${group.creatorLabel} invited you${group.description ? ` • ${group.description}` : ""}`}
-              rightMeta={t("groups.request")}
+          {/* ── Instagram-style rounded gray search pill ── */}
+          <View
+            style={[
+              styles.searchShell,
+              { backgroundColor: colors.inputBackground },
+            ]}
+          >
+            <MaterialIcons color={colors.textMuted} name="search" size={20} />
+            <TextInput
+              accessibilityLabel="Search groups and people"
+              onChangeText={(value) => {
+                vm.setSearchQuery(value);
+                vm.clearFeedback();
+              }}
+              placeholder="Search"
+              placeholderTextColor={colors.textMuted}
+              style={[styles.searchInput, { color: colors.textPrimary }]}
+              value={vm.searchQuery}
             />
-          ))
-        ) : null}
-
-        {vm.joinedGroups.length === 0 ? (
-          <View style={[styles.emptyState, { backgroundColor: colors.cardAlt, borderColor: colors.border }]}>
-            <Text style={[styles.emptyStateTitle, { color: colors.textPrimary }]}>{t("groups.noGroups")}</Text>
-            <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>
-              {t("groups.noGroupsHint")}
-            </Text>
           </View>
-        ) : (
-          vm.joinedGroups.map((group) => {
-            const invitedLabels = group.invitedUserIds
-              .slice(0, 2)
-              .map(
-                (inviteId) =>
-                  vm.publicProfilesById[inviteId]?.username ||
-                  vm.publicProfilesById[inviteId]?.displayName
-              )
-              .filter(Boolean);
-            const previewText =
-              invitedLabels.length > 0
-                ? `Invited ${invitedLabels.join(", ")}`
-                : group.description || `Created by ${group.creatorLabel}`;
 
-            return (
-              <GroupRow
-                badge={group.accessType === "private" ? t("common.private") : t("common.public")}
-                actionLabel={group.creatorId === vm.userId ? t("common.delete") : undefined}
-                actionLoading={vm.deletingGroupId === group.id}
-                actionVariant="danger"
-                group={group}
-                key={group.id}
-                onActionPress={
-                  group.creatorId === vm.userId ? () => vm.openDeleteModal(group) : undefined
-                }
-                onPress={() => vm.openGroupChat(group.id)}
-                preview={previewText}
-                rightMeta={formatRelativeTime(group.updatedAtMs ?? group.createdAtMs)}
-              />
-            );
-          })
-        )}
-
-        {!vm.searchQuery.trim() ? (
-          <View style={styles.sectionBlock}>
-            <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{t("groups.publicGroupsSection")}</Text>
-              <Text style={[styles.sectionMeta, { color: colors.textSecondary }]}>{vm.publicGroups.length} {t("groups.available")}</Text>
+          {vm.error ? (
+            <View
+              style={[
+                styles.feedbackCardError,
+                { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
+              ]}
+            >
+              <Text style={[styles.feedbackText, { color: colors.errorText }]}>{vm.error}</Text>
             </View>
+          ) : null}
 
-            {vm.publicGroups.length === 0 ? (
-              <View style={[styles.emptyState, { backgroundColor: colors.cardAlt, borderColor: colors.border }]}>
-                <Text style={[styles.emptyStateTitle, { color: colors.textPrimary }]}>{t("groups.noPublicGroups")}</Text>
-                <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>
-                  {t("groups.noPublicGroupsHint")}
+          {vm.successMessage ? (
+            <View
+              style={[
+                styles.feedbackCardSuccess,
+                { backgroundColor: colors.successBackground, borderColor: colors.successBorder },
+              ]}
+            >
+              <Text style={[styles.feedbackText, { color: colors.successText }]}>
+                {vm.successMessage}
+              </Text>
+            </View>
+          ) : null}
+
+          {!isSearching && vm.smartAlerts.length > 0 ? (
+            <View style={styles.sectionBlock}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
+                  Smart alerts
+                </Text>
+                <Text style={[styles.sectionMeta, { color: colors.textSecondary }]}>
+                  {vm.smartAlerts.length}
                 </Text>
               </View>
-            ) : (
-              vm.publicGroups
-                .filter((group) => !group.memberIds.includes(vm.userId))
-                .slice(0, 5)
-                .map((group) => (
-                  <GroupRow
-                    actionLabel={t("common.join")}
-                    actionLoading={vm.joiningGroupId === group.id}
-                    badge={t("common.public")}
-                    group={group}
-                    key={`discover-${group.id}`}
-                    onActionPress={() => vm.joinGroup(group.id)}
-                    onPress={() => vm.openGroupChat(group.id)}
-                    preview={group.description || `Created by ${group.creatorLabel}`}
-                    rightMeta={formatRelativeTime(group.updatedAtMs ?? group.createdAtMs)}
-                  />
-                ))
-            )}
-          </View>
-        ) : null}
-      </ScrollView>
+              <View style={styles.alertColumn}>
+                {vm.smartAlerts.map((alert) => (
+                  <TouchableOpacity
+                    key={alert.id}
+                    activeOpacity={alert.groupId ? 0.86 : 1}
+                    disabled={!alert.groupId}
+                    onPress={() => {
+                      if (alert.groupId) {
+                        vm.openGroupChat(alert.groupId);
+                      }
+                    }}
+                    style={[
+                      styles.alertCard,
+                      {
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.alertIconWrap,
+                        { backgroundColor: colors.accentMuted },
+                      ]}
+                    >
+                      <MaterialIcons color={colors.accent} name="notifications-active" size={18} />
+                    </View>
+                    <View style={styles.alertTextWrap}>
+                      <Text style={[styles.alertTitle, { color: colors.textPrimary }]}>
+                        {alert.title}
+                      </Text>
+                      <Text style={[styles.alertBody, { color: colors.textSecondary }]}>
+                        {alert.body}
+                      </Text>
+                    </View>
+                    {alert.groupId ? (
+                      <MaterialIcons color={colors.textMuted} name="chevron-right" size={20} />
+                    ) : null}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          ) : null}
+
+          {isSearching ? (
+            <>
+              <View style={styles.sectionBlock}>
+                <View style={styles.sectionHeader}>
+                  <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
+                    People
+                  </Text>
+                  <Text style={[styles.sectionMeta, { color: colors.textSecondary }]}>
+                    {vm.searchedPublicProfiles.length}
+                  </Text>
+                </View>
+
+                {vm.searchedPublicProfiles.length === 0
+                  ? renderEmptyState(
+                      "No travelers matched that search.",
+                      "Try a name, city, or username to find new people faster."
+                    )
+                  : (
+                    <View style={styles.verticalCards}>
+                      {vm.searchedPublicProfiles.map((profile) => buildPeopleCard(profile, true))}
+                    </View>
+                  )}
+              </View>
+
+              <View style={styles.sectionBlock}>
+                <View style={styles.sectionHeader}>
+                  <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
+                    Public groups
+                  </Text>
+                  <Text style={[styles.sectionMeta, { color: colors.textSecondary }]}>
+                    {vm.searchedPublicGroups.length}
+                  </Text>
+                </View>
+
+                {vm.searchedPublicGroups.length === 0
+                  ? renderEmptyState(
+                      t("groups.noMatches"),
+                      t("groups.noMatchesHint")
+                    )
+                  : (
+                    vm.searchedPublicGroups.map((group) => (
+                      <GroupRow
+                        actionLabel={
+                          group.memberIds.includes(vm.userId) ? t("common.joined") : t("common.join")
+                        }
+                        actionLoading={vm.joiningGroupId === group.id}
+                        badge={t("common.public")}
+                        group={group}
+                        key={group.id}
+                        onActionPress={
+                          group.memberIds.includes(vm.userId) ? undefined : () => vm.joinGroup(group.id)
+                        }
+                        onPress={() => vm.openGroupChat(group.id)}
+                        preview={group.description || `Created by ${group.creatorLabel}`}
+                        rightMeta={formatRelativeTime(group.updatedAtMs ?? group.createdAtMs, locale)}
+                      />
+                    ))
+                  )}
+              </View>
+            </>
+          ) : (
+            <>
+              {/* ── Top horizontal rail of friends (Instagram DM-style with circular avatars) ── */}
+              {vm.friendProfiles.length > 0 ? (
+                <View style={styles.friendRailWrap}>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.friendRail}
+                  >
+                    {vm.friendProfiles.slice(0, 12).map((profile) => (
+                      <TouchableOpacity
+                        key={profile.uid}
+                        activeOpacity={0.7}
+                        onPress={() => vm.openComposer(profile.uid)}
+                        style={styles.friendRailItem}
+                      >
+                        <View style={[styles.friendRailRing, { borderColor: colors.border }]}>
+                          {/* Avatar reuses 56px to match the row size */}
+                          <Avatar label={profile.label} photoUrl={profile.photoUrl} size={56} />
+                        </View>
+                        <Text
+                          numberOfLines={1}
+                          style={[styles.friendRailLabel, { color: colors.textPrimary }]}
+                        >
+                          {profile.username || profile.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
+
+              {/* ── Messages section header (Instagram DM "Messages" + "Requests") ── */}
+              <View style={styles.dmHeader}>
+                <Text style={[styles.dmHeaderTitle, { color: colors.textPrimary }]}>Messages</Text>
+                {vm.invitedGroups.length > 0 || vm.pendingIncomingFriendships.length > 0 ? (
+                  <Text style={[styles.dmRequestsLink, { color: colors.accent }]}>
+                    Requests ({vm.invitedGroups.length + vm.pendingIncomingFriendships.length})
+                  </Text>
+                ) : null}
+              </View>
+
+              {/* ── Pending invites at top of message list ── */}
+              {vm.invitedGroups.map((group) => (
+                <GroupRow
+                  actionLabel={t("groups.accept")}
+                  actionLoading={vm.joiningGroupId === group.id}
+                  badge={t("groups.invite")}
+                  group={group}
+                  key={`invite-${group.id}`}
+                  onActionPress={() => vm.joinGroup(group.id)}
+                  preview={`${group.creatorLabel} invited you${group.description ? ` • ${group.description}` : ""}`}
+                  rightMeta={t("groups.request")}
+                />
+              ))}
+
+              {/* ── Joined groups (clean flat rows) ── */}
+              {vm.joinedGroups.length === 0 && vm.invitedGroups.length === 0
+                ? renderEmptyState(
+                    "No chats yet.",
+                    "Tap the + icon to create a group, accept an invite, or use a private key to join one."
+                  )
+                : vm.joinedGroups.map((group) => {
+                    const invitedLabels = group.invitedUserIds
+                      .slice(0, 2)
+                      .map(
+                        (inviteId) =>
+                          vm.publicProfilesById[inviteId]?.username ||
+                          vm.publicProfilesById[inviteId]?.displayName
+                      )
+                      .filter(Boolean);
+                    const previewText =
+                      invitedLabels.length > 0
+                        ? `Invited ${invitedLabels.join(", ")}`
+                        : group.description || `Created by ${group.creatorLabel}`;
+
+                    return (
+                      <GroupRow
+                        actionLabel={group.creatorId === vm.userId ? t("common.delete") : undefined}
+                        actionLoading={vm.deletingGroupId === group.id}
+                        actionVariant="danger"
+                        group={group}
+                        key={group.id}
+                        onActionPress={
+                          group.creatorId === vm.userId ? () => vm.openDeleteModal(group) : undefined
+                        }
+                        onPress={() => vm.openGroupChat(group.id)}
+                        preview={previewText}
+                        rightMeta={formatRelativeTime(group.updatedAtMs ?? group.createdAtMs, locale)}
+                      />
+                    );
+                  })}
+
+              {/* ── Pending friend requests (Instagram-style "people you may know") ── */}
+              {vm.pendingIncomingFriendships.length > 0 ? (
+                <>
+                  <View style={[styles.dmHeader, styles.dmHeaderSpaced]}>
+                    <Text style={[styles.dmHeaderTitle, { color: colors.textPrimary }]}>
+                      Friend requests
+                    </Text>
+                  </View>
+                  {vm.pendingIncomingFriendships.map((friendship) =>
+                    buildPeopleCard(
+                      {
+                        displayName: vm.buildSocialProfilePreview(friendship.requesterId).label,
+                        uid: friendship.requesterId,
+                        username: vm.buildSocialProfilePreview(friendship.requesterId).username,
+                      },
+                      true
+                    )
+                  )}
+                </>
+              ) : null}
+
+              {/* ── Trip requests (compact horizontal scroll) ── */}
+              {vm.openTripRequests.length > 0 ? (
+                <>
+                  <View style={[styles.dmHeader, styles.dmHeaderSpaced]}>
+                    <Text style={[styles.dmHeaderTitle, { color: colors.textPrimary }]}>
+                      Trip ideas
+                    </Text>
+                  </View>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.requestCardsContent}
+                  >
+                    {vm.openTripRequests.map((request) => (
+                      <TripRequestCard
+                        currentUserId={vm.userId}
+                        key={request.id}
+                        onClosePress={() => {
+                          void vm.closeTripRequest(request);
+                        }}
+                        onCreateGroupPress={() => {
+                          void vm.createGroupFromRequest(request);
+                        }}
+                        onToggleInterestPress={() => {
+                          void vm.toggleTripRequestInterest(request);
+                        }}
+                        request={request}
+                        updating={vm.updatingTripRequestId === request.id}
+                      />
+                    ))}
+                  </ScrollView>
+                </>
+              ) : null}
+
+              {/* ── Discover public groups (clean flat list) ── */}
+              {vm.publicGroups.length > 0 ? (
+                <>
+                  <View style={[styles.dmHeader, styles.dmHeaderSpaced]}>
+                    <Text style={[styles.dmHeaderTitle, { color: colors.textPrimary }]}>
+                      Discover groups
+                    </Text>
+                  </View>
+                  {vm.publicGroups
+                    .filter((group) => !group.memberIds.includes(vm.userId))
+                    .slice(0, 8)
+                    .map((group) => (
+                      <GroupRow
+                        actionLabel={t("common.join")}
+                        actionLoading={vm.joiningGroupId === group.id}
+                        badge={t("common.public")}
+                        group={group}
+                        key={`public-${group.id}`}
+                        onActionPress={() => vm.joinGroup(group.id)}
+                        onPress={() => vm.openGroupChat(group.id)}
+                        preview={group.description || `Created by ${group.creatorLabel}`}
+                        rightMeta={formatRelativeTime(group.updatedAtMs ?? group.createdAtMs, locale)}
+                      />
+                    ))}
+                </>
+              ) : null}
+            </>
+          )}
+        </ScrollView>
       </KeyboardAvoidingView>
+
+      <SocialTabsDock />
 
       <ActionMenu
         visible={vm.actionMenuVisible}
@@ -456,10 +682,9 @@ const styles = StyleSheet.create({
   },
   content: {
     alignSelf: "center",
-    maxWidth: 980,
-    paddingBottom: 128,
+    maxWidth: 760,
     paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.md,
+    paddingTop: Spacing.xs,
     width: "100%",
   },
   topBar: {
@@ -467,42 +692,34 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     marginBottom: Spacing.md,
-    minHeight: 56,
-    borderRadius: Radius.lg,
+    minHeight: 48,
   },
-  topBarTextWrap: {
-    flex: 1,
-    paddingRight: Spacing.lg,
-  },
-  pageTitle: {
-    ...TypeScale.displayMd,
-  },
-  pageSubtitle: {
-    ...TypeScale.bodyMd,
-    marginTop: 6,
-  },
-  topBarCircleButton: {
+  topBarHandleWrap: {
     alignItems: "center",
-    borderRadius: Radius["3xl"],
-    borderWidth: 3,
-    height: 56,
-    justifyContent: "center",
-    ...shadow("lg"),
-    width: 56,
+    flex: 1,
+    flexDirection: "row",
+    paddingRight: Spacing.md,
+  },
+  handle: {
+    fontSize: 22,
+    fontWeight: FontWeight.black,
+  },
+  topBarIconButton: {
+    padding: 4,
   },
   searchShell: {
     alignItems: "center",
-    borderRadius: Radius.lg,
-    borderWidth: 1,
+    borderRadius: Radius.md,
     flexDirection: "row",
     marginBottom: Spacing.md,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 9,
   },
   searchInput: {
+    ...TypeScale.bodyMd,
     flex: 1,
-    ...TypeScale.bodyLg,
-    marginLeft: Spacing.md,
+    marginLeft: Spacing.sm,
+    padding: 0,
   },
   feedbackCardError: {
     borderRadius: Radius.lg,
@@ -510,121 +727,134 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
     padding: Spacing.md,
   },
-  feedbackTextError: {
-    ...TypeScale.bodyMd,
-  },
   feedbackCardSuccess: {
     borderRadius: Radius.lg,
     borderWidth: 1,
     marginBottom: Spacing.md,
     padding: Spacing.md,
   },
-  feedbackTextSuccess: {
+  feedbackText: {
     ...TypeScale.bodyMd,
-  },
-  storiesRow: {
-    marginBottom: Spacing.lg,
-  },
-  storiesContent: {
-    gap: Spacing.md,
-    paddingRight: Spacing.md,
-  },
-  storyButton: {
-    alignItems: "center",
-    width: 88,
-  },
-  storyLabel: {
-    ...TypeScale.bodyMd,
-    fontWeight: FontWeight.bold,
-    marginTop: Spacing.sm,
-    textAlign: "center",
-  },
-  storyHint: {
-    ...TypeScale.labelLg,
-    marginTop: Spacing.xs,
-    textAlign: "center",
   },
   sectionBlock: {
-    marginTop: Spacing.md,
+    marginBottom: Spacing.lg,
   },
   sectionHeader: {
-    alignItems: "center",
+    alignItems: "baseline",
     flexDirection: "row",
     justifyContent: "space-between",
     marginBottom: Spacing.sm,
-    marginTop: Spacing.sm,
-    borderRadius: 1,
   },
   sectionTitle: {
     ...TypeScale.headingMd,
-    fontWeight: FontWeight.extrabold,
+    fontWeight: FontWeight.bold,
   },
   sectionMeta: {
     ...TypeScale.bodyMd,
-    fontWeight: FontWeight.bold,
+    fontWeight: FontWeight.semibold,
   },
   sectionSupportText: {
     ...TypeScale.bodyMd,
-    marginBottom: Spacing.xs,
+    marginBottom: Spacing.md,
   },
-  requestCardsContent: {
-    paddingRight: Spacing.xl,
+  horizontalCards: {
+    gap: Spacing.md,
+    paddingRight: Spacing.lg,
   },
-  requestEmptyState: {
-    alignItems: "center",
-    borderRadius: Radius["3xl"],
-    borderWidth: 1,
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing["2xl"],
+  verticalCards: {
+    gap: 0,
   },
-  requestEmptyIcon: {
+  alertColumn: {
+    gap: Spacing.sm,
+  },
+  alertCard: {
     alignItems: "center",
     borderRadius: Radius.xl,
     borderWidth: 1,
-    height: 62,
-    justifyContent: "center",
-    width: 62,
-  },
-  requestEmptyTitle: {
-    ...TypeScale.headingSm,
-    fontWeight: FontWeight.extrabold,
-    marginTop: Spacing.md,
-    textAlign: "center",
-  },
-  requestEmptyText: {
-    ...TypeScale.bodyMd,
-    marginTop: Spacing.sm,
-    textAlign: "center",
-  },
-  inlineCreateRequestButton: {
-    alignItems: "center",
-    borderRadius: Radius.lg,
     flexDirection: "row",
-    gap: Spacing.sm,
-    marginTop: Spacing.lg,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
+    padding: Spacing.md,
   },
-  inlineCreateRequestButtonText: {
+  alertIconWrap: {
+    alignItems: "center",
+    borderRadius: Radius.full,
+    height: 38,
+    justifyContent: "center",
+    width: 38,
+  },
+  alertTextWrap: {
+    flex: 1,
+    marginLeft: Spacing.sm,
+    marginRight: Spacing.xs,
+  },
+  alertTitle: {
     ...TypeScale.bodyMd,
-    fontWeight: FontWeight.extrabold,
+    fontWeight: FontWeight.bold,
+  },
+  alertBody: {
+    ...TypeScale.bodySm,
+    marginTop: 2,
+  },
+  // ── Friend rail (top horizontal scroll) ──
+  friendRailWrap: {
+    marginHorizontal: -Spacing.xl,
+    marginBottom: Spacing.md,
+  },
+  friendRail: {
+    gap: Spacing.lg,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.xs,
+  },
+  friendRailItem: {
+    alignItems: "center",
+    width: 70,
+  },
+  friendRailRing: {
+    borderRadius: 999,
+    borderWidth: 1,
+    padding: 2,
+  },
+  friendRailLabel: {
+    ...TypeScale.labelSm,
+    marginTop: 4,
+    maxWidth: 70,
+    textAlign: "center",
+  },
+  // ── DM section header ──
+  dmHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 0,
+    paddingVertical: Spacing.xs,
+  },
+  dmHeaderSpaced: {
+    marginTop: Spacing.md,
+  },
+  dmHeaderTitle: {
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.bold,
+  },
+  dmRequestsLink: {
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.semibold,
   },
   emptyState: {
     alignItems: "center",
-    borderRadius: Radius["2xl"],
-    borderWidth: 1,
-    marginTop: Spacing.md,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing["2xl"],
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing["3xl"],
   },
   emptyStateTitle: {
-    ...TypeScale.titleLg,
-    fontWeight: FontWeight.extrabold,
+    ...TypeScale.titleMd,
+    fontWeight: FontWeight.bold,
     textAlign: "center",
   },
   emptyStateText: {
     ...TypeScale.bodyMd,
-    marginTop: Spacing.sm,
+    marginTop: Spacing.xs,
     textAlign: "center",
+  },
+  requestCardsContent: {
+    gap: Spacing.md,
+    paddingHorizontal: Spacing.md,
   },
 });
