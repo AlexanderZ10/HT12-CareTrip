@@ -34,7 +34,7 @@ function getHomeCopy(language: AppLanguage) {
       duration: "Duration",
       generate: "Suggestions",
       initialAssistant: (profileName: string) =>
-        `Hi, ${profileName}! I am your travel assistant. Tell me about the trip you dream about. Where do you want to go?`,
+        `Hi, ${profileName}! I'm your travel assistant. I'll ask you a few quick questions to plan the perfect trip. Let's start with your budget in EUR.`,
       planning: "Planning",
       timingFallback: "Flexible",
       timing: "When",
@@ -67,7 +67,7 @@ function getHomeCopy(language: AppLanguage) {
       duration: "Dauer",
       generate: "Vorschl\u00E4ge",
       initialAssistant: (profileName: string) =>
-        `Hallo, ${profileName}! Ich bin dein Reiseassistent. Erz\u00E4hl mir von der Reise, von der du tr\u00E4umst. Wohin m\u00F6chtest du fahren?`,
+        `Hallo, ${profileName}! Ich bin dein Reiseassistent. Ich stelle dir ein paar kurze Fragen, um die perfekte Reise zu planen. Wir starten mit deinem Budget in EUR.`,
       planning: "Planung",
       timingFallback: "Flexibel",
       timing: "Wann",
@@ -100,7 +100,7 @@ function getHomeCopy(language: AppLanguage) {
       duration: "Duraci\u00F3n",
       generate: "Sugerencias",
       initialAssistant: (profileName: string) =>
-        `Hola, ${profileName}. Soy tu asistente de viajes. Cu\u00E9ntame sobre el viaje con el que sue\u00F1as. \u00BAd\u00F3nde quieres ir?`,
+        `\u00A1Hola, ${profileName}! Soy tu asistente de viajes. Te har\u00E9 unas preguntas rápidas para planificar el viaje perfecto. Empecemos con tu presupuesto en EUR.`,
       planning: "Planificaci\u00F3n",
       timingFallback: "Flexible",
       timing: "Cu\u00E1ndo",
@@ -133,7 +133,7 @@ function getHomeCopy(language: AppLanguage) {
       duration: "Dur\u00E9e",
       generate: "Suggestions",
       initialAssistant: (profileName: string) =>
-        `Salut, ${profileName} ! Je suis ton assistant voyage. Parle-moi du voyage dont tu r\u00EAves. O\u00F9 veux-tu aller ?`,
+        `Salut, ${profileName} ! Je suis ton assistant voyage. Je vais te poser quelques questions rapides pour planifier le voyage parfait. On commence par ton budget en EUR.`,
       planning: "Planification",
       timingFallback: "Flexible",
       timing: "Quand",
@@ -165,7 +165,7 @@ function getHomeCopy(language: AppLanguage) {
     duration: "Продължителност",
     generate: "Предложения",
     initialAssistant: (profileName: string) =>
-      `Здравей, ${profileName}! Аз съм твоят travel асистент. Разкажи ми за пътуването, за което мечтаеш – накъде искаш да отидеш?`,
+      `Здравей, ${profileName}! Аз съм твоят travel асистент. Ще ти задам няколко бързи въпроса, за да планираме перфектното пътуване. Започваме с бюджета ти в евро.`,
     planning: "Планиране",
     timingFallback: "Гъвкаво",
     timing: "Кога",

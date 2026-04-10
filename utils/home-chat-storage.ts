@@ -2,9 +2,11 @@ import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 
 import { db } from "../firebase";
 import { normalizeBudgetToEuro } from "./currency";
+import { sanitizeString, sanitizeStringArray } from "./sanitize";
 import {
   formatGroundedTravelPlan,
   type GroundedTravelPlan,
+  type PlannerDayPlan,
 } from "./home-travel-planner";
 
 export type HomePlannerStep =
@@ -72,23 +74,8 @@ type ImportedSharedTrip = {
   sourceKey: string;
   summary: string;
   title: string;
+  tripDays: PlannerDayPlan[];
 };
-
-function sanitizeString(value: unknown, fallback = "") {
-  return typeof value === "string" ? value.trim() : fallback;
-}
-
-function sanitizeStringArray(value: unknown) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .filter((item): item is string => typeof item === "string")
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, 4);
-}
 
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -100,9 +87,18 @@ function parseStructuredPlan(value: unknown): GroundedTravelPlan | null {
   }
 
   const rawPlan = value as Record<string, unknown>;
+  const rawLanguage = sanitizeString(rawPlan.language);
 
   return {
     budgetNote: sanitizeString(rawPlan.budgetNote),
+    language:
+      rawLanguage === "en" ||
+      rawLanguage === "de" ||
+      rawLanguage === "es" ||
+      rawLanguage === "fr" ||
+      rawLanguage === "bg"
+        ? (rawLanguage as GroundedTravelPlan["language"])
+        : "bg",
     profileTip: sanitizeString(rawPlan.profileTip),
     stayOptions: Array.isArray(rawPlan.stayOptions)
       ? rawPlan.stayOptions
@@ -218,7 +214,7 @@ export function createEmptyPlannerState(initialAssistantMessage: string): Stored
     travelers: "",
     latestPlan: null,
     messages: [createHomeChatMessage("assistant", initialAssistantMessage)],
-    step: "chatting",
+    step: "budget",
   };
 }
 
@@ -240,7 +236,7 @@ export function createHomePlannerChat(
 
 export function isHomePlannerChatUntouched(chat: HomePlannerChatThread) {
   return (
-    chat.state.step === "chatting" &&
+    chat.state.step === "budget" &&
     !chat.state.budget &&
     !chat.state.days &&
     !chat.state.destination &&
@@ -288,7 +284,7 @@ export function createHomePlannerChatFromSharedTrip(
           summary: trip.summary.trim(),
           title: trip.title.trim(),
           transportOptions: [],
-          tripDays: [],
+          tripDays: trip.tripDays,
         },
         sourceKey: trip.sourceKey.trim() || createId("imported-source"),
       },
@@ -309,7 +305,8 @@ export function createHomePlannerChatFromSharedTrip(
 }
 
 function parsePlannerStep(value: unknown): HomePlannerStep {
-  return value === "chatting" ||
+  return value === "budget" ||
+    value === "chatting" ||
     value === "days" ||
     value === "travelers" ||
     value === "transport" ||
@@ -317,7 +314,7 @@ function parsePlannerStep(value: unknown): HomePlannerStep {
     value === "destination" ||
     value === "done"
     ? value
-    : "chatting";
+    : "budget";
 }
 
 function parsePlannerMessages(value: unknown): HomeChatMessage[] {
@@ -346,6 +343,13 @@ function parsePlannerStateFromRaw(
   rawState: Record<string, unknown>,
   initialAssistantMessage: string
 ): StoredHomePlannerState {
+  const parsedStep = parsePlannerStep(rawState.step);
+  const parsedLatestPlan = parseStoredHomePlan(rawState.latestPlan);
+
+  if (parsedStep === "chatting" || (parsedStep === "done" && !parsedLatestPlan)) {
+    return createEmptyPlannerState(initialAssistantMessage);
+  }
+
   const messages = parsePlannerMessages(rawState.chatMessages ?? rawState.messages);
   const followUpMessages = parsePlannerMessages(rawState.followUpMessages);
 
@@ -357,12 +361,12 @@ function parsePlannerStateFromRaw(
     timing: sanitizeString(rawState.timing),
     transportPreference: sanitizeString(rawState.transportPreference),
     travelers: sanitizeString(rawState.travelers),
-    latestPlan: parseStoredHomePlan(rawState.latestPlan),
+    latestPlan: parsedLatestPlan,
     messages:
       messages.length > 0
         ? messages
         : [createHomeChatMessage("assistant", initialAssistantMessage)],
-    step: parsePlannerStep(rawState.step),
+    step: parsedStep,
   };
 }
 

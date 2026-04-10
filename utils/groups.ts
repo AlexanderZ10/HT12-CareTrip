@@ -9,6 +9,8 @@ import {
   writeBatch,
 } from "firebase/firestore";
 
+import { sanitizeString, sanitizeStringArray, toMillis } from "./sanitize";
+
 export type GroupAccessType = "public" | "private";
 
 export type TravelGroup = {
@@ -30,20 +32,6 @@ export type TravelGroup = {
   updatedAtMs: number | null;
 };
 
-function sanitizeString(value: unknown, fallback = "") {
-  return typeof value === "string" ? value.trim() : fallback;
-}
-
-function sanitizeStringArray(value: unknown) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter(Boolean);
-}
-
 function sanitizeStringRecord(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {} as Record<string, string>;
@@ -54,23 +42,6 @@ function sanitizeStringRecord(value: unknown) {
       .map(([key, item]) => [key.trim(), typeof item === "string" ? item.trim() : ""])
       .filter(([key, item]) => !!key && !!item)
   );
-}
-
-function toMillis(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (
-    value &&
-    typeof value === "object" &&
-    "toMillis" in value &&
-    typeof value.toMillis === "function"
-  ) {
-    return value.toMillis();
-  }
-
-  return null;
 }
 
 export function normalizeGroupJoinKey(value: string) {
@@ -132,28 +103,40 @@ export function sortGroupsByCreatedAt(groups: TravelGroup[]) {
 
 const GROUP_DELETE_BATCH_SIZE = 100;
 
-export async function deleteGroupWithMessages(db: Firestore, groupId: string) {
-  const messagesRef = collection(db, "groups", groupId, "messages");
+async function deleteGroupSubcollection(
+  db: Firestore,
+  groupId: string,
+  subcollectionName: string
+) {
+  const subcollectionRef = collection(db, "groups", groupId, subcollectionName);
 
   while (true) {
-    const messagesSnapshot = await getDocs(query(messagesRef, limit(GROUP_DELETE_BATCH_SIZE)));
+    const snapshot = await getDocs(query(subcollectionRef, limit(GROUP_DELETE_BATCH_SIZE)));
 
-    if (messagesSnapshot.empty) {
+    if (snapshot.empty) {
       break;
     }
 
     const batch = writeBatch(db);
 
-    messagesSnapshot.docs.forEach((messageDocument) => {
-      batch.delete(messageDocument.ref);
+    snapshot.docs.forEach((entryDocument) => {
+      batch.delete(entryDocument.ref);
     });
 
     await batch.commit();
 
-    if (messagesSnapshot.size < GROUP_DELETE_BATCH_SIZE) {
+    if (snapshot.size < GROUP_DELETE_BATCH_SIZE) {
       break;
     }
   }
+}
+
+export async function deleteGroupWithMessages(db: Firestore, groupId: string) {
+  await deleteGroupSubcollection(db, groupId, "messages");
+  await deleteGroupSubcollection(db, groupId, "expenseRepayments");
+  await deleteGroupSubcollection(db, groupId, "tripPresence");
+  await deleteGroupSubcollection(db, groupId, "tripBoards");
+  await deleteGroupSubcollection(db, groupId, "tripRecaps");
 
   await deleteDoc(doc(db, "groups", groupId));
 }

@@ -1,7 +1,8 @@
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, runTransaction, setDoc } from "firebase/firestore";
 
 import { db } from "../firebase";
 import { normalizeBudgetToEuro } from "./currency";
+import { sanitizeString } from "./sanitize";
 import {
   type PlannerStayOption,
   type PlannerTransportOption,
@@ -31,10 +32,6 @@ export type BookingOrder = {
   transport: PlannerTransportOption | null;
   travelers: string;
 };
-
-function sanitizeString(value: unknown, fallback = "") {
-  return typeof value === "string" ? value.trim() : fallback;
-}
 
 function sanitizeNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -184,7 +181,7 @@ export function buildBookingOrder(params: {
     createdAtMs: Date.now(),
     days: params.days.trim(),
     destination: params.destination.trim(),
-    id: `booking-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: `booking-${Date.now()}-${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`,
     note: params.note.trim(),
     paymentMethod: params.paymentMethod.trim(),
     paymentIntentId: params.paymentIntentId.trim(),
@@ -246,33 +243,36 @@ export function parseBookingOrders(profileData: Record<string, unknown>): Bookin
 
 export async function saveBookingForUser(userId: string, bookingOrder: BookingOrder) {
   const profileRef = doc(db, "profiles", userId);
-  const profileSnapshot = await getDoc(profileRef);
-  const profileData = profileSnapshot.exists()
-    ? (profileSnapshot.data() as Record<string, unknown>)
-    : {};
-  const currentBookingOrders = parseBookingOrders(profileData);
 
-  if (
-    bookingOrder.paymentIntentId &&
-    currentBookingOrders.some(
-      (currentBookingOrder) =>
-        currentBookingOrder.paymentIntentId &&
-        currentBookingOrder.paymentIntentId === bookingOrder.paymentIntentId
-    )
-  ) {
-    return currentBookingOrders;
-  }
+  return runTransaction(db, async (transaction) => {
+    const profileSnapshot = await transaction.get(profileRef);
+    const profileData = profileSnapshot.exists()
+      ? (profileSnapshot.data() as Record<string, unknown>)
+      : {};
+    const currentBookingOrders = parseBookingOrders(profileData);
 
-  const nextBookingOrders = [bookingOrder, ...currentBookingOrders].slice(0, 30);
+    if (
+      bookingOrder.paymentIntentId &&
+      currentBookingOrders.some(
+        (currentBookingOrder) =>
+          currentBookingOrder.paymentIntentId &&
+          currentBookingOrder.paymentIntentId === bookingOrder.paymentIntentId
+      )
+    ) {
+      return currentBookingOrders;
+    }
 
-  await setDoc(
-    profileRef,
-    {
-      bookingOrders: nextBookingOrders,
-      bookingOrdersUpdatedAtMs: Date.now(),
-    },
-    { merge: true }
-  );
+    const nextBookingOrders = [bookingOrder, ...currentBookingOrders].slice(0, 30);
 
-  return nextBookingOrders;
+    transaction.set(
+      profileRef,
+      {
+        bookingOrders: nextBookingOrders,
+        bookingOrdersUpdatedAtMs: Date.now(),
+      },
+      { merge: true }
+    );
+
+    return nextBookingOrders;
+  });
 }

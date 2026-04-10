@@ -26,6 +26,7 @@ import {
   type GroupChatSharedTrip,
 } from "../../../utils/group-chat";
 import { type GroupExpenseRepayment } from "../../../utils/group-expense-repayments";
+import { getLanguageLocale } from "../../../utils/translations";
 import { formatMessageTime, getAvatarColor, getInitials } from "../helpers";
 import { ExpenseCard } from "./ExpenseCard";
 import { SharedTripCard } from "./SharedTripCard";
@@ -86,14 +87,17 @@ export function GroupChatMessageRow({
   settledShareCount,
   userId,
 }: GroupChatMessageProps) {
-  const { t } = useAppLanguage();
+  const { language, t } = useAppLanguage();
   const { colors } = useAppTheme();
   const [menuVisible, setMenuVisible] = useState(false);
   const [menuPosition, setMenuPosition] = useState<MenuPosition | null>(null);
+  const [photoViewerVisible, setPhotoViewerVisible] = useState(false);
   const bubbleRef = useRef<View>(null);
   const hasSharedTrip = message.messageType === "shared-trip" && !!message.sharedTrip;
   const hasExpense = message.messageType === "expense" && !!message.expense;
+  const hasPhoto = message.messageType === "photo" && !!message.photo;
   const expense = hasExpense ? (message.expense as GroupChatExpense) : null;
+  const photo = hasPhoto ? message.photo : null;
   const senderName = isMine ? t("common.you") : message.senderLabel;
   const showMenu = canEditMessage || canDeleteMessage;
 
@@ -135,25 +139,34 @@ export function GroupChatMessageRow({
       <Pressable
         onLongPress={handleLongPress}
         delayLongPress={400}
-        style={styles.bubblePressable}
+        style={[
+          styles.bubblePressable,
+          isMine ? styles.bubblePressableMine : styles.bubblePressableTheirs,
+        ]}
       >
+        {/* Instagram-style: small sender name ABOVE the bubble for their messages.
+            For own messages we hide it entirely (just like Instagram DMs). */}
+        {!isMine && !hasSharedTrip && !hasExpense ? (
+          <Text
+            numberOfLines={1}
+            style={[styles.senderNameAbove, { color: colors.textMuted }]}
+          >
+            {senderName}
+          </Text>
+        ) : null}
+
         <View
           ref={bubbleRef}
           style={[
             styles.messageBubble,
             isMine
-              ? { backgroundColor: colors.accent }
-              : { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 },
+              ? [styles.messageBubbleMine, { backgroundColor: colors.accent }]
+              : [
+                  styles.messageBubbleTheirs,
+                  { backgroundColor: colors.cardAlt },
+                ],
           ]}
         >
-          <Text
-            style={[
-              styles.messageSender,
-              { color: isMine ? colors.screenSoft : colors.textSecondary },
-            ]}
-          >
-            {senderName}
-          </Text>
           {hasSharedTrip ? (
             <SharedTripCard
               creatingLinkedExpenseKey={creatingLinkedExpenseKey}
@@ -180,15 +193,50 @@ export function GroupChatMessageRow({
               settledShareCount={settledShareCount}
               userId={userId}
             />
+          ) : hasPhoto && photo ? (
+            <TouchableOpacity
+              activeOpacity={0.92}
+              onPress={() => setPhotoViewerVisible(true)}
+              style={styles.photoBubbleWrap}
+            >
+              <Image
+                source={{ uri: photo.imageUri }}
+                style={styles.photoBubbleImage}
+                contentFit="cover"
+              />
+              {photo.caption ? (
+                <Text
+                  style={[
+                    styles.photoCaption,
+                    { color: isMine ? colors.buttonTextOnAction : colors.textPrimary },
+                  ]}
+                >
+                  {photo.caption}
+                </Text>
+              ) : null}
+            </TouchableOpacity>
           ) : (
-            <Text style={[styles.messageText, { color: isMine ? colors.buttonTextOnAction : colors.textPrimary }]}>
+            <Text
+              style={[
+                styles.messageText,
+                { color: isMine ? colors.buttonTextOnAction : colors.textPrimary },
+              ]}
+            >
               {message.text}
             </Text>
           )}
-          <Text style={[styles.messageTime, { color: isMine ? colors.textMuted : colors.textMuted }]}>
-            {formatMessageTime(message.createdAtMs)}
-          </Text>
         </View>
+
+        {/* Timestamp BELOW the bubble (Instagram style), tiny + muted */}
+        <Text
+          style={[
+            styles.messageTime,
+            isMine ? styles.messageTimeMine : styles.messageTimeTheirs,
+            { color: colors.textMuted },
+          ]}
+        >
+          {formatMessageTime(message.createdAtMs, getLanguageLocale(language))}
+        </Text>
       </Pressable>
 
       {showMenu ? (
@@ -249,28 +297,33 @@ export function GroupChatMessageRow({
         </Modal>
       ) : null}
 
-      {isMine ? (
-        <View style={styles.messageAvatarWrap}>
-          {message.senderAvatarUrl ? (
+      {hasPhoto && photo ? (
+        <Modal
+          transparent
+          visible={photoViewerVisible}
+          animationType="fade"
+          onRequestClose={() => setPhotoViewerVisible(false)}
+        >
+          <Pressable
+            style={[styles.photoViewerOverlay, { backgroundColor: "rgba(0,0,0,0.9)" }]}
+            onPress={() => setPhotoViewerVisible(false)}
+          >
             <Image
-              source={{ uri: message.senderAvatarUrl }}
-              style={[styles.messageAvatarImage, { backgroundColor: colors.border }]}
-              contentFit="cover"
+              source={{ uri: photo.imageUri }}
+              style={styles.photoViewerImage}
+              contentFit="contain"
             />
-          ) : (
-            <View
-              style={[
-                styles.messageAvatarFallback,
-                { backgroundColor: getAvatarColor(senderName) },
-              ]}
-            >
-              <Text style={[styles.messageAvatarFallbackText, { color: colors.buttonTextOnAction }]}>
-                {getInitials(senderName)}
-              </Text>
-            </View>
-          )}
-        </View>
+            {photo.caption ? (
+              <View style={styles.photoViewerCaptionWrap}>
+                <Text style={styles.photoViewerCaption}>{photo.caption}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+        </Modal>
       ) : null}
+
+      {/* Instagram doesn't show your own avatar on your own messages — keep
+          the right side clean. */}
     </View>
   );
 }
@@ -279,8 +332,7 @@ const styles = StyleSheet.create({
   messageRow: {
     alignItems: "flex-end",
     flexDirection: "row",
-    gap: Spacing.sm,
-    marginTop: Spacing.md,
+    marginTop: Spacing.sm,
   },
   theirMessageRow: {
     justifyContent: "flex-start",
@@ -289,9 +341,10 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   messageAvatarWrap: {
-    width: 34,
-    height: 34,
+    width: 28,
+    height: 28,
     borderRadius: Radius.full,
+    marginHorizontal: Spacing.xs,
     overflow: "hidden",
   },
   messageAvatarImage: {
@@ -307,26 +360,73 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   messageAvatarFallbackText: {
-    ...TypeScale.bodySm,
+    ...TypeScale.labelMd,
     fontWeight: FontWeight.extrabold,
   },
   bubblePressable: {
+    // Instagram caps bubbles at ~75% of screen so very long messages wrap
+    // instead of stretching across the chat.
     flexShrink: 1,
+    maxWidth: "75%",
+  },
+  bubblePressableMine: {
+    alignItems: "flex-end",
+  },
+  bubblePressableTheirs: {
+    alignItems: "flex-start",
+  },
+  senderNameAbove: {
+    ...TypeScale.labelSm,
+    marginBottom: 2,
+    marginLeft: Spacing.md,
   },
   messageBubble: {
-    borderRadius: Radius.xl,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.md,
+    borderRadius: 22,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
-  messageSender: {
-    ...TypeScale.labelLg,
-    fontWeight: FontWeight.extrabold,
-    marginBottom: Spacing.xs,
-    textTransform: "uppercase",
-    flexShrink: 1,
+  messageBubbleMine: {
+    // Asymmetric corner like Instagram (less rounded on bottom-right)
+    borderBottomRightRadius: 6,
+  },
+  messageBubbleTheirs: {
+    borderBottomLeftRadius: 6,
   },
   messageText: {
-    ...TypeScale.titleSm,
+    ...TypeScale.bodyMd,
+    lineHeight: 20,
+  },
+  photoBubbleWrap: {
+    minWidth: 180,
+  },
+  photoBubbleImage: {
+    borderRadius: 18,
+    height: 220,
+    width: 220,
+  },
+  photoCaption: {
+    ...TypeScale.bodySm,
+    lineHeight: 18,
+    marginTop: Spacing.sm,
+  },
+  photoViewerOverlay: {
+    alignItems: "center",
+    flex: 1,
+    justifyContent: "center",
+    padding: Spacing.xl,
+  },
+  photoViewerImage: {
+    height: "78%",
+    width: "100%",
+  },
+  photoViewerCaptionWrap: {
+    marginTop: Spacing.md,
+    maxWidth: 360,
+  },
+  photoViewerCaption: {
+    color: "#FFFFFF",
+    ...TypeScale.bodyMd,
+    textAlign: "center",
   },
   menuOverlay: {
     flex: 1,
@@ -354,8 +454,14 @@ const styles = StyleSheet.create({
     marginHorizontal: Spacing.md,
   },
   messageTime: {
-    ...TypeScale.labelMd,
-    marginTop: Spacing.sm,
+    ...TypeScale.labelSm,
+    marginTop: 4,
+    paddingHorizontal: Spacing.sm,
+  },
+  messageTimeMine: {
     textAlign: "right",
+  },
+  messageTimeTheirs: {
+    textAlign: "left",
   },
 });

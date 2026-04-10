@@ -2,6 +2,8 @@ import { MaterialIcons } from "@expo/vector-icons";
 import React from "react";
 import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
+import { useAppLanguage } from "../../../components/app-language-provider";
+import { useAppTheme } from "../../../components/app-theme-provider";
 import { FontWeight, Radius, Spacing, TypeScale } from "../../../constants/design-system";
 import type { StoredHomePlan } from "../../../utils/home-chat-storage";
 import type {
@@ -10,6 +12,7 @@ import type {
 } from "../../../utils/home-travel-planner";
 import { formatCheckoutReference, getPaymentMethodDisplayLabel, getPaymentMethodIcon } from "../helpers";
 import { formatProcessedAt } from "../../../utils/formatting";
+import { getLanguageLocale } from "../../../utils/translations";
 import type { BookingCheckoutStage, BookingReceipt } from "../types";
 
 type BookingForm = {
@@ -18,6 +21,8 @@ type BookingForm = {
   note: string;
   paymentMethod: string;
 };
+
+type ThemeColors = ReturnType<typeof useAppTheme>["colors"];
 
 type BookingModalProps = {
   bookingError: string;
@@ -29,11 +34,6 @@ type BookingModalProps = {
   bookingReceipt: BookingReceipt | null;
   bookingStage: BookingCheckoutStage;
   paymentMethods: string[];
-  colors: {
-    border: string;
-    card: string;
-    modalOverlay: string;
-  };
   latestPlan: NonNullable<StoredHomePlan>;
   onClose: () => void;
   onConfirm: () => void;
@@ -57,7 +57,6 @@ export function BookingModal({
   bookingReceipt,
   bookingStage,
   paymentMethods,
-  colors,
   latestPlan,
   onClose,
   onConfirm,
@@ -70,9 +69,13 @@ export function BookingModal({
   setSelectedTransportIndex,
   visible,
 }: BookingModalProps) {
+  const { language } = useAppLanguage();
+  const { colors } = useAppTheme();
+  const locale = getLanguageLocale(language);
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={[styles.bookingModalOverlay, { backgroundColor: colors.modalOverlay }]}>
+      <View style={[styles.bookingModalOverlay, { backgroundColor: colors.overlay }]}>
         <View
           style={[
             styles.bookingModalCard,
@@ -82,13 +85,13 @@ export function BookingModal({
           <ScrollView contentContainerStyle={styles.bookingModalContent} showsVerticalScrollIndicator={false}>
             <View style={styles.bookingModalHeader}>
               <View style={styles.bookingModalHeaderText}>
-                <Text style={styles.bookingModalKicker}>Secure checkout</Text>
-                <Text style={styles.bookingModalTitle}>
+                <Text style={[styles.bookingModalKicker, { color: colors.accent }]}>Secure checkout</Text>
+                <Text style={[styles.bookingModalTitle, { color: colors.textPrimary }]}>
                   {bookingStage === "success"
                     ? "Потвърдено плащане"
                     : latestPlan?.plan.title || "Потвърди резервацията"}
                 </Text>
-                <Text style={styles.bookingModalSubtitle}>
+                <Text style={[styles.bookingModalSubtitle, { color: colors.textSecondary }]}>
                   {bookingStage === "processing"
                     ? "Подготвяме плащането и потвърждението на резервацията."
                     : bookingStage === "success"
@@ -97,12 +100,12 @@ export function BookingModal({
                 </Text>
               </View>
               <TouchableOpacity
-                style={styles.bookingCloseButton}
+                style={[styles.bookingCloseButton, { backgroundColor: colors.inputBackground }]}
                 onPress={onClose}
                 disabled={bookingProcessing}
                 activeOpacity={0.9}
               >
-                <MaterialIcons name="close" size={18} color="#1A1A1A" />
+                <MaterialIcons name="close" size={18} color={colors.textPrimary} />
               </TouchableOpacity>
             </View>
 
@@ -113,6 +116,7 @@ export function BookingModal({
                 bookingProgressLabel={bookingProgressLabel}
                 estimateLabel={bookingEstimateLabel}
                 destination={latestPlan?.destination}
+                colors={colors}
               />
             ) : bookingStage === "success" ? (
               <SuccessView
@@ -121,6 +125,7 @@ export function BookingModal({
                 bookingReceipt={bookingReceipt}
                 destination={latestPlan?.destination}
                 onClose={onClose}
+                colors={colors}
               />
             ) : (
               <FormView
@@ -138,6 +143,7 @@ export function BookingModal({
                 selectedTransportIndex={selectedTransportIndex}
                 setSelectedStayIndex={setSelectedStayIndex}
                 setSelectedTransportIndex={setSelectedTransportIndex}
+                colors={colors}
               />
             )}
           </ScrollView>
@@ -151,41 +157,43 @@ function ProcessingView({
   bookingForm,
   bookingProgress,
   bookingProgressLabel,
+  colors,
   destination,
   estimateLabel,
 }: {
   bookingForm: BookingForm;
   bookingProgress: number;
   bookingProgressLabel: string;
+  colors: ThemeColors;
   destination?: string;
   estimateLabel: string;
 }) {
   return (
-    <View style={styles.checkoutProcessingCard}>
-      <View style={styles.checkoutProcessingIcon}>
+    <View style={[styles.checkoutProcessingCard, { backgroundColor: colors.cardAlt, borderColor: colors.border }]}>
+      <View style={[styles.checkoutProcessingIcon, { backgroundColor: colors.skeleton }]}>
         <MaterialIcons
           name={getPaymentMethodIcon(bookingForm.paymentMethod) as keyof typeof MaterialIcons.glyphMap}
           size={34}
-          color="#1A1A1A"
+          color={colors.textPrimary}
         />
       </View>
-      <Text style={styles.checkoutProcessingTitle}>Обработваме плащането</Text>
-      <Text style={styles.checkoutProcessingSubtitle}>
+      <Text style={[styles.checkoutProcessingTitle, { color: colors.textPrimary }]}>Обработваме плащането</Text>
+      <Text style={[styles.checkoutProcessingSubtitle, { color: colors.textSecondary }]}>
         {bookingProgressLabel || "Подготвяме плащането..."}
       </Text>
-      <View style={styles.checkoutProgressTrack}>
-        <View style={[styles.checkoutProgressFill, { width: `${Math.max(8, bookingProgress * 100)}%` }]} />
+      <View style={[styles.checkoutProgressTrack, { backgroundColor: colors.skeleton }]}>
+        <View style={[styles.checkoutProgressFill, { width: `${Math.max(8, bookingProgress * 100)}%`, backgroundColor: colors.accent }]} />
       </View>
-      <View style={styles.checkoutProcessingSteps}>
-        <Text style={styles.checkoutProcessingStep}>1. Авторизация на плащането</Text>
-        <Text style={styles.checkoutProcessingStep}>2. Потвърждение на wallet / карта</Text>
-        <Text style={styles.checkoutProcessingStep}>3. Финализиране на резервацията</Text>
+      <View style={[styles.checkoutProcessingSteps, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Text style={[styles.checkoutProcessingStep, { color: colors.textSecondary }]}>1. Авторизация на плащането</Text>
+        <Text style={[styles.checkoutProcessingStep, { color: colors.textSecondary }]}>2. Потвърждение на wallet / карта</Text>
+        <Text style={[styles.checkoutProcessingStep, { color: colors.textSecondary }]}>3. Финализиране на резервацията</Text>
       </View>
-      <View style={styles.bookingSummaryCard}>
-        <Text style={styles.bookingSummaryTitle}>Обобщение</Text>
-        <Text style={styles.bookingSummaryLine}>{destination || "Дестинация"}</Text>
-        <Text style={styles.bookingSummaryLine}>{estimateLabel}</Text>
-        <Text style={styles.bookingSummaryHint}>
+      <View style={[styles.bookingSummaryCard, { backgroundColor: colors.warningBackground, borderColor: colors.warningBorder }]}>
+        <Text style={[styles.bookingSummaryTitle, { color: colors.warningText }]}>Обобщение</Text>
+        <Text style={[styles.bookingSummaryLine, { color: colors.warningText }]}>{destination || "Дестинация"}</Text>
+        <Text style={[styles.bookingSummaryLine, { color: colors.warningText }]}>{estimateLabel}</Text>
+        <Text style={[styles.bookingSummaryHint, { color: colors.warningText }]}>
           Сумата е изчислена според избрания транспорт и мястото за престой.
         </Text>
       </View>
@@ -197,55 +205,60 @@ function SuccessView({
   bookingEstimateLabel,
   bookingForm,
   bookingReceipt,
+  colors,
   destination,
   onClose,
 }: {
   bookingEstimateLabel: string;
   bookingForm: BookingForm;
   bookingReceipt: BookingReceipt | null;
+  colors: ThemeColors;
   destination?: string;
   onClose: () => void;
 }) {
+  const { language: successLanguage } = useAppLanguage();
+  const successLocale = getLanguageLocale(successLanguage);
+
   return (
-    <View style={styles.checkoutSuccessCard}>
-      <View style={styles.checkoutSuccessBadge}>
-        <MaterialIcons name="check" size={34} color="#FFFFFF" />
+    <View style={[styles.checkoutSuccessCard, { backgroundColor: colors.cardAlt, borderColor: colors.border }]}>
+      <View style={[styles.checkoutSuccessBadge, { backgroundColor: colors.accent }]}>
+        <MaterialIcons name="check" size={34} color={colors.buttonTextOnAction} />
       </View>
-      <Text style={styles.checkoutSuccessTitle}>Плащането мина успешно</Text>
-      <Text style={styles.checkoutSuccessSubtitle}>
+      <Text style={[styles.checkoutSuccessTitle, { color: colors.textPrimary }]}>Плащането мина успешно</Text>
+      <Text style={[styles.checkoutSuccessSubtitle, { color: colors.textSecondary }]}>
         Резервацията е потвърдена и детайлите са готови за преглед.
       </Text>
-      <View style={styles.checkoutReceiptCard}>
-        <Text style={styles.checkoutReceiptKicker}>Потвърждение</Text>
-        <Text style={styles.checkoutReceiptLine}>
+      <View style={[styles.checkoutReceiptCard, { backgroundColor: colors.warningBackground, borderColor: colors.warningBorder }]}>
+        <Text style={[styles.checkoutReceiptKicker, { color: colors.warningText }]}>Потвърждение</Text>
+        <Text style={[styles.checkoutReceiptLine, { color: colors.warningText }]}>
           Дестинация: {bookingReceipt?.destination || destination || "-"}
         </Text>
-        <Text style={styles.checkoutReceiptLine}>
+        <Text style={[styles.checkoutReceiptLine, { color: colors.warningText }]}>
           Метод: {getPaymentMethodDisplayLabel(bookingReceipt?.paymentMethod || bookingForm.paymentMethod)}
         </Text>
-        <Text style={styles.checkoutReceiptLine}>Статус: Потвърдено</Text>
-        <Text style={styles.checkoutReceiptLine}>
-          Обработено на: {bookingReceipt?.processedAtLabel || formatProcessedAt(Date.now())}
+        <Text style={[styles.checkoutReceiptLine, { color: colors.warningText }]}>Статус: Потвърдено</Text>
+        <Text style={[styles.checkoutReceiptLine, { color: colors.warningText }]}>
+          Обработено на: {bookingReceipt?.processedAtLabel || formatProcessedAt(Date.now(), successLocale)}
         </Text>
-        <Text style={styles.checkoutReceiptLine}>
+        <Text style={[styles.checkoutReceiptLine, { color: colors.warningText }]}>
           Код за оторизация: {bookingReceipt?.authorizationCode || "A47K92"}
         </Text>
         {bookingReceipt?.selectedTransportLabel ? (
-          <Text style={styles.checkoutReceiptLine}>Транспорт: {bookingReceipt.selectedTransportLabel}</Text>
+          <Text style={[styles.checkoutReceiptLine, { color: colors.warningText }]}>Транспорт: {bookingReceipt.selectedTransportLabel}</Text>
         ) : null}
         {bookingReceipt?.selectedStayLabel ? (
-          <Text style={styles.checkoutReceiptLine}>Престой: {bookingReceipt.selectedStayLabel}</Text>
+          <Text style={[styles.checkoutReceiptLine, { color: colors.warningText }]}>Престой: {bookingReceipt.selectedStayLabel}</Text>
         ) : null}
-        <Text style={styles.checkoutReceiptTotal}>
+        <Text style={[styles.checkoutReceiptTotal, { color: colors.warningText }]}>
           Обща сума: {bookingReceipt?.totalLabel || bookingEstimateLabel}
         </Text>
-        <Text style={styles.checkoutReceiptRef}>
+        <Text style={[styles.checkoutReceiptRef, { color: colors.warningText }]}>
           Референция: {formatCheckoutReference(bookingReceipt?.paymentIntentId || "test-payment")}
         </Text>
       </View>
-      <TouchableOpacity style={styles.bookingPayButton} onPress={onClose} activeOpacity={0.9}>
-        <MaterialIcons name="done-all" size={18} color="#FFFFFF" />
-        <Text style={styles.bookingPayButtonText}>Затвори</Text>
+      <TouchableOpacity style={[styles.bookingPayButton, { backgroundColor: colors.hero }]} onPress={onClose} activeOpacity={0.9}>
+        <MaterialIcons name="done-all" size={18} color={colors.buttonTextOnAction} />
+        <Text style={[styles.bookingPayButtonText, { color: colors.buttonTextOnAction }]}>Затвори</Text>
       </TouchableOpacity>
     </View>
   );
@@ -256,6 +269,7 @@ function FormView({
   bookingEstimateLabel,
   bookingForm,
   bookingProcessing,
+  colors,
   latestPlan,
   onConfirm,
   onUpdateForm,
@@ -271,6 +285,7 @@ function FormView({
   bookingEstimateLabel: string;
   bookingForm: BookingForm;
   bookingProcessing: boolean;
+  colors: ThemeColors;
   latestPlan: NonNullable<StoredHomePlan>;
   onConfirm: () => void;
   onUpdateForm: (updater: (current: BookingForm) => BookingForm) => void;
@@ -286,16 +301,21 @@ function FormView({
     <>
       <View style={styles.bookingSection}>
         <View style={styles.bookingSectionHeader}>
-          <Text style={styles.bookingSectionTitle}>Транспорт</Text>
+          <Text style={[styles.bookingSectionTitle, { color: colors.textPrimary }]}>Транспорт</Text>
           <TouchableOpacity
-            style={[styles.bookingSkipChip, selectedTransportIndex === null && styles.bookingSkipChipSelected]}
+            style={[
+              styles.bookingSkipChip,
+              { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder },
+              selectedTransportIndex === null && { backgroundColor: colors.hero, borderColor: colors.hero },
+            ]}
             onPress={() => setSelectedTransportIndex(null)}
             activeOpacity={0.9}
           >
             <Text
               style={[
                 styles.bookingSkipChipText,
-                selectedTransportIndex === null && styles.bookingSkipChipTextSelected,
+                { color: colors.textPrimary },
+                selectedTransportIndex === null && { color: colors.buttonTextOnAction },
               ]}
             >
               Без билет
@@ -307,17 +327,21 @@ function FormView({
           return (
             <TouchableOpacity
               key={`${option.provider}-${index}`}
-              style={[styles.bookingOptionCard, isSelected && styles.bookingOptionCardSelected]}
+              style={[
+                styles.bookingOptionCard,
+                { backgroundColor: colors.card, borderColor: colors.border },
+                isSelected && { borderColor: colors.accent, backgroundColor: colors.inputBackground },
+              ]}
               onPress={() => setSelectedTransportIndex(index)}
               activeOpacity={0.9}
             >
               <View style={styles.bookingOptionTopRow}>
-                <Text style={styles.bookingOptionTitle}>{option.mode}</Text>
-                <Text style={styles.bookingOptionPrice}>{option.price}</Text>
+                <Text style={[styles.bookingOptionTitle, { color: colors.textPrimary }]}>{option.mode}</Text>
+                <Text style={[styles.bookingOptionPrice, { color: colors.warningText }]}>{option.price}</Text>
               </View>
-              <Text style={styles.bookingOptionMeta}>{option.provider}</Text>
-              <Text style={styles.bookingOptionMeta}>{option.route}</Text>
-              <Text style={styles.bookingOptionNote}>{option.note}</Text>
+              <Text style={[styles.bookingOptionMeta, { color: colors.textSecondary }]}>{option.provider}</Text>
+              <Text style={[styles.bookingOptionMeta, { color: colors.textSecondary }]}>{option.route}</Text>
+              <Text style={[styles.bookingOptionNote, { color: colors.textMuted }]}>{option.note}</Text>
             </TouchableOpacity>
           );
         })}
@@ -325,16 +349,21 @@ function FormView({
 
       <View style={styles.bookingSection}>
         <View style={styles.bookingSectionHeader}>
-          <Text style={styles.bookingSectionTitle}>Място за престой</Text>
+          <Text style={[styles.bookingSectionTitle, { color: colors.textPrimary }]}>Място за престой</Text>
           <TouchableOpacity
-            style={[styles.bookingSkipChip, selectedStayIndex === null && styles.bookingSkipChipSelected]}
+            style={[
+              styles.bookingSkipChip,
+              { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder },
+              selectedStayIndex === null && { backgroundColor: colors.hero, borderColor: colors.hero },
+            ]}
             onPress={() => setSelectedStayIndex(null)}
             activeOpacity={0.9}
           >
             <Text
               style={[
                 styles.bookingSkipChipText,
-                selectedStayIndex === null && styles.bookingSkipChipTextSelected,
+                { color: colors.textPrimary },
+                selectedStayIndex === null && { color: colors.buttonTextOnAction },
               ]}
             >
               Без хотел
@@ -346,43 +375,47 @@ function FormView({
           return (
             <TouchableOpacity
               key={`${stay.name}-${index}`}
-              style={[styles.bookingOptionCard, isSelected && styles.bookingOptionCardSelected]}
+              style={[
+                styles.bookingOptionCard,
+                { backgroundColor: colors.card, borderColor: colors.border },
+                isSelected && { borderColor: colors.accent, backgroundColor: colors.inputBackground },
+              ]}
               onPress={() => setSelectedStayIndex(index)}
               activeOpacity={0.9}
             >
               <View style={styles.bookingOptionTopRow}>
-                <Text style={styles.bookingOptionTitle}>{stay.name}</Text>
-                <Text style={styles.bookingOptionPrice}>{stay.pricePerNight}</Text>
+                <Text style={[styles.bookingOptionTitle, { color: colors.textPrimary }]}>{stay.name}</Text>
+                <Text style={[styles.bookingOptionPrice, { color: colors.warningText }]}>{stay.pricePerNight}</Text>
               </View>
-              <Text style={styles.bookingOptionMeta}>{stay.type} • {stay.area}</Text>
-              <Text style={styles.bookingOptionNote}>{stay.note}</Text>
+              <Text style={[styles.bookingOptionMeta, { color: colors.textSecondary }]}>{stay.type} • {stay.area}</Text>
+              <Text style={[styles.bookingOptionNote, { color: colors.textMuted }]}>{stay.note}</Text>
             </TouchableOpacity>
           );
         })}
       </View>
 
       <View style={styles.bookingSection}>
-        <Text style={styles.bookingSectionTitle}>Данни за резервацията</Text>
+        <Text style={[styles.bookingSectionTitle, { color: colors.textPrimary }]}>Данни за резервацията</Text>
         <TextInput
-          style={styles.bookingInput}
+          style={[styles.bookingInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.textPrimary }]}
           placeholder="Име за резервацията"
-          placeholderTextColor="#9CA3AF"
+          placeholderTextColor={colors.textMuted}
           value={bookingForm.contactName}
           onChangeText={(value) => onUpdateForm((c) => ({ ...c, contactName: value }))}
         />
         <TextInput
-          style={styles.bookingInput}
+          style={[styles.bookingInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.textPrimary }]}
           placeholder="Email за потвърждение"
-          placeholderTextColor="#9CA3AF"
+          placeholderTextColor={colors.textMuted}
           keyboardType="email-address"
           autoCapitalize="none"
           value={bookingForm.contactEmail}
           onChangeText={(value) => onUpdateForm((c) => ({ ...c, contactEmail: value }))}
         />
         <TextInput
-          style={[styles.bookingInput, styles.bookingNoteInput]}
+          style={[styles.bookingInput, styles.bookingNoteInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.textPrimary }]}
           placeholder="Бележка по желание"
-          placeholderTextColor="#9CA3AF"
+          placeholderTextColor={colors.textMuted}
           value={bookingForm.note}
           onChangeText={(value) => onUpdateForm((c) => ({ ...c, note: value }))}
           multiline
@@ -390,21 +423,26 @@ function FormView({
       </View>
 
       <View style={styles.bookingSection}>
-        <Text style={styles.bookingSectionTitle}>Метод на плащане</Text>
+        <Text style={[styles.bookingSectionTitle, { color: colors.textPrimary }]}>Метод на плащане</Text>
         <View style={styles.paymentMethodsRow}>
           {paymentMethods.map((method) => {
             const isSelected = bookingForm.paymentMethod === method;
             return (
               <TouchableOpacity
                 key={method}
-                style={[styles.paymentMethodChip, isSelected && styles.paymentMethodChipSelected]}
+                style={[
+                  styles.paymentMethodChip,
+                  { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder },
+                  isSelected && { backgroundColor: colors.accent, borderColor: colors.accent },
+                ]}
                 onPress={() => onUpdateForm((c) => ({ ...c, paymentMethod: method }))}
                 activeOpacity={0.9}
               >
                 <Text
                   style={[
                     styles.paymentMethodChipText,
-                    isSelected && styles.paymentMethodChipTextSelected,
+                    { color: colors.textPrimary },
+                    isSelected && { color: colors.buttonTextOnAction },
                   ]}
                 >
                   {method}
@@ -415,40 +453,40 @@ function FormView({
         </View>
       </View>
 
-      <View style={styles.bookingSummaryCard}>
-        <Text style={styles.bookingSummaryTitle}>Обобщение</Text>
-        <Text style={styles.bookingSummaryLine}>
+      <View style={[styles.bookingSummaryCard, { backgroundColor: colors.warningBackground, borderColor: colors.warningBorder }]}>
+        <Text style={[styles.bookingSummaryTitle, { color: colors.warningText }]}>Обобщение</Text>
+        <Text style={[styles.bookingSummaryLine, { color: colors.warningText }]}>
           {latestPlan?.destination || "Дестинация"} • {latestPlan?.days || "Пътуване"}
         </Text>
-        <Text style={styles.bookingSummaryLine}>
+        <Text style={[styles.bookingSummaryLine, { color: colors.warningText }]}>
           {latestPlan?.travelers || "Пътници"} • {latestPlan?.timing || "Период"}
         </Text>
         {selectedTransport ? (
-          <Text style={styles.bookingSummaryLine}>
+          <Text style={[styles.bookingSummaryLine, { color: colors.warningText }]}>
             Транспорт: {selectedTransport.mode} • {selectedTransport.price}
           </Text>
         ) : null}
         {selectedStay ? (
-          <Text style={styles.bookingSummaryLine}>
+          <Text style={[styles.bookingSummaryLine, { color: colors.warningText }]}>
             Престой: {selectedStay.name} • {selectedStay.pricePerNight}
           </Text>
         ) : null}
-        <Text style={styles.bookingSummaryTotal}>{bookingEstimateLabel}</Text>
-        <Text style={styles.bookingSummaryHint}>
+        <Text style={[styles.bookingSummaryTotal, { color: colors.warningText }]}>{bookingEstimateLabel}</Text>
+        <Text style={[styles.bookingSummaryHint, { color: colors.warningText }]}>
           Сумата е изчислена спрямо избрания транспорт и мястото за престой.
         </Text>
       </View>
 
-      {bookingError ? <Text style={styles.bookingErrorText}>{bookingError}</Text> : null}
+      {bookingError ? <Text style={[styles.bookingErrorText, { color: colors.errorText }]}>{bookingError}</Text> : null}
 
       <TouchableOpacity
-        style={[styles.bookingPayButton, bookingProcessing && styles.disabledButton]}
+        style={[styles.bookingPayButton, { backgroundColor: colors.hero }, bookingProcessing && styles.disabledButton]}
         onPress={onConfirm}
         disabled={bookingProcessing}
         activeOpacity={0.9}
       >
-        <MaterialIcons name="lock" size={18} color="#FFFFFF" />
-        <Text style={styles.bookingPayButtonText}>
+        <MaterialIcons name="lock" size={18} color={colors.buttonTextOnAction} />
+        <Text style={[styles.bookingPayButtonText, { color: colors.buttonTextOnAction }]}>
           {bookingProcessing ? "Обработваме..." : "Плати и потвърди"}
         </Text>
       </TouchableOpacity>
@@ -485,7 +523,6 @@ const styles = StyleSheet.create({
     paddingRight: Spacing.md,
   },
   bookingModalKicker: {
-    color: "#2D6A4F",
     ...TypeScale.labelLg,
     fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
@@ -493,20 +530,17 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   bookingModalTitle: {
-    color: "#1A1A1A",
     ...TypeScale.headingLg,
     fontWeight: FontWeight.extrabold,
     marginBottom: Spacing.sm,
   },
   bookingModalSubtitle: {
-    color: "#6B7280",
     ...TypeScale.bodyMd,
   },
   bookingCloseButton: {
     width: 36,
     height: 36,
     borderRadius: Radius.md,
-    backgroundColor: "#F5F5F5",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -520,41 +554,24 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   bookingSectionTitle: {
-    color: "#1A1A1A",
     ...TypeScale.titleSm,
     fontWeight: FontWeight.extrabold,
   },
   bookingSkipChip: {
-    backgroundColor: "#F5F5F5",
     borderRadius: Radius.full,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderWidth: 1,
-    borderColor: "#E0E0E0",
-  },
-  bookingSkipChipSelected: {
-    backgroundColor: "#1A1A1A",
-    borderColor: "#1A1A1A",
   },
   bookingSkipChipText: {
-    color: "#1A1A1A",
     ...TypeScale.labelLg,
     fontWeight: FontWeight.extrabold,
   },
-  bookingSkipChipTextSelected: {
-    color: "#FFFFFF",
-  },
   bookingOptionCard: {
-    backgroundColor: "#FFFFFF",
     borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: "#E8E8E8",
     padding: Spacing.md,
     marginBottom: Spacing.sm,
-  },
-  bookingOptionCardSelected: {
-    borderColor: "#2D6A4F",
-    backgroundColor: "#F5F5F5",
   },
   bookingOptionTopRow: {
     flexDirection: "row",
@@ -563,34 +580,27 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   bookingOptionTitle: {
-    color: "#1A1A1A",
     ...TypeScale.titleSm,
     fontWeight: FontWeight.extrabold,
     flex: 1,
     paddingRight: Spacing.sm,
   },
   bookingOptionPrice: {
-    color: "#92400E",
     ...TypeScale.bodyMd,
     fontWeight: FontWeight.extrabold,
   },
   bookingOptionMeta: {
-    color: "#6B7280",
     ...TypeScale.bodySm,
     marginBottom: Spacing.xs,
   },
   bookingOptionNote: {
-    color: "#9CA3AF",
     ...TypeScale.bodySm,
   },
   bookingInput: {
-    backgroundColor: "#FFFFFF",
     borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: "#E8E8E8",
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,
-    color: "#1A1A1A",
     ...TypeScale.bodyMd,
     marginBottom: Spacing.sm,
   },
@@ -603,65 +613,47 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
   },
   paymentMethodChip: {
-    backgroundColor: "#F5F5F5",
     borderRadius: Radius.full,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     marginRight: Spacing.sm,
     marginBottom: Spacing.sm,
     borderWidth: 1,
-    borderColor: "#E0E0E0",
-  },
-  paymentMethodChipSelected: {
-    backgroundColor: "#2D6A4F",
-    borderColor: "#2D6A4F",
   },
   paymentMethodChipText: {
-    color: "#1A1A1A",
     ...TypeScale.bodySm,
     fontWeight: FontWeight.bold,
   },
-  paymentMethodChipTextSelected: {
-    color: "#FFFFFF",
-  },
   bookingSummaryCard: {
-    backgroundColor: "#FFFBEB",
     borderRadius: Radius.xl,
     padding: Spacing.lg,
     borderWidth: 1,
-    borderColor: "#FCD34D",
     marginBottom: Spacing.lg,
   },
   bookingSummaryTitle: {
-    color: "#92400E",
     ...TypeScale.titleSm,
     fontWeight: FontWeight.extrabold,
     marginBottom: Spacing.sm,
   },
   bookingSummaryLine: {
-    color: "#92400E",
     ...TypeScale.bodyMd,
     marginBottom: Spacing.xs,
   },
   bookingSummaryTotal: {
-    color: "#78350F",
     ...TypeScale.headingLg,
     fontWeight: FontWeight.extrabold,
     marginTop: Spacing.sm,
     marginBottom: Spacing.xs,
   },
   bookingSummaryHint: {
-    color: "#B45309",
     ...TypeScale.labelMd,
   },
   bookingErrorText: {
-    color: "#DC3545",
     ...TypeScale.bodyMd,
     fontWeight: FontWeight.bold,
     marginBottom: Spacing.sm,
   },
   bookingPayButton: {
-    backgroundColor: "#1A1A1A",
     borderRadius: Radius.lg,
     paddingVertical: Spacing.lg,
     alignItems: "center",
@@ -669,7 +661,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
   },
   bookingPayButtonText: {
-    color: "#FFFFFF",
     ...TypeScale.titleSm,
     fontWeight: FontWeight.extrabold,
     marginLeft: Spacing.sm,
@@ -678,31 +669,26 @@ const styles = StyleSheet.create({
     opacity: 0.55,
   },
   checkoutProcessingCard: {
-    backgroundColor: "#F8F8F8",
     borderRadius: Radius["2xl"],
     borderWidth: 1,
-    borderColor: "#E8E8E8",
     padding: Spacing.xl,
   },
   checkoutProcessingIcon: {
     width: 72,
     height: 72,
     borderRadius: Radius["2xl"],
-    backgroundColor: "#E5E7EB",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: Spacing.lg,
     alignSelf: "center",
   },
   checkoutProcessingTitle: {
-    color: "#1A1A1A",
     ...TypeScale.headingMd,
     fontWeight: FontWeight.extrabold,
     textAlign: "center",
     marginBottom: Spacing.sm,
   },
   checkoutProcessingSubtitle: {
-    color: "#6B7280",
     ...TypeScale.bodyMd,
     textAlign: "center",
     marginBottom: Spacing.lg,
@@ -710,33 +696,26 @@ const styles = StyleSheet.create({
   checkoutProgressTrack: {
     height: Spacing.md,
     borderRadius: Radius.full,
-    backgroundColor: "#E5E7EB",
     overflow: "hidden",
     marginBottom: Spacing.lg,
   },
   checkoutProgressFill: {
     height: "100%",
     borderRadius: Radius.full,
-    backgroundColor: "#2D6A4F",
   },
   checkoutProcessingSteps: {
-    backgroundColor: "#FFFFFF",
     borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: "#E8E8E8",
     padding: Spacing.md,
     marginBottom: Spacing.lg,
   },
   checkoutProcessingStep: {
-    color: "#6B7280",
     ...TypeScale.bodyMd,
     marginBottom: Spacing.xs,
   },
   checkoutSuccessCard: {
-    backgroundColor: "#F8F8F8",
     borderRadius: Radius["2xl"],
     borderWidth: 1,
-    borderColor: "#E8E8E8",
     padding: Spacing.xl,
     alignItems: "center",
   },
@@ -744,35 +723,29 @@ const styles = StyleSheet.create({
     width: 74,
     height: 74,
     borderRadius: Radius["2xl"],
-    backgroundColor: "#2D6A4F",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: Spacing.lg,
   },
   checkoutSuccessTitle: {
-    color: "#1A1A1A",
     ...TypeScale.headingLg,
     fontWeight: FontWeight.extrabold,
     textAlign: "center",
     marginBottom: Spacing.sm,
   },
   checkoutSuccessSubtitle: {
-    color: "#6B7280",
     ...TypeScale.bodyMd,
     textAlign: "center",
     marginBottom: Spacing.lg,
   },
   checkoutReceiptCard: {
     width: "100%",
-    backgroundColor: "#FFFBEB",
     borderRadius: Radius.xl,
     padding: Spacing.lg,
     borderWidth: 1,
-    borderColor: "#FCD34D",
     marginBottom: Spacing.lg,
   },
   checkoutReceiptKicker: {
-    color: "#92400E",
     ...TypeScale.labelLg,
     fontWeight: FontWeight.extrabold,
     textTransform: "uppercase",
@@ -780,19 +753,16 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   checkoutReceiptLine: {
-    color: "#78350F",
     ...TypeScale.bodyMd,
     marginBottom: Spacing.xs,
   },
   checkoutReceiptTotal: {
-    color: "#78350F",
     ...TypeScale.headingLg,
     fontWeight: FontWeight.extrabold,
     marginTop: Spacing.xs,
     marginBottom: Spacing.sm,
   },
   checkoutReceiptRef: {
-    color: "#B45309",
     ...TypeScale.labelMd,
   },
 });

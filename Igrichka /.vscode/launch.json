@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "/Users/martindomoustchiev/HT12-CareTrip/Igrichka ",
+      "program": "/Users/martindomoustchiev/HT12-CareTrip/Igrichka /build/Debug/outDebug"
+    }
+  ]
+}

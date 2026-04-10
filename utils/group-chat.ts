@@ -1,4 +1,6 @@
 import { type SavedTrip } from "./saved-trips";
+import { type PlannerDayPlan } from "./home-travel-planner";
+import { sanitizeString, sanitizeStringArray, toMillis } from "./sanitize";
 
 export type GroupChatLinkedTransport = {
   amountLabel: string;
@@ -17,11 +19,14 @@ export type GroupChatSharedTrip = {
   destination: string;
   details: string;
   duration: string | null;
+  latitude: number | null;
   linkedTransports: GroupChatLinkedTransport[];
+  longitude: number | null;
   source: "discover" | "home";
   sourceKey: string;
   summary: string;
   title: string;
+  tripDays: PlannerDayPlan[];
 };
 
 export type GroupChatExpense = {
@@ -38,11 +43,17 @@ export type GroupChatExpense = {
   title: string;
 };
 
+export type GroupChatPhoto = {
+  caption: string;
+  imageUri: string;
+};
+
 export type GroupChatMessage = {
   createdAtMs: number | null;
   expense: GroupChatExpense | null;
   id: string;
-  messageType: "expense" | "text" | "shared-trip";
+  messageType: "expense" | "photo" | "text" | "shared-trip";
+  photo: GroupChatPhoto | null;
   senderAvatarUrl: string;
   senderId: string;
   senderLabel: string;
@@ -50,39 +61,28 @@ export type GroupChatMessage = {
   text: string;
 };
 
-function sanitizeString(value: unknown, fallback = "") {
-  return typeof value === "string" ? value.trim() : fallback;
+function sanitizeNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function sanitizeStringArray(value: unknown) {
+function parseTripDays(value: unknown) {
   if (!Array.isArray(value)) {
     return [];
   }
 
   return value
-    .map((entry) => sanitizeString(entry))
-    .filter(Boolean);
-}
-
-function sanitizeNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function toMillis(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (
-    value &&
-    typeof value === "object" &&
-    "toMillis" in value &&
-    typeof value.toMillis === "function"
-  ) {
-    return value.toMillis();
-  }
-
-  return null;
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
+    .map((item, index): PlannerDayPlan => ({
+      dayLabel: sanitizeString(item.dayLabel, `Day ${index + 1}`),
+      items: Array.isArray(item.items)
+        ? item.items
+            .map((entry) => sanitizeString(entry))
+            .filter(Boolean)
+            .slice(0, 8)
+        : [],
+      title: sanitizeString(item.title, `Day ${index + 1}`),
+    }))
+    .filter((day) => day.title || day.items.length > 0);
 }
 
 function formatExpenseAmountLabel(amountValue: number) {
@@ -152,11 +152,14 @@ function parseSharedTrip(value: unknown): GroupChatSharedTrip | null {
     destination,
     details,
     duration: sanitizeString(data.duration) || null,
+    latitude: sanitizeNumber(data.latitude),
     linkedTransports: parseLinkedTransports(data.linkedTransports),
+    longitude: sanitizeNumber(data.longitude),
     source,
     sourceKey: sanitizeString(data.sourceKey),
     summary: sanitizeString(data.summary),
     title,
+    tripDays: parseTripDays(data.tripDays),
   };
 }
 
@@ -195,6 +198,24 @@ function parseExpense(value: unknown): GroupChatExpense | null {
   };
 }
 
+function parsePhoto(value: unknown): GroupChatPhoto | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const data = value as Record<string, unknown>;
+  const imageUri = sanitizeString(data.imageUri);
+
+  if (!imageUri) {
+    return null;
+  }
+
+  return {
+    caption: sanitizeString(data.caption),
+    imageUri,
+  };
+}
+
 export function buildGroupChatSharedTrip(
   trip: SavedTrip,
   options?: {
@@ -206,11 +227,14 @@ export function buildGroupChatSharedTrip(
     destination: trip.destination,
     details: trip.details,
     duration: trip.duration,
+    latitude: trip.latitude,
     linkedTransports: options?.linkedTransports?.slice(0, 4) ?? [],
+    longitude: trip.longitude,
     source: trip.source,
     sourceKey: trip.sourceKey,
     summary: trip.summary,
     title: trip.title,
+    tripDays: trip.tripDays,
   };
 }
 
@@ -246,12 +270,15 @@ export function parseGroupChatMessage(
 ): GroupChatMessage {
   const sharedTrip = parseSharedTrip(data?.sharedTrip);
   const expense = parseExpense(data?.expense);
+  const photo = parsePhoto(data?.photo);
   let messageType: GroupChatMessage["messageType"] = "text";
 
   if (data?.messageType === "shared-trip" && sharedTrip) {
     messageType = "shared-trip";
   } else if (data?.messageType === "expense" && expense) {
     messageType = "expense";
+  } else if (data?.messageType === "photo" && photo) {
+    messageType = "photo";
   }
 
   return {
@@ -259,6 +286,7 @@ export function parseGroupChatMessage(
     expense,
     id,
     messageType,
+    photo,
     senderAvatarUrl: sanitizeString(data?.senderAvatarUrl),
     senderId: sanitizeString(data?.senderId),
     senderLabel: sanitizeString(data?.senderLabel, "Traveler"),

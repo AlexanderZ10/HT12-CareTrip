@@ -55,6 +55,8 @@ import {
   translateOnboardingOption,
   type AppLanguage,
 } from "../../utils/translations";
+import { getCitiesForCountry } from "../../utils/cities";
+import { getCountriesSorted, getCountryName, type Country } from "../../utils/countries";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
 import {
   extractPersonalProfile,
@@ -131,7 +133,13 @@ export default function ProfileTabScreen() {
   const [sendingReset, setSendingReset] = useState(false);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const [avatarSheetVisible, setAvatarSheetVisible] = useState(false);
+  const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
   const [languageMenuVisible, setLanguageMenuVisible] = useState(false);
+  const [countryPickerVisible, setCountryPickerVisible] = useState(false);
+  const [countrySearch, setCountrySearch] = useState("");
+  const [citySearch, setCitySearch] = useState("");
+  const [pickerStep, setPickerStep] = useState<"country" | "city">("country");
+  const [selectedCountryCode, setSelectedCountryCode] = useState("");
   const [floatingNotice, setFloatingNotice] = useState<FloatingNotice | null>(null);
   const [onboardingSummary, setOnboardingSummary] = useState<{
     assistance: string[];
@@ -252,6 +260,58 @@ export default function ProfileTabScreen() {
     },
     [dismissNotice]
   );
+
+  const sortedCountries = useMemo(() => getCountriesSorted(language), [language]);
+  const filteredCountries = useMemo(() => {
+    const q = countrySearch.trim().toLowerCase();
+    if (!q) return sortedCountries;
+    return sortedCountries.filter((c) =>
+      getCountryName(c, language).toLowerCase().includes(q)
+    );
+  }, [countrySearch, language, sortedCountries]);
+
+  const citiesForSelected = useMemo(
+    () => getCitiesForCountry(selectedCountryCode),
+    [selectedCountryCode]
+  );
+  const filteredCities = useMemo(() => {
+    const q = citySearch.trim().toLowerCase();
+    if (!q) return citiesForSelected;
+    return citiesForSelected.filter((c) =>
+      c.name.toLowerCase().includes(q)
+    );
+  }, [citySearch, citiesForSelected]);
+
+  const homeBaseParts = form.homeBase.split(", ");
+  const homeBaseCity = homeBaseParts.length >= 2 ? homeBaseParts[0] : "";
+  const homeBaseCountry = homeBaseParts.length >= 2 ? homeBaseParts.slice(1).join(", ") : form.homeBase;
+
+  const handleSelectCountry = (country: Country) => {
+    const countryName = getCountryName(country, language);
+    updateField("homeBase", countryName);
+    setCountrySearch("");
+    setSelectedCountryCode(country.code);
+    setPickerStep("city");
+  };
+
+  const handleSelectCity = (cityName: string) => {
+    if (homeBaseCountry) {
+      updateField("homeBase", `${cityName}, ${homeBaseCountry}`);
+    }
+    setCountryPickerVisible(false);
+    setPickerStep("country");
+    setSelectedCountryCode("");
+    setCitySearch("");
+    setCountrySearch("");
+  };
+
+  const closeHomeBasePicker = () => {
+    setCountryPickerVisible(false);
+    setPickerStep("country");
+    setSelectedCountryCode("");
+    setCitySearch("");
+    setCountrySearch("");
+  };
 
   // ── Save button press ──────────────────────────────────────────────────
   const saveBtnScale = useSharedValue(1);
@@ -748,6 +808,16 @@ export default function ProfileTabScreen() {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
+        {/* ── Instagram-style top bar: brand title + settings menu ── */}
+        <View style={staticStyles.topBar}>
+          <Text style={[staticStyles.brandTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+            {t("tab.profile")}
+          </Text>
+          <TouchableOpacity accessibilityLabel="Settings menu" activeOpacity={0.7} onPress={() => setSettingsMenuVisible(true)} style={staticStyles.topBarIconButton}>
+            <MaterialIcons name="menu" size={28} color={colors.textPrimary} />
+          </TouchableOpacity>
+        </View>
+
         {/* ───────── 1. Avatar + identity ───────── */}
         <Animated.View style={[staticStyles.profileHeader, avatarAnimStyle]}>
           <Pressable
@@ -907,20 +977,28 @@ export default function ProfileTabScreen() {
             <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>
               {t("profile.homeBase")}
             </Text>
-            <TextInput
+            <Pressable
               style={[
                 staticStyles.input,
+                staticStyles.homeBaseSelector,
                 {
                   backgroundColor: colors.inputBackground,
                   borderColor: colors.inputBorder,
-                  color: colors.textPrimary,
                 },
               ]}
-              placeholder={t("profile.cityPlaceholder")}
-              placeholderTextColor={colors.inputPlaceholder}
-              value={form.homeBase}
-              onChangeText={(v) => updateField("homeBase", v)}
-            />
+              onPress={() => setCountryPickerVisible(true)}
+            >
+              <Text
+                style={[
+                  staticStyles.homeBaseSelectorText,
+                  { color: form.homeBase ? colors.textPrimary : colors.inputPlaceholder },
+                ]}
+                numberOfLines={1}
+              >
+                {form.homeBase || t("profile.selectCountry")}
+              </Text>
+              <MaterialIcons name="expand-more" size={20} color={colors.textMuted} />
+            </Pressable>
 
             <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>
               {t("profile.travelPace")}
@@ -1175,6 +1253,247 @@ export default function ProfileTabScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* ───────── Home base picker (country → city) ───────── */}
+      <Modal
+        animationType="none"
+        transparent
+        visible={countryPickerVisible}
+        onRequestClose={closeHomeBasePicker}
+      >
+        <Pressable
+          style={[staticStyles.modalOverlay, { backgroundColor: colors.modalOverlay }]}
+          onPress={closeHomeBasePicker}
+        >
+          <Pressable
+            style={[
+              staticStyles.countryPickerSheet,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={staticStyles.countryPickerHeader}>
+              <Text style={[staticStyles.countryPickerTitle, { color: colors.textPrimary }]}>
+                {pickerStep === "country" ? t("profile.selectCountry") : t("profile.enterCity")}
+              </Text>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={closeHomeBasePicker}
+                style={[
+                  staticStyles.countryPickerCloseButton,
+                  { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder },
+                ]}
+              >
+                <MaterialIcons name="close" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {pickerStep === "country" ? (
+              <>
+                <TextInput
+                  style={[
+                    staticStyles.countrySearchInput,
+                    {
+                      backgroundColor: colors.inputBackground,
+                      borderColor: colors.inputBorder,
+                      color: colors.textPrimary,
+                    },
+                  ]}
+                  placeholder={t("profile.searchCountry")}
+                  placeholderTextColor={colors.inputPlaceholder}
+                  value={countrySearch}
+                  onChangeText={setCountrySearch}
+                  autoFocus
+                />
+                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                  {filteredCountries.map((country) => {
+                    const name = getCountryName(country, language);
+                    const isSelected = homeBaseCountry === name;
+                    return (
+                      <Pressable
+                        key={country.code}
+                        style={[
+                          staticStyles.countryItem,
+                          isSelected && { backgroundColor: colors.accentMuted },
+                        ]}
+                        onPress={() => handleSelectCountry(country)}
+                      >
+                        <Text
+                          style={[
+                            staticStyles.countryItemText,
+                            { color: isSelected ? colors.accent : colors.textPrimary },
+                            isSelected && { fontWeight: FontWeight.semibold },
+                          ]}
+                        >
+                          {name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </>
+            ) : (
+              <>
+                <Pressable
+                  style={[staticStyles.countryItem, { backgroundColor: colors.accentMuted }]}
+                  onPress={() => {
+                    setPickerStep("country");
+                    setCitySearch("");
+                  }}
+                >
+                  <Text style={[staticStyles.countryItemText, { color: colors.accent, fontWeight: FontWeight.semibold }]}>
+                    ← {homeBaseCountry}
+                  </Text>
+                </Pressable>
+                <TextInput
+                  style={[
+                    staticStyles.countrySearchInput,
+                    {
+                      backgroundColor: colors.inputBackground,
+                      borderColor: colors.inputBorder,
+                      color: colors.textPrimary,
+                    },
+                  ]}
+                  placeholder={t("profile.searchCountry")}
+                  placeholderTextColor={colors.inputPlaceholder}
+                  value={citySearch}
+                  onChangeText={setCitySearch}
+                  autoFocus
+                />
+                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                  {filteredCities.map((city) => {
+                    const name = city.name;
+                    const isSelected = homeBaseCity === name;
+                    return (
+                      <Pressable
+                        key={name}
+                        style={[
+                          staticStyles.countryItem,
+                          isSelected && { backgroundColor: colors.accentMuted },
+                        ]}
+                        onPress={() => handleSelectCity(name)}
+                      >
+                        <Text
+                          style={[
+                            staticStyles.countryItemText,
+                            { color: isSelected ? colors.accent : colors.textPrimary },
+                            isSelected && { fontWeight: FontWeight.semibold },
+                          ]}
+                        >
+                          {name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ───────── Settings menu (bottom-right panel) ───────── */}
+      <Modal
+        animationType="fade"
+        transparent
+        visible={settingsMenuVisible}
+        onRequestClose={() => setSettingsMenuVisible(false)}
+      >
+        <View style={[staticStyles.settingsBackdrop, { backgroundColor: colors.modalOverlay }]}>
+          <Pressable style={staticStyles.settingsDismissArea} onPress={() => setSettingsMenuVisible(false)} />
+          <View
+            style={[
+              staticStyles.settingsCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                paddingBottom: insets.bottom + Spacing.lg,
+              },
+            ]}
+          >
+            <View style={staticStyles.settingsHeader}>
+              <View>
+                <Text style={[staticStyles.settingsTitle, { color: colors.textPrimary }]}>
+                  {t("profile.account")}
+                </Text>
+                <Text style={[staticStyles.settingsSubtitle, { color: colors.textSecondary }]}>
+                  {email}
+                </Text>
+              </View>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setSettingsMenuVisible(false)}
+                style={[staticStyles.settingsCloseBtn, { backgroundColor: colors.cardAlt }]}
+              >
+                <MaterialIcons name="close" size={22} color={colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => {
+                setSettingsMenuVisible(false);
+                router.push("/onboarding");
+              }}
+              style={[staticStyles.settingsRow, { borderColor: colors.border }]}
+            >
+              <View style={[staticStyles.settingsRowIcon, { backgroundColor: colors.accentMuted }]}>
+                <MaterialIcons name="tune" size={20} color={colors.accent} />
+              </View>
+              <View style={staticStyles.settingsRowTextWrap}>
+                <Text style={[staticStyles.settingsRowLabel, { color: colors.textPrimary }]}>
+                  {t("profile.editPreferences")}
+                </Text>
+                <Text style={[staticStyles.settingsRowHint, { color: colors.textSecondary }]}>
+                  Travel style, interests, skills
+                </Text>
+              </View>
+              <MaterialIcons name="chevron-right" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              disabled={sendingReset}
+              onPress={() => {
+                setSettingsMenuVisible(false);
+                void handleResetPassword();
+              }}
+              style={[staticStyles.settingsRow, { borderColor: colors.border }]}
+            >
+              <View style={[staticStyles.settingsRowIcon, { backgroundColor: colors.inputBackground }]}>
+                <MaterialIcons name="lock-reset" size={20} color={colors.textPrimary} />
+              </View>
+              <View style={staticStyles.settingsRowTextWrap}>
+                <Text style={[staticStyles.settingsRowLabel, { color: colors.textPrimary }]}>
+                  {t("profile.changePassword")}
+                </Text>
+                <Text style={[staticStyles.settingsRowHint, { color: colors.textSecondary }]}>
+                  Send a reset email
+                </Text>
+              </View>
+              <MaterialIcons name="chevron-right" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => {
+                setSettingsMenuVisible(false);
+                void handleLogout();
+              }}
+              style={[staticStyles.settingsRow, { borderColor: "transparent" }]}
+            >
+              <View style={[staticStyles.settingsRowIcon, { backgroundColor: colors.errorBackground }]}>
+                <MaterialIcons name="logout" size={20} color={colors.error} />
+              </View>
+              <View style={staticStyles.settingsRowTextWrap}>
+                <Text style={[staticStyles.settingsRowLabel, { color: colors.error }]}>
+                  {t("profile.signOut")}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1195,7 +1514,23 @@ const staticStyles = StyleSheet.create({
     maxWidth: 600,
     alignSelf: "center",
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.lg,
+    paddingTop: Spacing.sm,
+  },
+  // ── Instagram-style top bar ──
+  topBar: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: Spacing.md,
+    minHeight: 48,
+  },
+  brandTitle: {
+    fontSize: 28,
+    fontWeight: FontWeight.black,
+    letterSpacing: 0.3,
+  },
+  topBarIconButton: {
+    padding: 4,
   },
   profileHeader: {
     alignItems: "center",
@@ -1300,7 +1635,6 @@ const staticStyles = StyleSheet.create({
   footer: {
     height: Spacing["4xl"],
   },
-
   // Banner
   banner: {
     flexDirection: "row",
@@ -1436,5 +1770,118 @@ const staticStyles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.sm,
+  },
+  homeBaseSelector: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  homeBaseSelectorText: {
+    flex: 1,
+    ...TypeScale.bodyMd,
+  },
+  countryPickerSheet: {
+    borderRadius: Radius.xl,
+    padding: Spacing.lg,
+    maxHeight: "80%",
+    width: "92%",
+    alignSelf: "center",
+  },
+  countryPickerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: Spacing.md,
+  },
+  countryPickerTitle: {
+    ...TypeScale.titleLg,
+    fontWeight: FontWeight.bold,
+  },
+  countryPickerCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  countrySearchInput: {
+    borderWidth: 1,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginBottom: Spacing.md,
+    ...TypeScale.bodyMd,
+  },
+  countryItem: {
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: Radius.sm,
+    marginBottom: 2,
+  },
+  countryItemText: {
+    ...TypeScale.bodyMd,
+  },
+  // ── Settings menu (bottom-right panel) ──
+  settingsBackdrop: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  settingsDismissArea: {
+    flex: 1,
+  },
+  settingsCard: {
+    borderTopLeftRadius: Radius["3xl"],
+    borderTopRightRadius: Radius["3xl"],
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    padding: Spacing.lg,
+    ...shadow("xl"),
+  },
+  settingsHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: Spacing.lg,
+  },
+  settingsTitle: {
+    ...TypeScale.headingMd,
+    fontWeight: FontWeight.extrabold,
+  },
+  settingsSubtitle: {
+    ...TypeScale.bodySm,
+    marginTop: Spacing.xs,
+  },
+  settingsCloseBtn: {
+    alignItems: "center",
+    borderRadius: Radius.full,
+    height: 38,
+    justifyContent: "center",
+    width: 38,
+  },
+  settingsRow: {
+    alignItems: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: Spacing.md,
+    paddingVertical: Spacing.md,
+  },
+  settingsRowIcon: {
+    alignItems: "center",
+    borderRadius: Radius.lg,
+    height: 40,
+    justifyContent: "center",
+    width: 40,
+  },
+  settingsRowTextWrap: {
+    flex: 1,
+  },
+  settingsRowLabel: {
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.bold,
+  },
+  settingsRowHint: {
+    ...TypeScale.bodySm,
+    marginTop: 2,
   },
 });

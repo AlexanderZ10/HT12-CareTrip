@@ -48,11 +48,13 @@ export function DeleteGroupModal({
       visible={visible}
     >
       <View style={[styles.modalBackdrop, { backgroundColor: colors.modalOverlay }]}>
-        <View style={styles.joinKeyModalSheet}>
+        <View style={[styles.joinKeyModalSheet, { backgroundColor: colors.card }]}>
           <View style={styles.modalHeader}>
             <View>
-              <Text style={styles.modalTitle}>Delete group</Text>
-              <Text style={styles.modalSubtitle}>
+              <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+                Delete group
+              </Text>
+              <Text style={[styles.modalSubtitle, { color: colors.textSecondary }]}>
                 Only the creator can remove an outdated group for everyone.
               </Text>
             </View>
@@ -60,15 +62,25 @@ export function DeleteGroupModal({
               activeOpacity={0.9}
               disabled={deleting}
               onPress={onClose}
-              style={styles.modalClose}
+              style={[styles.modalClose, { backgroundColor: colors.inputBackground }]}
             >
-              <MaterialIcons color="#374151" name="close" size={22} />
+              <MaterialIcons color={colors.textSecondary} name="close" size={22} />
             </TouchableOpacity>
           </View>
 
-          <View style={styles.deleteSummaryCard}>
-            <Text style={styles.deleteSummaryTitle}>{group?.name ?? "Group"}</Text>
-            <Text style={styles.deleteSummaryText}>
+          <View
+            style={[
+              styles.deleteSummaryCard,
+              {
+                backgroundColor: colors.errorBackground,
+                borderColor: colors.errorBorder,
+              },
+            ]}
+          >
+            <Text style={[styles.deleteSummaryTitle, { color: colors.errorText }]}>
+              {group?.name ?? "Group"}
+            </Text>
+            <Text style={[styles.deleteSummaryText, { color: colors.errorText }]}>
               This will permanently remove the group chat and all messages for every member.
             </Text>
           </View>
@@ -79,11 +91,11 @@ export function DeleteGroupModal({
             onPress={onConfirm}
             style={[
               styles.createButton,
-              styles.deleteButton,
+              { backgroundColor: colors.errorText },
               deleting && styles.createButtonDisabled,
             ]}
           >
-            <Text style={styles.createButtonText}>
+            <Text style={[styles.createButtonText, { color: colors.buttonTextOnAction }]}>
               {deleting ? "Deleting..." : "Delete group"}
             </Text>
           </TouchableOpacity>
@@ -95,12 +107,10 @@ export function DeleteGroupModal({
 
 const styles = StyleSheet.create({
   modalBackdrop: {
-    backgroundColor: "rgba(0,0,0,0.25)",
     flex: 1,
     justifyContent: "flex-end",
   },
   joinKeyModalSheet: {
-    backgroundColor: "#FFFFFF",
     borderTopLeftRadius: Radius["3xl"],
     borderTopRightRadius: Radius["3xl"],
     paddingBottom: Radius["3xl"],
@@ -115,25 +125,20 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     ...TypeScale.headingLg,
-    color: "#1A1A1A",
     fontWeight: FontWeight.extrabold,
   },
   modalSubtitle: {
     ...TypeScale.bodyMd,
-    color: "#6B7280",
     marginTop: Spacing.xs,
   },
   modalClose: {
     alignItems: "center",
-    backgroundColor: "#F5F5F5",
     borderRadius: Radius.full,
     height: 38,
     justifyContent: "center",
     width: 38,
   },
   deleteSummaryCard: {
-    backgroundColor: "#FFF1EF",
-    borderColor: "#F0B6AE",
     borderRadius: Radius.lg,
     borderWidth: 1,
     marginTop: Spacing.sm,
@@ -141,17 +146,14 @@ const styles = StyleSheet.create({
   },
   deleteSummaryTitle: {
     ...TypeScale.titleLg,
-    color: "#991B1B",
     fontWeight: FontWeight.extrabold,
   },
   deleteSummaryText: {
     ...TypeScale.bodyMd,
-    color: "#991B1B",
     marginTop: Spacing.sm,
   },
   createButton: {
     alignItems: "center",
-    backgroundColor: "#2D6A4F",
     borderRadius: Radius.lg,
     justifyContent: "center",
     marginTop: Spacing.lg,
@@ -160,12 +162,8 @@ const styles = StyleSheet.create({
   createButtonDisabled: {
     opacity: 0.7,
   },
-  deleteButton: {
-    backgroundColor: "#B84B3A",
-  },
   createButtonText: {
     ...TypeScale.titleSm,
-    color: "#FFFFFF",
     fontWeight: FontWeight.extrabold,
   },
 });

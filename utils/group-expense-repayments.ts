@@ -1,6 +1,7 @@
 import { collection, doc, runTransaction, serverTimestamp } from "firebase/firestore";
 
 import { db } from "../firebase";
+import { sanitizeString, toMillis } from "./sanitize";
 
 export type GroupExpenseRepayment = {
   amountLabel: string;
@@ -21,29 +22,8 @@ export type GroupExpenseRepayment = {
   status: "paid";
 };
 
-function sanitizeString(value: unknown, fallback = "") {
-  return typeof value === "string" ? value.trim() : fallback;
-}
-
 function sanitizeNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function toMillis(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (
-    value &&
-    typeof value === "object" &&
-    "toMillis" in value &&
-    typeof value.toMillis === "function"
-  ) {
-    return value.toMillis();
-  }
-
-  return null;
 }
 
 export function formatExpenseRepaymentAmount(value: number) {
