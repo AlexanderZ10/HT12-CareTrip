@@ -373,3 +373,139 @@ appId: com.caretrip.app
 - `merge: true` on `setDoc` prevents accidental data overwrites
 - Input validation at UI level (min length, required fields) and Firestore rules level
 - No direct SQL/database connections from client — always through authenticated API layer
+
+---
+
+## 16. Travel API Integrations
+
+### Architecture
+All travel API calls go through Firebase Cloud Functions (never from the client directly) to protect API keys:
+```
+Mobile App → Firebase Cloud Function → Travel Provider API → Response back to app
+```
+
+### Currently Integrated APIs
+
+| API | Purpose | File | Free Tier |
+|-----|---------|------|-----------|
+| **Google Gemini** | AI trip planning, cost estimates, recommendations | `utils/ai.ts` | 15 RPM free |
+| **Frankfurter** | Live EUR exchange rates (40+ currencies) | `utils/currency-converter.ts` | Unlimited, no key |
+| **Skyscanner Partners** | Flight + hotel search with real prices | `functions/src/search-offers.ts` | Partner program |
+| **Busbud** | Bus/coach route search with prices | `functions/src/search-offers.ts` | Partner program |
+
+### How to Add a New Travel API
+
+**Step 1: Create a travel provider module**
+```typescript
+// travel-providers/new-provider.ts
+export type NewProviderOffer = {
+  name: string;
+  price: number;
+  currency: string;
+  url: string;
+};
+
+export async function searchNewProvider(params: {
+  origin: string;
+  destination: string;
+  date: string;
+  passengers: number;
+}): Promise<NewProviderOffer[]> {
+  const response = await fetch("https://api.provider.com/search", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${process.env.PROVIDER_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: params.origin,
+      to: params.destination,
+      departure: params.date,
+      pax: params.passengers,
+    }),
+  });
+
+  if (!response.ok) throw new Error(`provider-error:${response.status}`);
+  const data = await response.json();
+  return data.results.map((r: any) => ({
+    name: r.carrier,
+    price: r.price.amount,
+    currency: r.price.currency,
+    url: r.booking_url,
+  }));
+}
+```
+
+**Step 2: Add to the Cloud Function**
+```typescript
+// functions/src/search-offers.ts
+import { searchNewProvider } from "../../travel-providers/new-provider";
+
+// Inside searchOffers function:
+const [flights, hotels, buses, newResults] = await Promise.allSettled([
+  searchSkyscannerFlightOffers(params),
+  searchSkyscannerHotelOffers(params),
+  searchBusbudOffers(params),
+  searchNewProvider(params),
+]);
+```
+
+**Step 3: Add API key to environment**
+```bash
+# functions/.env
+PROVIDER_API_KEY=your_key_here
+```
+
+### Available Free Travel APIs (Ready to Integrate)
+
+**Amadeus Self-Service API** (flights, hotels, points of interest)
+- Free tier: 500 calls/month
+- Docs: https://developers.amadeus.com
+- Best for: flight search, hotel search, trip purpose prediction
+```typescript
+// Example: Flight search
+const response = await fetch(
+  `https://api.amadeus.com/v2/shopping/flight-offers?originLocationCode=SOF&destinationLocationCode=BCN&departureDate=2026-07-01&adults=2`,
+  { headers: { Authorization: `Bearer ${accessToken}` } }
+);
+```
+
+**Kiwi.com Tequila API** (flights, trains, buses — multi-modal)
+- Free tier: 3000 calls/month
+- Docs: https://tequila.kiwi.com
+- Best for: combined flight+bus+train search from one API
+```typescript
+const response = await fetch(
+  `https://api.tequila.kiwi.com/v2/search?fly_from=SOF&fly_to=BCN&date_from=01/07/2026&adults=2`,
+  { headers: { apikey: process.env.KIWI_API_KEY } }
+);
+```
+
+**Rome2Rio** (multi-modal transport routes)
+- Free tier: limited
+- Docs: https://www.rome2rio.com/documentation
+- Best for: "how to get from A to B" with all transport modes
+
+**OpenTripMap** (points of interest, attractions)
+- Free tier: 500 calls/day
+- Docs: https://opentripmap.io/product
+- Best for: discovering attractions, restaurants, museums at destination
+
+**Frankfurter API** (already integrated — currency exchange)
+- Unlimited, no key needed
+- `https://api.frankfurter.app/latest?from=EUR&to=USD,GBP,BGN`
+
+**OpenWeatherMap** (weather forecasts)
+- Free tier: 1000 calls/day
+- Best for: trip timing recommendations
+```typescript
+const response = await fetch(
+  `https://api.openweathermap.org/data/2.5/forecast?q=Barcelona&appid=${API_KEY}&units=metric`
+);
+```
+
+### API Key Management
+- All API keys stored in `functions/.env` (for Cloud Functions) or `.env` (for client-side Gemini)
+- Never commit `.env` files — only `.env.example` with empty values
+- Cloud Functions access keys via `process.env.KEY_NAME`
+- Client-side keys prefixed with `EXPO_PUBLIC_` for Expo access

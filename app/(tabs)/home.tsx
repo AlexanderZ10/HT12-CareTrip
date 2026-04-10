@@ -878,7 +878,18 @@ export default function HomeTabScreen() {
 
         const extracted = response.extractedInfo;
 
-        if (response.readyToGenerate && extracted.destination) {
+        // Safety: require at least 5 filled fields before accepting readyToGenerate
+        const filledFields = [
+          extracted.destination,
+          extracted.timing,
+          extracted.days,
+          extracted.travelers,
+          extracted.budget,
+          extracted.transportPreference,
+          extracted.interests,
+        ].filter((f) => f && f.trim().length > 0).length;
+
+        if (response.readyToGenerate && extracted.destination && filledFields >= 5) {
           const searchingMessage = createHomeChatMessage(
             "assistant",
             t("home.preparingRoute")

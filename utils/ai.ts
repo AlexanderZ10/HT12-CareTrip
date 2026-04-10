@@ -114,6 +114,29 @@ export async function callAI(params: {
     body: JSON.stringify(body),
   });
 
+  if (response.status === 429) {
+    // Rate limited — wait and retry once
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    const retryResponse = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": params.apiKey,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!retryResponse.ok) {
+      const errorText = await retryResponse.text();
+      throw new Error(`ai-request-failed:${retryResponse.status}:${errorText}`);
+    }
+
+    const retryData = await retryResponse.json();
+    const retryText = extractGeminiText(retryData);
+    if (!retryText) throw new Error("empty-ai-response");
+    return retryText;
+  }
+
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`ai-request-failed:${response.status}:${errorText}`);

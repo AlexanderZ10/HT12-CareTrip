@@ -3,6 +3,7 @@ import { sanitizeString, sanitizeStringArray } from "./sanitize";
 import type { AppLanguage } from "./translations";
 import { type DiscoverProfile } from "./trip-recommendations";
 import { callAI, getAIApiKey } from "./ai";
+import { fetchDestinationCosts, formatDailyCostSummary } from "./destination-costs";
 
 export type PlannerTransportOption = {
   bookingUrl?: string;
@@ -136,7 +137,7 @@ function getPlannerCopy(language?: string) {
         dayLabel: (index: number) => `Day ${index + 1}`,
         dayPlan: "Daily plan",
         durationPending: "Duration to be confirmed",
-        fallbackMessage: "Tell me more about the trip you're planning.",
+        fallbackMessage: "Got it! When do you want to travel?",
         flexiblePlan:
           "A practical trip plan focused on realistic transport, stay and a compact itinerary.",
         mainOption: "Main option",
@@ -162,7 +163,7 @@ function getPlannerCopy(language?: string) {
         dayLabel: (index: number) => `Tag ${index + 1}`,
         dayPlan: "Tagesplan",
         durationPending: "Dauer wird noch bestätigt",
-        fallbackMessage: "Erzähl mir mehr über die Reise, die du planst.",
+        fallbackMessage: "Verstanden! Wann möchtest du reisen?",
         flexiblePlan:
           "Ein praktischer Reiseplan mit Fokus auf realistischem Transport, Unterkunft und kompaktem Ablauf.",
         mainOption: "Hauptoption",
@@ -188,7 +189,7 @@ function getPlannerCopy(language?: string) {
         dayLabel: (index: number) => `Día ${index + 1}`,
         dayPlan: "Plan diario",
         durationPending: "Duración por confirmar",
-        fallbackMessage: "Cuéntame más sobre el viaje que estás planeando.",
+        fallbackMessage: "¡Entendido! ¿Cuándo quieres viajar?",
         flexiblePlan:
           "Un plan de viaje práctico centrado en transporte realista, alojamiento e itinerario compacto.",
         mainOption: "Opción principal",
@@ -214,7 +215,7 @@ function getPlannerCopy(language?: string) {
         dayLabel: (index: number) => `Jour ${index + 1}`,
         dayPlan: "Plan du jour",
         durationPending: "Durée à confirmer",
-        fallbackMessage: "Parle-moi davantage du voyage que tu prépares.",
+        fallbackMessage: "Compris ! Quand veux-tu voyager ?",
         flexiblePlan:
           "Un plan de voyage pratique axé sur un transport réaliste, l’hébergement et un itinéraire compact.",
         mainOption: "Option principale",
@@ -239,7 +240,7 @@ function getPlannerCopy(language?: string) {
         dayLabel: (index: number) => `Ден ${index + 1}`,
         dayPlan: "Дневен план",
         durationPending: "Времето се уточнява",
-        fallbackMessage: "Разкажи ми повече за пътуването, което планираш.",
+        fallbackMessage: "Разбрах! Кога искаш да пътуваш?",
         flexiblePlan:
           "Стегнат план с фокус върху реалистичен транспорт, настаняване и компактен маршрут.",
         mainOption: "Основен вариант",
@@ -554,29 +555,48 @@ function buildStructuredPlanPrompt(params: {
     groundedNotes,
   } = params;
 
+  const homeBase = profile.personalProfile.homeBase || "Sofia, Bulgaria";
+  const normalizedBudget = normalizeBudgetToEuro(budget);
+
   return [
-    `Convert the grounded travel research below into a compact structured travel plan in ${params.language || "Bulgarian"}.`,
-    "Use only the grounded notes for factual claims.",
-    "Do not add long explanations or generic travel advice.",
-    "Keep summary to max 2 sentences.",
-    "Keep budgetNote to max 1 sentence.",
-    "Keep profileTip to max 2 sentences.",
-    "All prices must stay in EUR.",
-    "The itinerary must match the requested number of days.",
-    "If the budget is too low, say so briefly in budgetNote, but still provide the best realistic fit.",
-    "Prefer guesthouses first when they fit.",
-    "Avoid duplicated points or near-identical wording across sections.",
+    `Generate a complete structured travel plan in ${params.language || "English"}.`,
     "",
-    `Budget: ${normalizeBudgetToEuro(budget)}`,
-    `Days: ${days}`,
-    `Travelers: ${travelers}`,
-    `Preferred transport: ${transportPreference}`,
-    `Timing: ${timing}`,
-    `Destination: ${destination}`,
-    `Home base: ${profile.personalProfile.homeBase || "Unknown"}`,
+    "TRIP DETAILS:",
+    `- Destination: ${destination}`,
+    `- Origin / home base: ${homeBase}`,
+    `- Budget: ${normalizedBudget} EUR total`,
+    `- Duration: ${days} days`,
+    `- Travelers: ${travelers}`,
+    `- Preferred transport: ${transportPreference}`,
+    `- Timing: ${timing}`,
     "",
-    "Grounded notes:",
-    groundedNotes,
+    "YOU MUST GENERATE ALL OF THESE (never leave empty):",
+    "",
+    "transportOptions (MINIMUM 2 items): Real transport options from the origin to destination.",
+    `Example for ${homeBase} → ${destination}:`,
+    "- Include the user's preferred transport mode first",
+    "- Add 1-2 alternative options (bus, train, flight, car as applicable)",
+    "- Each must have: mode, provider (real company name), route (e.g. 'Sofia → Plovdiv'), duration, price in EUR, note",
+    "- Use realistic prices and real operator names (e.g. Union Ivkoni, BlaBlaCar, Ryanair, FlixBus, BDZ)",
+    "",
+    "stayOptions (MINIMUM 2 items): Real accommodation options at the destination.",
+    `Example for ${destination}:`,
+    "- Include a budget option and a mid-range option",
+    "- Each must have: name (real or realistic hotel/hostel name), type (hotel/hostel/guesthouse/Airbnb), area (neighborhood), pricePerNight in EUR, note",
+    "- Use realistic prices for the destination",
+    "",
+    `tripDays (EXACTLY ${days} items — one per day): Day-by-day itinerary.`,
+    "- Each day must have: dayLabel (e.g. 'Day 1'), title (short theme), items (2-4 specific activities with real place names)",
+    "- Include specific restaurant/cafe names, museum names, landmark names — be concrete",
+    "",
+    "Also provide:",
+    "- title: catchy trip title",
+    "- summary: 2 sentences describing the trip",
+    "- budgetNote: 1 sentence about how the budget fits",
+    "- profileTip: 2 sentences personalized to the traveler",
+    "",
+    "All prices in EUR. Be specific with real names, not generic descriptions.",
+    groundedNotes ? `\nAdditional research notes (use if helpful):\n${groundedNotes}` : "",
   ].join("\n");
 }
 
@@ -626,22 +646,41 @@ export async function generateGroundedTravelPlan(params: {
     throw new Error("missing-api-key");
   }
 
-  const groundedNotes = await callAI({
-    apiKey,
-    prompt: buildPlannerPrompt(params),
+  // Skip research step entirely — go straight to structured plan generation.
+  // This halves the API calls and avoids rate limits.
+  const structuredPrompt = buildStructuredPlanPrompt({
+    ...params,
+    groundedNotes: "",
   });
 
   const structuredJsonText = await callAI({
     apiKey,
-    prompt: buildStructuredPlanPrompt({
-      ...params,
-      groundedNotes,
-    }),
+    prompt: structuredPrompt,
+    systemPrompt: [
+      "You are a travel plan generator. Return ONLY valid JSON matching this exact schema.",
+      "transportOptions: array of {mode, provider, route, duration, price, note} — MINIMUM 2 items",
+      "stayOptions: array of {name, type, area, pricePerNight, note} — MINIMUM 2 items",
+      "tripDays: array of {dayLabel, title, items: string[]} — one per day",
+      "Also: title (string), summary (string), budgetNote (string), profileTip (string)",
+      "ALL fields are required. NEVER return empty arrays.",
+    ].join("\n"),
     jsonMode: true,
   });
 
   const parsedPlan = extractJsonObject(structuredJsonText) as RawGroundedTravelPlan;
-  return normalizePlan(parsedPlan, params);
+  const plan = normalizePlan(parsedPlan, params);
+
+  // Append daily cost estimate to the budget note when possible.
+  try {
+    const homeBase = params.profile.personalProfile.homeBase || "Europe";
+    const costs = await fetchDestinationCosts(params.destination, homeBase);
+    const costLine = `Daily expenses estimate: ${formatDailyCostSummary(costs, params.language || "English")}`;
+    plan.budgetNote = plan.budgetNote ? `${plan.budgetNote}\n${costLine}` : costLine;
+  } catch {
+    // Cost enrichment is best-effort; do not block plan generation.
+  }
+
+  return plan;
 }
 
 function buildPlannerFollowUpPrompt(params: {
@@ -795,67 +834,52 @@ const CONVERSATIONAL_RESPONSE_SCHEMA = {
   required: ["message", "extractedInfo", "readyToGenerate"],
 } as const;
 
-function buildConversationalPrompt(params: {
-  conversationHistory: { role: "assistant" | "user"; text: string }[];
+function buildConversationalSystemPrompt(params: {
   language?: string;
   profile: DiscoverProfile;
 }) {
-  const { conversationHistory, profile } = params;
+  const { profile } = params;
   const homeBase = profile.personalProfile.homeBase || "Unknown";
-
-  const historyText =
-    conversationHistory.length > 0
-      ? conversationHistory
-          .map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.text}`)
-          .join("\n")
-      : "No messages yet.";
+  const lang = params.language || "Bulgarian";
 
   return [
-    "You are a friendly, conversational travel planning assistant inside a mobile app called CareTrip.",
-    "Your job is to chat naturally with the user to understand their dream trip.",
-    `Answer ONLY in ${params.language || "Bulgarian"}.`,
+    `You are a travel planning assistant. Answer ONLY in ${lang}.`,
     "",
-    "You must gather the following information through natural, engaging conversation:",
-    "1. Destination – Where they want to go",
-    "2. Budget – How much they want to spend (in EUR)",
-    "3. Duration – How many days the trip should be",
-    "4. Travelers – How many people are going",
-    "5. Transport – How they prefer to travel",
-    "6. Timing – When they want to travel",
-    "7. Interests / activities – What they enjoy doing on a trip",
-    "8. Accommodation – Which type of stay they prefer (hotel, guesthouse, Airbnb, etc.)",
-    "9. Special needs – Dietary, accessibility, or any other needs",
+    "You ask the user 7 questions, ONE per message, in this exact order:",
     "",
-    "RULES:",
-    "- Ask ONE question at a time. Never ask multiple questions in the same message.",
-    "- Be warm, conversational and natural – like a friend helping plan a trip, not a form.",
-    "- Build on the user's previous answers. Reference what they said.",
-    "- If the user gives multiple pieces of info in one answer, acknowledge them all and move on.",
-    "- Don't re-ask for information the user has already clearly provided.",
-    "- If the user gives very short or vague answers, ask a friendly follow-up to get more detail.",
-    "- Keep your messages short (1-3 sentences max).",
-    "- Use the user's profile context to personalize questions (e.g. mention their dream destinations, home base, interests).",
-    "- For extractedInfo, fill in only what you've clearly learned. Use empty string for unknown fields.",
-    "- Normalize budget to EUR when possible.",
+    "Q1: Where do you want to go? (already asked — the user's first message is their answer)",
+    "Q2: When do you want to travel?",
+    "Q3: How many days?",
+    "Q4: How many people are going? Solo, couple, friends, family?",
+    "Q5: What is your budget in EUR?",
+    "Q6: How do you want to get there? Flight, bus, train, car?",
+    "Q7: What do you want to do there? Beach, museums, food, nightlife, hiking?",
     "",
-    "IMPORTANT — when to generate the trip plan:",
-    "- NEVER set readyToGenerate to true on your own. You must ALWAYS ask the user for confirmation first.",
-    "- After you have gathered at least 7 of the 9 key details, send a short summary of everything you know about their trip and ask if you should prepare the itinerary with those details.",
-    "- Only set readyToGenerate to true when the user EXPLICITLY confirms in their own language.",
-    "- If the user says no or wants to change something, continue the conversation and adjust the extracted info.",
-    "- readyToGenerate must ONLY be true in the response AFTER the user has confirmed.",
+    "FORMAT OF EACH RESPONSE:",
+    '- Acknowledge the user\'s answer in 3-5 words (e.g. "Plovdiv, great choice!") then ask the NEXT question.',
+    "- Keep it to 1-2 short sentences total.",
+    "- Ask exactly ONE question per message.",
     "",
-    "User profile context:",
-    `Home base: ${homeBase}`,
-    `Name: ${profile.personalProfile.fullName || "Not provided"}`,
-    `Dream destinations: ${profile.personalProfile.dreamDestinations || "Not provided"}`,
-    `Travel pace: ${profile.personalProfile.travelPace || "Not provided"}`,
-    `Stay style: ${profile.personalProfile.stayStyle || "Not provided"}`,
-    `Interests: ${profile.interests.selectedOptions.join(", ") || "None provided"}`,
-    `Accessibility needs: ${profile.assistance.selectedOptions.join(", ") || "None provided"}`,
+    "EXAMPLES of good responses:",
+    `- User says "Barcelona" → you reply: "Barcelona, great choice! When do you want to travel?"`,
+    `- User says "July" → you reply: "July it is! How many days should the trip be?"`,
+    `- User says "5" → you reply: "5 days, perfect. How many people are going — solo, couple, friends?"`,
+    `- User says "2 friends" → you reply: "A trip with friends! What's your total budget in EUR?"`,
+    `- User says "500" → you reply: "€500 total, got it. How do you want to get there — flight, bus, train, car?"`,
+    `- User says "bus" → you reply: "Bus it is! What do you want to do there — relax on the beach, visit museums, try local food, nightlife, hiking?"`,
+    `- User says "food and museums" → you reply with a summary and ask to confirm.`,
     "",
-    "Conversation so far:",
-    historyText,
+    "CRITICAL RULE ABOUT readyToGenerate:",
+    "- readyToGenerate MUST be false in EVERY response UNLESS the user's LAST message is an explicit confirmation like 'yes', 'go', 'generate', 'да', 'давай', 'ok', 'sure'.",
+    "- You MUST ask ALL 7 questions FIRST. After Q7 is answered, present a summary and ask for confirmation.",
+    "- If fewer than 5 extractedInfo fields are filled, readyToGenerate MUST be false. No exceptions.",
+    "- The ONLY time readyToGenerate can be true is when you already showed a summary AND the user confirmed.",
+    "",
+    "EXTRACTEDINFO RULES:",
+    "- Fill fields ONLY with what the user explicitly said. Empty string for unknown fields.",
+    "- interests = what they want to do. accommodation = their preferred stay type. specialNeeds = dietary/accessibility.",
+    `- User's profile: home base = "${homeBase}", stay style = "${profile.personalProfile.stayStyle || ""}", interests from profile = "${profile.interests.selectedOptions.join(", ") || ""}"`,
+    "- Use profile info to pre-fill accommodation/specialNeeds if relevant, but NEVER skip asking the user questions.",
   ].join("\n");
 }
 
@@ -896,9 +920,32 @@ export async function generateConversationalResponse(params: {
     throw new Error("missing-api-key");
   }
 
+  const systemPrompt = buildConversationalSystemPrompt({
+    language: params.language,
+    profile: params.profile,
+  });
+
+  // Pass all messages EXCEPT the last one as conversationHistory,
+  // because callAI appends `prompt` as the final user message.
+  const allMessages = params.conversationHistory;
+  const historyForApi = allMessages.slice(0, -1).map((m) => ({
+    role: m.role === "assistant" ? ("assistant" as const) : ("user" as const),
+    content: m.text,
+  }));
+  const lastUserMessage = allMessages[allMessages.length - 1]?.text || "Hello";
+
+  const jsonSchema = [
+    "You MUST respond with a JSON object with exactly these fields:",
+    '{ "message": "your reply text (the next question or summary)", "extractedInfo": { "destination": "", "budget": "", "days": "", "travelers": "", "transportPreference": "", "timing": "", "interests": "", "accommodation": "", "specialNeeds": "" }, "readyToGenerate": false }',
+    "Fill extractedInfo fields ONLY with values the user has explicitly stated. Use empty string for unknown fields.",
+    "readyToGenerate must be false unless the user just confirmed they want to generate.",
+  ].join("\n");
+
   const text = await callAI({
     apiKey,
-    prompt: buildConversationalPrompt(params),
+    prompt: lastUserMessage,
+    systemPrompt: systemPrompt + "\n\n" + jsonSchema,
+    conversationHistory: historyForApi,
     jsonMode: true,
   });
 

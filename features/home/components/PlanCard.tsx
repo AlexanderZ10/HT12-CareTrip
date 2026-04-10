@@ -3,6 +3,7 @@ import * as Linking from "expo-linking";
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
+import { useAppLanguage } from "../../../components/app-language-provider";
 import { useAppTheme } from "../../../components/app-theme-provider";
 import { FontWeight, Radius, Spacing, TypeScale } from "../../../constants/design-system";
 import type { StoredHomePlan } from "../../../utils/home-chat-storage";
@@ -40,6 +41,17 @@ export function PlanCard({
   saving,
 }: PlanCardProps) {
   const { colors } = useAppTheme();
+  const { language } = useAppLanguage();
+
+  const labels = language === "en"
+    ? { transport: "Transport", stay: "Accommodation", days: "Day-by-day itinerary", profileTip: "Profile tip", viewOffer: "View offer", buyTicket: "Buy ticket", bookStay: "Book stay" }
+    : language === "de"
+      ? { transport: "Transport", stay: "Unterkunft", days: "Tagesplan", profileTip: "Profil-Tipp", viewOffer: "Angebot", buyTicket: "Ticket kaufen", bookStay: "Buchen" }
+      : language === "es"
+        ? { transport: "Transporte", stay: "Alojamiento", days: "Itinerario por días", profileTip: "Consejo del perfil", viewOffer: "Ver oferta", buyTicket: "Comprar billete", bookStay: "Reservar" }
+        : language === "fr"
+          ? { transport: "Transport", stay: "Hébergement", days: "Itinéraire jour par jour", profileTip: "Conseil profil", viewOffer: "Voir l'offre", buyTicket: "Acheter", bookStay: "Réserver" }
+          : { transport: "Транспорт", stay: "Настаняване", days: "Маршрут по дни", profileTip: "Съвет според профила", viewOffer: "Офертата", buyTicket: "Купи билет", bookStay: "Резервирай" };
 
   return (
     <View
@@ -94,7 +106,7 @@ export function PlanCard({
       ) : null}
 
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Транспорт</Text>
+        <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{labels.transport}</Text>
         {latestPlan.plan.transportOptions.map((option, index) => (
           <View
             key={`${option.provider}-${index}`}
@@ -148,7 +160,7 @@ export function PlanCard({
                 >
                   <MaterialIcons name="open-in-new" size={16} color={colors.textPrimary} />
                   <Text style={[styles.optionLinkButtonText, { color: colors.textPrimary }]}>
-                    Офертата
+                    {labels.viewOffer}
                   </Text>
                 </TouchableOpacity>
               ) : null}
@@ -164,7 +176,7 @@ export function PlanCard({
               >
                 <MaterialIcons name="confirmation-number" size={16} color={colors.buttonTextOnAction} />
                 <Text style={[styles.optionActionButtonText, { color: colors.buttonTextOnAction }]}>
-                  Купи билет
+                  {labels.buyTicket}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -173,7 +185,7 @@ export function PlanCard({
       </View>
 
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Настаняване</Text>
+        <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{labels.stay}</Text>
         {latestPlan.plan.stayOptions.map((stay, index) => (
           <View
             key={`${stay.name}-${index}`}
@@ -215,7 +227,7 @@ export function PlanCard({
                 >
                   <MaterialIcons name="open-in-new" size={16} color={colors.textPrimary} />
                   <Text style={[styles.optionLinkButtonText, { color: colors.textPrimary }]}>
-                    Офертата
+                    {labels.viewOffer}
                   </Text>
                 </TouchableOpacity>
               ) : null}
@@ -231,7 +243,7 @@ export function PlanCard({
               >
                 <MaterialIcons name="hotel" size={16} color={colors.buttonTextOnAction} />
                 <Text style={[styles.optionActionButtonText, { color: colors.buttonTextOnAction }]}>
-                  Резервирай
+                  {labels.bookStay}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -240,7 +252,7 @@ export function PlanCard({
       </View>
 
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Маршрут по дни</Text>
+        <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{labels.days}</Text>
         {latestPlan.plan.tripDays.map((day, index) => (
           <View
             key={`${day.dayLabel}-${index}`}
@@ -263,7 +275,7 @@ export function PlanCard({
       {latestPlan.plan.profileTip ? (
         <View style={[styles.profileTipCard, { backgroundColor: colors.cardAlt }]}>
           <Text style={[styles.profileTipTitle, { color: colors.textPrimary }]}>
-            Съвет според профила
+            {labels.profileTip}
           </Text>
           <Text style={[styles.profileTipText, { color: colors.textSecondary }]}>
             {latestPlan.plan.profileTip}

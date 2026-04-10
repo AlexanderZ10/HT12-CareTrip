@@ -32,6 +32,7 @@ type ChatComposerProps = {
 
 function getPlaceholder(step: HomePlannerStep, language: "bg" | "en" | "de" | "es" | "fr") {
   if (language === "en") {
+    if (step === "done") return "Ask about your trip...";
     if (step === "chatting") return "Write your answer...";
     if (step === "budget") return "Write your budget in EUR...";
     if (step === "days") return "Write the number of days...";
@@ -43,6 +44,7 @@ function getPlaceholder(step: HomePlannerStep, language: "bg" | "en" | "de" | "e
   }
 
   if (language === "de") {
+    if (step === "done") return "Frag etwas zu deiner Reise...";
     if (step === "chatting") return "Schreibe deine Antwort...";
     if (step === "budget") return "Schreibe dein Budget in EUR...";
     if (step === "days") return "Schreibe die Anzahl der Tage...";
@@ -54,6 +56,7 @@ function getPlaceholder(step: HomePlannerStep, language: "bg" | "en" | "de" | "e
   }
 
   if (language === "es") {
+    if (step === "done") return "Pregunta sobre tu viaje...";
     if (step === "chatting") return "Escribe tu respuesta...";
     if (step === "budget") return "Escribe tu presupuesto en EUR...";
     if (step === "days") return "Escribe el número de días...";
@@ -65,6 +68,7 @@ function getPlaceholder(step: HomePlannerStep, language: "bg" | "en" | "de" | "e
   }
 
   if (language === "fr") {
+    if (step === "done") return "Pose une question sur ton voyage...";
     if (step === "chatting") return "Écris ta réponse...";
     if (step === "budget") return "Écris ton budget en EUR...";
     if (step === "days") return "Écris le nombre de jours...";
@@ -75,6 +79,7 @@ function getPlaceholder(step: HomePlannerStep, language: "bg" | "en" | "de" | "e
     return "Écris un message...";
   }
 
+  if (step === "done") return "Попитай за пътуването си...";
   if (step === "chatting") return "Напиши отговор...";
   if (step === "budget") return "Напиши бюджета в евро...";
   if (step === "days") return "Напиши броя дни...";
@@ -119,7 +124,7 @@ export function ChatComposer({
           placeholderTextColor={colors.inputPlaceholder}
           value={chatInput}
           onChangeText={onChangeText}
-          editable={step !== "done" && !planning}
+          editable={!planning}
           multiline
         />
         <TouchableOpacity

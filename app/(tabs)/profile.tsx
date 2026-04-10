@@ -133,6 +133,7 @@ export default function ProfileTabScreen() {
   const [sendingReset, setSendingReset] = useState(false);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const [avatarSheetVisible, setAvatarSheetVisible] = useState(false);
+  const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
   const [languageMenuVisible, setLanguageMenuVisible] = useState(false);
   const [countryPickerVisible, setCountryPickerVisible] = useState(false);
   const [countrySearch, setCountrySearch] = useState("");
@@ -812,7 +813,7 @@ export default function ProfileTabScreen() {
           <Text style={[staticStyles.brandTitle, { color: colors.textPrimary }]} numberOfLines={1}>
             {t("tab.profile")}
           </Text>
-          <TouchableOpacity accessibilityLabel="Settings menu" activeOpacity={0.7} style={staticStyles.topBarIconButton}>
+          <TouchableOpacity accessibilityLabel="Settings menu" activeOpacity={0.7} onPress={() => setSettingsMenuVisible(true)} style={staticStyles.topBarIconButton}>
             <MaterialIcons name="menu" size={28} color={colors.textPrimary} />
           </TouchableOpacity>
         </View>
@@ -1390,6 +1391,109 @@ export default function ProfileTabScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* ───────── Settings menu (bottom-right panel) ───────── */}
+      <Modal
+        animationType="fade"
+        transparent
+        visible={settingsMenuVisible}
+        onRequestClose={() => setSettingsMenuVisible(false)}
+      >
+        <View style={[staticStyles.settingsBackdrop, { backgroundColor: colors.modalOverlay }]}>
+          <Pressable style={staticStyles.settingsDismissArea} onPress={() => setSettingsMenuVisible(false)} />
+          <View
+            style={[
+              staticStyles.settingsCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                paddingBottom: insets.bottom + Spacing.lg,
+              },
+            ]}
+          >
+            <View style={staticStyles.settingsHeader}>
+              <View>
+                <Text style={[staticStyles.settingsTitle, { color: colors.textPrimary }]}>
+                  {t("profile.account")}
+                </Text>
+                <Text style={[staticStyles.settingsSubtitle, { color: colors.textSecondary }]}>
+                  {email}
+                </Text>
+              </View>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setSettingsMenuVisible(false)}
+                style={[staticStyles.settingsCloseBtn, { backgroundColor: colors.cardAlt }]}
+              >
+                <MaterialIcons name="close" size={22} color={colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => {
+                setSettingsMenuVisible(false);
+                router.push("/onboarding");
+              }}
+              style={[staticStyles.settingsRow, { borderColor: colors.border }]}
+            >
+              <View style={[staticStyles.settingsRowIcon, { backgroundColor: colors.accentMuted }]}>
+                <MaterialIcons name="tune" size={20} color={colors.accent} />
+              </View>
+              <View style={staticStyles.settingsRowTextWrap}>
+                <Text style={[staticStyles.settingsRowLabel, { color: colors.textPrimary }]}>
+                  {t("profile.editPreferences")}
+                </Text>
+                <Text style={[staticStyles.settingsRowHint, { color: colors.textSecondary }]}>
+                  Travel style, interests, skills
+                </Text>
+              </View>
+              <MaterialIcons name="chevron-right" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              disabled={sendingReset}
+              onPress={() => {
+                setSettingsMenuVisible(false);
+                void handleResetPassword();
+              }}
+              style={[staticStyles.settingsRow, { borderColor: colors.border }]}
+            >
+              <View style={[staticStyles.settingsRowIcon, { backgroundColor: colors.inputBackground }]}>
+                <MaterialIcons name="lock-reset" size={20} color={colors.textPrimary} />
+              </View>
+              <View style={staticStyles.settingsRowTextWrap}>
+                <Text style={[staticStyles.settingsRowLabel, { color: colors.textPrimary }]}>
+                  {t("profile.changePassword")}
+                </Text>
+                <Text style={[staticStyles.settingsRowHint, { color: colors.textSecondary }]}>
+                  Send a reset email
+                </Text>
+              </View>
+              <MaterialIcons name="chevron-right" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => {
+                setSettingsMenuVisible(false);
+                void handleLogout();
+              }}
+              style={[staticStyles.settingsRow, { borderColor: "transparent" }]}
+            >
+              <View style={[staticStyles.settingsRowIcon, { backgroundColor: colors.errorBackground }]}>
+                <MaterialIcons name="logout" size={20} color={colors.error} />
+              </View>
+              <View style={staticStyles.settingsRowTextWrap}>
+                <Text style={[staticStyles.settingsRowLabel, { color: colors.error }]}>
+                  {t("profile.signOut")}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1717,5 +1821,67 @@ const staticStyles = StyleSheet.create({
   },
   countryItemText: {
     ...TypeScale.bodyMd,
+  },
+  // ── Settings menu (bottom-right panel) ──
+  settingsBackdrop: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  settingsDismissArea: {
+    flex: 1,
+  },
+  settingsCard: {
+    borderTopLeftRadius: Radius["3xl"],
+    borderTopRightRadius: Radius["3xl"],
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    padding: Spacing.lg,
+    ...shadow("xl"),
+  },
+  settingsHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: Spacing.lg,
+  },
+  settingsTitle: {
+    ...TypeScale.headingMd,
+    fontWeight: FontWeight.extrabold,
+  },
+  settingsSubtitle: {
+    ...TypeScale.bodySm,
+    marginTop: Spacing.xs,
+  },
+  settingsCloseBtn: {
+    alignItems: "center",
+    borderRadius: Radius.full,
+    height: 38,
+    justifyContent: "center",
+    width: 38,
+  },
+  settingsRow: {
+    alignItems: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: Spacing.md,
+    paddingVertical: Spacing.md,
+  },
+  settingsRowIcon: {
+    alignItems: "center",
+    borderRadius: Radius.lg,
+    height: 40,
+    justifyContent: "center",
+    width: 40,
+  },
+  settingsRowTextWrap: {
+    flex: 1,
+  },
+  settingsRowLabel: {
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.bold,
+  },
+  settingsRowHint: {
+    ...TypeScale.bodySm,
+    marginTop: 2,
   },
 });
