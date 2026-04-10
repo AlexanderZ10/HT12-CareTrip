@@ -113,6 +113,7 @@ export function ChatComposer({
         ]}
       >
         <TextInput
+          accessibilityLabel="Message input"
           style={[styles.input, { color: colors.textPrimary }]}
           placeholder={getPlaceholder(step, language)}
           placeholderTextColor={colors.inputPlaceholder}
@@ -122,13 +123,14 @@ export function ChatComposer({
           multiline
         />
         <TouchableOpacity
+          accessibilityLabel="Send message"
           style={[
             styles.sendButton,
             { backgroundColor: canSend ? colors.accent : colors.disabledBackground },
           ]}
           onPress={onSend}
           disabled={!canSend}
-          activeOpacity={0.7}
+          activeOpacity={0.9}
         >
           <MaterialIcons
             name="arrow-upward"
@@ -138,10 +140,11 @@ export function ChatComposer({
         </TouchableOpacity>
       </View>
       <TouchableOpacity
+        accessibilityLabel="Start new plan"
         style={styles.resetButton}
         onPress={onReset}
         disabled={planning}
-        activeOpacity={0.7}
+        activeOpacity={0.9}
       >
         <MaterialIcons name="refresh" size={14} color={colors.textMuted} />
         <Text style={[styles.resetButtonText, { color: colors.textMuted }]}>

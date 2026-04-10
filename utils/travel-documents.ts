@@ -1,5 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import { sanitizeString } from "./sanitize";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -65,10 +67,6 @@ function sanitizeDocumentType(value: unknown): DocumentType {
   }
 
   return "other";
-}
-
-function sanitizeString(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value.trim() : fallback;
 }
 
 function sanitizeNumber(value: unknown, fallback = 0): number {

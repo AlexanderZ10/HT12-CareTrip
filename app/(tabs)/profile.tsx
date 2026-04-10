@@ -807,6 +807,16 @@ export default function ProfileTabScreen() {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
+        {/* ── Instagram-style top bar: brand title + settings menu ── */}
+        <View style={staticStyles.topBar}>
+          <Text style={[staticStyles.brandTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+            {t("tab.profile")}
+          </Text>
+          <TouchableOpacity accessibilityLabel="Settings menu" activeOpacity={0.7} style={staticStyles.topBarIconButton}>
+            <MaterialIcons name="menu" size={28} color={colors.textPrimary} />
+          </TouchableOpacity>
+        </View>
+
         {/* ───────── 1. Avatar + identity ───────── */}
         <Animated.View style={[staticStyles.profileHeader, avatarAnimStyle]}>
           <Pressable
@@ -1400,7 +1410,23 @@ const staticStyles = StyleSheet.create({
     maxWidth: 600,
     alignSelf: "center",
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.lg,
+    paddingTop: Spacing.sm,
+  },
+  // ── Instagram-style top bar ──
+  topBar: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: Spacing.md,
+    minHeight: 48,
+  },
+  brandTitle: {
+    fontSize: 28,
+    fontWeight: FontWeight.black,
+    letterSpacing: 0.3,
+  },
+  topBarIconButton: {
+    padding: 4,
   },
   profileHeader: {
     alignItems: "center",
@@ -1505,7 +1531,6 @@ const staticStyles = StyleSheet.create({
   footer: {
     height: Spacing["4xl"],
   },
-
   // Banner
   banner: {
     flexDirection: "row",

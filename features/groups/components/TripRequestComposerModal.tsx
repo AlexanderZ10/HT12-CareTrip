@@ -1,7 +1,9 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import React from "react";
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -64,43 +66,48 @@ export function TripRequestComposerModal({
       transparent
       visible={visible}
     >
-      <View style={[styles.modalBackdrop, { backgroundColor: colors.modalOverlay }]}>
-        <View style={styles.modalSheet}>
+      <KeyboardAvoidingView
+        style={[styles.modalBackdrop, { backgroundColor: colors.modalOverlay }]}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <View style={[styles.modalSheet, { backgroundColor: colors.card }]}>
           <View style={styles.modalHeader}>
             <View>
-              <Text style={styles.modalTitle}>New trip request</Text>
-              <Text style={styles.modalSubtitle}>
+              <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+                New trip request
+              </Text>
+              <Text style={[styles.modalSubtitle, { color: colors.textSecondary }]}>
                 Tell the group tab where you want to go and what kind of people you want with you.
               </Text>
             </View>
             <TouchableOpacity
               activeOpacity={0.9}
               onPress={onClose}
-              style={styles.modalClose}
+              style={[styles.modalClose, { backgroundColor: colors.inputBackground }]}
             >
-              <MaterialIcons color="#374151" name="close" size={22} />
+              <MaterialIcons color={colors.textSecondary} name="close" size={22} />
             </TouchableOpacity>
           </View>
 
           {error ? (
             <View
               style={[
-                styles.feedbackCardError,
+                styles.feedbackCard,
                 { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder },
               ]}
             >
-              <Text style={[styles.feedbackTextError, { color: colors.errorText }]}>{error}</Text>
+              <Text style={[styles.feedbackText, { color: colors.errorText }]}>{error}</Text>
             </View>
           ) : null}
 
           {successMessage ? (
             <View
               style={[
-                styles.feedbackCardSuccess,
+                styles.feedbackCard,
                 { backgroundColor: colors.successBackground, borderColor: colors.successBorder },
               ]}
             >
-              <Text style={[styles.feedbackTextSuccess, { color: colors.successText }]}>
+              <Text style={[styles.feedbackText, { color: colors.successText }]}>
                 {successMessage}
               </Text>
             </View>
@@ -110,8 +117,15 @@ export function TripRequestComposerModal({
             <TextInput
               onChangeText={onDestinationChange}
               placeholder="Destination"
-              placeholderTextColor="#9CA3AF"
-              style={styles.modalInput}
+              placeholderTextColor={colors.inputPlaceholder}
+              style={[
+                styles.modalInput,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.inputBorder,
+                  color: colors.textPrimary,
+                },
+              ]}
               value={destination}
             />
 
@@ -119,15 +133,31 @@ export function TripRequestComposerModal({
               <TextInput
                 onChangeText={onBudgetChange}
                 placeholder="Budget"
-                placeholderTextColor="#9CA3AF"
-                style={[styles.modalInput, styles.requestGridInput]}
+                placeholderTextColor={colors.inputPlaceholder}
+                style={[
+                  styles.modalInput,
+                  styles.requestGridInput,
+                  {
+                    backgroundColor: colors.card,
+                    borderColor: colors.inputBorder,
+                    color: colors.textPrimary,
+                  },
+                ]}
                 value={budget}
               />
               <TextInput
                 onChangeText={onTimingChange}
                 placeholder="When"
-                placeholderTextColor="#9CA3AF"
-                style={[styles.modalInput, styles.requestGridInput]}
+                placeholderTextColor={colors.inputPlaceholder}
+                style={[
+                  styles.modalInput,
+                  styles.requestGridInput,
+                  {
+                    backgroundColor: colors.card,
+                    borderColor: colors.inputBorder,
+                    color: colors.textPrimary,
+                  },
+                ]}
                 value={timing}
               />
             </View>
@@ -135,8 +165,15 @@ export function TripRequestComposerModal({
             <TextInput
               onChangeText={onTravelersChange}
               placeholder="How many people"
-              placeholderTextColor="#9CA3AF"
-              style={styles.modalInput}
+              placeholderTextColor={colors.inputPlaceholder}
+              style={[
+                styles.modalInput,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.inputBorder,
+                  color: colors.textPrimary,
+                },
+              ]}
               value={travelers}
             />
 
@@ -145,35 +182,65 @@ export function TripRequestComposerModal({
               numberOfLines={4}
               onChangeText={onNoteChange}
               placeholder="What kind of trip is it? Food, beaches, budget vibe, roadtrip energy..."
-              placeholderTextColor="#9CA3AF"
-              style={[styles.modalInput, styles.modalTextarea]}
+              placeholderTextColor={colors.inputPlaceholder}
+              style={[
+                styles.modalInput,
+                styles.modalTextarea,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.inputBorder,
+                  color: colors.textPrimary,
+                },
+              ]}
               textAlignVertical="top"
               value={note}
             />
 
-            <View style={styles.requestPreviewCard}>
-              <Text style={styles.requestPreviewKicker}>Preview</Text>
-              <Text style={styles.requestPreviewTitle}>
+            <View
+              style={[
+                styles.requestPreviewCard,
+                { backgroundColor: colors.cardAlt, borderColor: colors.border },
+              ]}
+            >
+              <Text style={[styles.requestPreviewKicker, { color: colors.accent }]}>
+                Preview
+              </Text>
+              <Text style={[styles.requestPreviewTitle, { color: colors.textPrimary }]}>
                 {destination.trim() || "Your next trip idea"}
               </Text>
               <View style={styles.requestPreviewChips}>
-                <View style={styles.requestPreviewChip}>
-                  <Text style={styles.requestPreviewChipText}>
+                <View
+                  style={[
+                    styles.requestPreviewChip,
+                    { backgroundColor: colors.card, borderColor: colors.border },
+                  ]}
+                >
+                  <Text style={[styles.requestPreviewChipText, { color: colors.textSecondary }]}>
                     {budget.trim() || "Open budget"}
                   </Text>
                 </View>
-                <View style={styles.requestPreviewChip}>
-                  <Text style={styles.requestPreviewChipText}>
+                <View
+                  style={[
+                    styles.requestPreviewChip,
+                    { backgroundColor: colors.card, borderColor: colors.border },
+                  ]}
+                >
+                  <Text style={[styles.requestPreviewChipText, { color: colors.textSecondary }]}>
                     {timing.trim() || "Flexible timing"}
                   </Text>
                 </View>
-                <View style={styles.requestPreviewChip}>
-                  <Text style={styles.requestPreviewChipText}>
+                <View
+                  style={[
+                    styles.requestPreviewChip,
+                    { backgroundColor: colors.card, borderColor: colors.border },
+                  ]}
+                >
+                  <Text style={[styles.requestPreviewChipText, { color: colors.textSecondary }]}>
                     {travelers.trim() || "2-4 people"}
                   </Text>
                 </View>
               </View>
-              <Text style={styles.requestPreviewNote}>
+              <Text style={[styles.requestPreviewNote, { color: colors.textSecondary }]}>
                 {note.trim() ||
                   "People will see this inside Groups and can mark themselves as interested before you open a full chat."}
               </Text>
@@ -184,26 +251,28 @@ export function TripRequestComposerModal({
             activeOpacity={0.9}
             disabled={saving}
             onPress={onPublishPress}
-            style={[styles.createButton, saving && styles.createButtonDisabled]}
+            style={[
+              styles.createButton,
+              { backgroundColor: colors.accent },
+              saving && styles.createButtonDisabled,
+            ]}
           >
-            <Text style={styles.createButtonText}>
+            <Text style={[styles.createButtonText, { color: colors.buttonTextOnAction }]}>
               {saving ? "Publishing..." : "Publish request"}
             </Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   modalBackdrop: {
-    backgroundColor: "rgba(0,0,0,0.25)",
     flex: 1,
     justifyContent: "flex-end",
   },
   modalSheet: {
-    backgroundColor: "#FFFFFF",
     borderTopLeftRadius: Radius["3xl"],
     borderTopRightRadius: Radius["3xl"],
     maxHeight: "88%",
@@ -219,28 +288,22 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     ...TypeScale.headingLg,
-    color: "#1A1A1A",
     fontWeight: FontWeight.extrabold,
   },
   modalSubtitle: {
     ...TypeScale.bodyMd,
-    color: "#6B7280",
     marginTop: Spacing.xs,
   },
   modalClose: {
     alignItems: "center",
-    backgroundColor: "#F5F5F5",
     borderRadius: Radius.full,
     height: 38,
     justifyContent: "center",
     width: 38,
   },
   modalInput: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E8E8E8",
     borderRadius: Radius.lg,
     borderWidth: 1,
-    color: "#1A1A1A",
     ...TypeScale.titleSm,
     marginTop: Spacing.md,
     paddingHorizontal: Spacing.md,
@@ -249,29 +312,14 @@ const styles = StyleSheet.create({
   modalTextarea: {
     minHeight: 94,
   },
-  feedbackCardError: {
-    backgroundColor: "#FFF1EF",
-    borderColor: "#F0B6AE",
+  feedbackCard: {
     borderRadius: Radius.lg,
     borderWidth: 1,
     marginBottom: Spacing.md,
     padding: Spacing.md,
   },
-  feedbackTextError: {
+  feedbackText: {
     ...TypeScale.bodyMd,
-    color: "#991B1B",
-  },
-  feedbackCardSuccess: {
-    backgroundColor: "#F0FFF4",
-    borderColor: "#A7F3D0",
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    marginBottom: Spacing.md,
-    padding: Spacing.md,
-  },
-  feedbackTextSuccess: {
-    ...TypeScale.bodyMd,
-    color: "#2D6A4F",
   },
   requestInputGrid: {
     flexDirection: "row",
@@ -281,8 +329,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   requestPreviewCard: {
-    backgroundColor: "#F8F8F8",
-    borderColor: "#E8E8E8",
     borderRadius: Radius.xl,
     borderWidth: 1,
     marginTop: Spacing.lg,
@@ -290,14 +336,12 @@ const styles = StyleSheet.create({
   },
   requestPreviewKicker: {
     ...TypeScale.labelLg,
-    color: "#2D6A4F",
     fontWeight: FontWeight.extrabold,
     letterSpacing: 0.6,
     textTransform: "uppercase",
   },
   requestPreviewTitle: {
     ...TypeScale.headingMd,
-    color: "#1A1A1A",
     fontWeight: FontWeight.extrabold,
     marginTop: 6,
   },
@@ -308,8 +352,6 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
   },
   requestPreviewChip: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E8E8E8",
     borderRadius: Radius.full,
     borderWidth: 1,
     paddingHorizontal: Spacing.sm,
@@ -317,17 +359,14 @@ const styles = StyleSheet.create({
   },
   requestPreviewChipText: {
     ...TypeScale.labelLg,
-    color: "#6B7280",
     fontWeight: FontWeight.bold,
   },
   requestPreviewNote: {
     ...TypeScale.bodyMd,
-    color: "#6B7280",
     marginTop: Spacing.md,
   },
   createButton: {
     alignItems: "center",
-    backgroundColor: "#2D6A4F",
     borderRadius: Radius.lg,
     justifyContent: "center",
     marginTop: Spacing.lg,
@@ -338,7 +377,6 @@ const styles = StyleSheet.create({
   },
   createButtonText: {
     ...TypeScale.titleSm,
-    color: "#FFFFFF",
     fontWeight: FontWeight.extrabold,
   },
 });

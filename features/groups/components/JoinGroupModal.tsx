@@ -1,7 +1,9 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import React from "react";
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -46,21 +48,26 @@ export function JoinGroupModal({
       transparent
       visible={visible}
     >
-      <View style={[styles.modalBackdrop, { backgroundColor: colors.modalOverlay }]}>
-        <View style={styles.joinKeyModalSheet}>
+      <KeyboardAvoidingView
+        style={[styles.modalBackdrop, { backgroundColor: colors.modalOverlay }]}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <View style={[styles.joinKeyModalSheet, { backgroundColor: colors.card }]}>
           <View style={styles.modalHeader}>
             <View>
-              <Text style={styles.modalTitle}>Join with private key</Text>
-              <Text style={styles.modalSubtitle}>
+              <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+                Join with private key
+              </Text>
+              <Text style={[styles.modalSubtitle, { color: colors.textSecondary }]}>
                 Paste the key shared by the group creator.
               </Text>
             </View>
             <TouchableOpacity
               activeOpacity={0.9}
               onPress={onClose}
-              style={styles.modalClose}
+              style={[styles.modalClose, { backgroundColor: colors.inputBackground }]}
             >
-              <MaterialIcons color="#374151" name="close" size={22} />
+              <MaterialIcons color={colors.textSecondary} name="close" size={22} />
             </TouchableOpacity>
           </View>
 
@@ -71,8 +78,15 @@ export function JoinGroupModal({
               onClearFeedback();
             }}
             placeholder="Enter private key"
-            placeholderTextColor="#9CA3AF"
-            style={styles.modalInput}
+            placeholderTextColor={colors.inputPlaceholder}
+            style={[
+              styles.modalInput,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.inputBorder,
+                color: colors.textPrimary,
+              },
+            ]}
             value={joinKeyValue}
           />
 
@@ -80,26 +94,28 @@ export function JoinGroupModal({
             activeOpacity={0.9}
             disabled={joining}
             onPress={onJoinPress}
-            style={[styles.createButton, joining && styles.createButtonDisabled]}
+            style={[
+              styles.createButton,
+              { backgroundColor: colors.accent },
+              joining && styles.createButtonDisabled,
+            ]}
           >
-            <Text style={styles.createButtonText}>
+            <Text style={[styles.createButtonText, { color: colors.buttonTextOnAction }]}>
               {joining ? "Joining..." : "Join group"}
             </Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   modalBackdrop: {
-    backgroundColor: "rgba(0,0,0,0.25)",
     flex: 1,
     justifyContent: "flex-end",
   },
   joinKeyModalSheet: {
-    backgroundColor: "#FFFFFF",
     borderTopLeftRadius: Radius["3xl"],
     borderTopRightRadius: Radius["3xl"],
     paddingBottom: Radius["3xl"],
@@ -114,28 +130,22 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     ...TypeScale.headingLg,
-    color: "#1A1A1A",
     fontWeight: FontWeight.extrabold,
   },
   modalSubtitle: {
     ...TypeScale.bodyMd,
-    color: "#6B7280",
     marginTop: Spacing.xs,
   },
   modalClose: {
     alignItems: "center",
-    backgroundColor: "#F5F5F5",
     borderRadius: Radius.full,
     height: 38,
     justifyContent: "center",
     width: 38,
   },
   modalInput: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E8E8E8",
     borderRadius: Radius.lg,
     borderWidth: 1,
-    color: "#1A1A1A",
     ...TypeScale.titleSm,
     marginTop: Spacing.md,
     paddingHorizontal: Spacing.md,
@@ -143,7 +153,6 @@ const styles = StyleSheet.create({
   },
   createButton: {
     alignItems: "center",
-    backgroundColor: "#2D6A4F",
     borderRadius: Radius.lg,
     justifyContent: "center",
     marginTop: Spacing.lg,
@@ -154,7 +163,6 @@ const styles = StyleSheet.create({
   },
   createButtonText: {
     ...TypeScale.titleSm,
-    color: "#FFFFFF",
     fontWeight: FontWeight.extrabold,
   },
 });

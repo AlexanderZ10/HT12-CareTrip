@@ -4,6 +4,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { useAppTheme } from "../components/app-theme-provider";
+import { FontWeight, Radius, Spacing, TypeScale, shadow } from "../constants/design-system";
 import { auth } from "../firebase";
 import { buildBookingOrder, saveBookingForUser } from "../utils/bookings";
 import {
@@ -65,6 +67,7 @@ function resolveParam(value: string | string[] | undefined) {
 }
 
 export default function PaymentReturnScreen() {
+  const { colors } = useAppTheme();
   const router = useRouter();
   const params = useLocalSearchParams<{
     checkout?: string | string[];
@@ -321,36 +324,36 @@ export default function PaymentReturnScreen() {
     receipt?.targetLabel ?? returnTargetLabel ?? (returnState.kind === "expense-repayment" ? "Обратно към групата" : "Обратно към Home");
 
   return (
-    <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
-      <View style={styles.card}>
+    <SafeAreaView style={[styles.screen, { backgroundColor: colors.screenSoft }]} edges={["top", "bottom", "left", "right"]}>
+      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
         {stage === "processing" ? (
           <>
-            <ActivityIndicator size="large" color="#2D6A4F" />
-            <Text style={styles.title}>Завършваме Stripe checkout</Text>
-            <Text style={styles.text}>{message}</Text>
+            <ActivityIndicator size="large" color={colors.accent} />
+            <Text style={[styles.title, { color: colors.textPrimary }]}>Завършваме Stripe checkout</Text>
+            <Text style={[styles.text, { color: colors.textSecondary }]}>{message}</Text>
           </>
         ) : null}
 
         {stage === "success" ? (
           <>
-            <Text style={styles.title}>
+            <Text style={[styles.title, { color: colors.textPrimary }]}>
               {returnState.kind === "expense-repayment"
                 ? "Expense плащането е потвърдено"
                 : "Плащането е потвърдено"}
             </Text>
-            <Text style={styles.text}>{message}</Text>
+            <Text style={[styles.text, { color: colors.textSecondary }]}>{message}</Text>
             {receipt ? (
-              <View style={styles.receiptCard}>
-                <Text style={styles.receiptTitle}>{receipt.kicker}</Text>
+              <View style={[styles.receiptCard, { backgroundColor: colors.warningBackground, borderColor: colors.warningBorder }]}>
+                <Text style={[styles.receiptTitle, { color: colors.warningText }]}>{receipt.kicker}</Text>
                 {receipt.lines.map((line) => (
-                  <Text key={line} style={styles.receiptLine}>
+                  <Text key={line} style={[styles.receiptLine, { color: colors.textSecondary }]}>
                     {line}
                   </Text>
                 ))}
-                <Text style={styles.receiptLine}>
+                <Text style={[styles.receiptLine, { color: colors.textSecondary }]}>
                   Референция: {formatCheckoutReference(receipt.paymentIntentId)}
                 </Text>
-                <Text style={styles.receiptTotal}>Обща сума: {receipt.totalLabel}</Text>
+                <Text style={[styles.receiptTotal, { color: colors.textPrimary }]}>Обща сума: {receipt.totalLabel}</Text>
               </View>
             ) : null}
           </>
@@ -358,21 +361,21 @@ export default function PaymentReturnScreen() {
 
         {stage === "cancelled" ? (
           <>
-            <Text style={styles.title}>Checkout е отказан</Text>
-            <Text style={styles.text}>{message}</Text>
+            <Text style={[styles.title, { color: colors.textPrimary }]}>Checkout е отказан</Text>
+            <Text style={[styles.text, { color: colors.textSecondary }]}>{message}</Text>
           </>
         ) : null}
 
         {stage === "error" ? (
           <>
-            <Text style={styles.title}>Проблем при връщане от Stripe</Text>
-            <Text style={styles.text}>{message}</Text>
+            <Text style={[styles.title, { color: colors.textPrimary }]}>Проблем при връщане от Stripe</Text>
+            <Text style={[styles.text, { color: colors.textSecondary }]}>{message}</Text>
           </>
         ) : null}
 
         {stage !== "processing" ? (
-          <TouchableOpacity activeOpacity={0.9} onPress={handleBack} style={styles.button}>
-            <Text style={styles.buttonText}>{buttonLabel}</Text>
+          <TouchableOpacity activeOpacity={0.9} onPress={handleBack} style={[styles.button, { backgroundColor: colors.accent }]}>
+            <Text style={[styles.buttonText, { color: colors.buttonTextOnAction }]}>{buttonLabel}</Text>
           </TouchableOpacity>
         ) : null}
       </View>
@@ -383,76 +386,63 @@ export default function PaymentReturnScreen() {
 const styles = StyleSheet.create({
   screen: {
     alignItems: "center",
-    backgroundColor: "#F0F0F0",
     flex: 1,
     justifyContent: "center",
-    padding: 20,
+    padding: Spacing.xl,
   },
   card: {
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E8E8E8",
-    borderRadius: 24,
+    borderRadius: Radius["2xl"],
     borderWidth: 1,
     maxWidth: 520,
-    padding: 24,
+    padding: Spacing["2xl"],
     width: "100%",
+    ...shadow("md"),
   },
   title: {
-    color: "#1A1A1A",
-    fontSize: 24,
-    fontWeight: "800",
-    marginBottom: 10,
-    marginTop: 14,
+    ...TypeScale.headingLg,
+    fontWeight: FontWeight.extrabold,
+    marginBottom: Spacing.sm,
+    marginTop: Spacing.md,
     textAlign: "center",
   },
   text: {
-    color: "#5A6E41",
-    fontSize: 15,
-    lineHeight: 22,
+    ...TypeScale.bodyMd,
     textAlign: "center",
   },
   receiptCard: {
-    backgroundColor: "#FFF8E7",
-    borderColor: "#F1D7A5",
-    borderRadius: 18,
+    borderRadius: Radius.xl,
     borderWidth: 1,
-    marginTop: 18,
-    padding: 16,
+    marginTop: Spacing.lg,
+    padding: Spacing.lg,
     width: "100%",
   },
   receiptTitle: {
-    color: "#8B5611",
-    fontSize: 12,
-    fontWeight: "800",
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.extrabold,
     letterSpacing: 0.8,
-    marginBottom: 10,
+    marginBottom: Spacing.sm,
     textTransform: "uppercase",
   },
   receiptLine: {
-    color: "#5C4826",
-    fontSize: 14,
-    lineHeight: 21,
-    marginBottom: 6,
+    ...TypeScale.bodyMd,
+    marginBottom: Spacing.xs,
   },
   receiptTotal: {
-    color: "#2C341E",
-    fontSize: 22,
-    fontWeight: "800",
-    marginTop: 10,
+    ...TypeScale.headingMd,
+    fontWeight: FontWeight.extrabold,
+    marginTop: Spacing.sm,
   },
   button: {
     alignItems: "center",
-    backgroundColor: "#2D6A4F",
-    borderRadius: 16,
-    marginTop: 20,
-    paddingHorizontal: 18,
-    paddingVertical: 14,
+    borderRadius: Radius.lg,
+    marginTop: Spacing.xl,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
     width: "100%",
   },
   buttonText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "800",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
   },
 });

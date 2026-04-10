@@ -83,9 +83,7 @@ export async function callAI(params: {
   jsonMode?: boolean;
   conversationHistory?: { role: "user" | "assistant"; content: string }[];
 }): Promise<string> {
-  const endpoint = `${GEMINI_API_BASE_URL}/models/${AI_MODEL}:generateContent?key=${encodeURIComponent(
-    params.apiKey
-  )}`;
+  const endpoint = `${GEMINI_API_BASE_URL}/models/${AI_MODEL}:generateContent`;
 
   const systemInstruction = params.jsonMode
     ? [params.systemPrompt, "Return only a valid JSON object. No markdown fences. No commentary."]
@@ -111,6 +109,7 @@ export async function callAI(params: {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "x-goog-api-key": params.apiKey,
     },
     body: JSON.stringify(body),
   });

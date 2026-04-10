@@ -2,6 +2,7 @@ import {
   extractPersonalProfile,
   type PersonalProfileInfo,
 } from "./profile-info";
+import { sanitizeString, sanitizeStringArray } from "./sanitize";
 import type { AppLanguage } from "./translations";
 import { callAI, getAIApiKey, AI_MODEL } from "./ai";
 
@@ -73,10 +74,6 @@ type SettlementCoordinates = {
   latitude: number | null;
   longitude: number | null;
 };
-
-function sanitizeString(value: unknown, fallback = "") {
-  return typeof value === "string" ? value.trim() : fallback;
-}
 
 function getLanguageVariant(language?: string): AppLanguage {
   const normalized = (language || "").trim().toLowerCase();
@@ -177,18 +174,6 @@ function normalizeComparableText(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
-}
-
-function sanitizeStringArray(value: unknown) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .filter((item): item is string => typeof item === "string")
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, 6);
 }
 
 function sanitizeImageUrls(value: unknown) {

@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAppLanguage } from "../../../components/app-language-provider";
+import { useAppTheme } from "../../../components/app-theme-provider";
 import { FontWeight, Layout, Radius, Spacing, TypeScale, shadow } from "../../../constants/design-system";
 import type { HomePlannerChatThread } from "../../../utils/home-chat-storage";
 import { formatUpdatedDate } from "../../../utils/formatting";
@@ -24,14 +25,6 @@ type ChatDrawerProps = {
   chatMenuVisible: boolean;
   chatSearch: string;
   chats: HomePlannerChatThread[];
-  colors: {
-    border: string;
-    card: string;
-    cardAlt: string;
-    modalOverlay: string;
-    textPrimary: string;
-    textSecondary: string;
-  };
   currentChatId: string | null;
   filteredChats: HomePlannerChatThread[];
   insetBottom: number;
@@ -83,32 +76,46 @@ function ChatListItem({
   setRenamingChatId: (id: string | null) => void;
 }) {
   const { language: itemLanguage } = useAppLanguage();
+  const { colors } = useAppTheme();
   const itemLocale = getLanguageLocale(itemLanguage);
 
   if (isRenaming) {
     return (
-      <View style={[styles.chatListItem, isActive && styles.chatListItemActive]}>
+      <View
+        style={[
+          styles.chatListItem,
+          { backgroundColor: colors.inputBackground, borderColor: colors.border },
+          isActive && { backgroundColor: colors.cardAlt, borderColor: colors.border },
+        ]}
+      >
         <View style={styles.renameWrap}>
           <TextInput
-            style={styles.renameInput}
+            style={[
+              styles.renameInput,
+              { backgroundColor: colors.card, color: colors.textPrimary, borderColor: colors.inputBorder },
+            ]}
             value={renameValue}
             onChangeText={setRenameValue}
             placeholder={renamePlaceholder}
-            placeholderTextColor="#9CA3AF"
+            placeholderTextColor={colors.inputPlaceholder}
           />
           <View style={styles.renameActions}>
-            <TouchableOpacity style={styles.iconButton} onPress={onSaveRename} activeOpacity={0.9}>
-              <MaterialIcons name="check" size={18} color="#2D6A4F" />
+            <TouchableOpacity
+              style={[styles.iconButton, { backgroundColor: colors.card }]}
+              onPress={onSaveRename}
+              activeOpacity={0.9}
+            >
+              <MaterialIcons name="check" size={18} color={colors.accent} />
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.iconButton}
+              style={[styles.iconButton, { backgroundColor: colors.card }]}
               onPress={() => {
                 setRenamingChatId(null);
                 setRenameValue("");
               }}
               activeOpacity={0.9}
             >
-              <MaterialIcons name="close" size={18} color="#DC3545" />
+              <MaterialIcons name="close" size={18} color={colors.error} />
             </TouchableOpacity>
           </View>
         </View>
@@ -117,29 +124,49 @@ function ChatListItem({
   }
 
   return (
-    <View style={[styles.chatListItem, isActive && styles.chatListItemActive]}>
+    <View
+      style={[
+        styles.chatListItem,
+        { backgroundColor: colors.inputBackground, borderColor: colors.border },
+        isActive && { backgroundColor: colors.cardAlt, borderColor: colors.border },
+      ]}
+    >
       <TouchableOpacity onPress={onSelect} activeOpacity={0.9}>
         <View style={styles.chatTitleRow}>
-          <Text style={styles.chatItemTitle} numberOfLines={2}>
+          <Text style={[styles.chatItemTitle, { color: colors.textPrimary }]} numberOfLines={2}>
             {chat.title}
           </Text>
-          {chat.pinned ? <MaterialIcons name="push-pin" size={16} color="#92400E" /> : null}
+          {chat.pinned ? <MaterialIcons name="push-pin" size={16} color={colors.warningText} /> : null}
         </View>
-        <Text style={styles.chatItemMeta}>{formatUpdatedDate(chat.updatedAtMs, itemLocale)}</Text>
+        <Text style={[styles.chatItemMeta, { color: colors.textMuted }]}>
+          {formatUpdatedDate(chat.updatedAtMs, itemLocale)}
+        </Text>
       </TouchableOpacity>
       <View style={styles.chatItemActions}>
-        <TouchableOpacity style={styles.iconButton} onPress={onRename} activeOpacity={0.9}>
-          <MaterialIcons name="edit" size={16} color="#6B7280" />
+        <TouchableOpacity
+          style={[styles.iconButton, { backgroundColor: colors.card }]}
+          onPress={onRename}
+          activeOpacity={0.9}
+        >
+          <MaterialIcons name="edit" size={16} color={colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.iconButton} onPress={onTogglePin} activeOpacity={0.9}>
+        <TouchableOpacity
+          style={[styles.iconButton, { backgroundColor: colors.card }]}
+          onPress={onTogglePin}
+          activeOpacity={0.9}
+        >
           <MaterialIcons
             name={chat.pinned ? "push-pin" : "outlined-flag"}
             size={16}
-            color="#6B7280"
+            color={colors.textSecondary}
           />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.iconButton} onPress={onDelete} activeOpacity={0.9}>
-          <MaterialIcons name="delete-outline" size={16} color="#DC3545" />
+        <TouchableOpacity
+          style={[styles.iconButton, { backgroundColor: colors.card }]}
+          onPress={onDelete}
+          activeOpacity={0.9}
+        >
+          <MaterialIcons name="delete-outline" size={16} color={colors.error} />
         </TouchableOpacity>
       </View>
     </View>
@@ -150,7 +177,6 @@ export function ChatDrawer({
   chatMenuVisible,
   chatSearch,
   chats,
-  colors,
   currentChatId,
   filteredChats,
   insetBottom,
@@ -174,6 +200,7 @@ export function ChatDrawer({
   setRenamingChatId,
 }: ChatDrawerProps) {
   const { language, t } = useAppLanguage();
+  const { colors } = useAppTheme();
   const locale = getLanguageLocale(language);
   const savedChatsLabel =
     language === "bg"
@@ -189,8 +216,15 @@ export function ChatDrawer({
   const renderChatList = (chatList: HomePlannerChatThread[]) => {
     if (chatList.length === 0) {
       return (
-        <View style={styles.emptyChatSearchState}>
-          <Text style={styles.emptyChatSearchText}>{t("home.noChatsFound")}</Text>
+        <View
+          style={[
+            styles.emptyChatSearchState,
+            { backgroundColor: colors.inputBackground, borderColor: colors.border },
+          ]}
+        >
+          <Text style={[styles.emptyChatSearchText, { color: colors.textMuted }]}>
+            {t("home.noChatsFound")}
+          </Text>
         </View>
       );
     }
@@ -218,11 +252,16 @@ export function ChatDrawer({
     <>
       {isPhoneLayout && isPhoneChatDrawerMounted ? (
         <View style={styles.phoneDrawerOverlay}>
-          <Pressable style={styles.phoneDrawerBackdrop} onPress={onClosePhoneDrawer} />
+          <Pressable
+            style={[styles.phoneDrawerBackdrop, { backgroundColor: colors.overlay }]}
+            onPress={onClosePhoneDrawer}
+          />
           <Animated.View
             style={[
               styles.phoneDrawerPanel,
               {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
                 paddingBottom: insetBottom + 16,
                 paddingTop: insetTop + 14,
                 transform: [{ translateX: phoneDrawerTranslateX }],
@@ -231,23 +270,31 @@ export function ChatDrawer({
             ]}
           >
             <View style={styles.phoneDrawerTopRow}>
-              <Text style={styles.phoneDrawerBrand}>CareTrip</Text>
+              <Text style={[styles.phoneDrawerBrand, { color: colors.textPrimary }]}>CareTrip</Text>
               <TouchableOpacity
-                style={styles.phoneDrawerCloseButton}
+                style={[
+                  styles.phoneDrawerCloseButton,
+                  { backgroundColor: colors.inputBackground, borderColor: colors.border },
+                ]}
                 onPress={onClosePhoneDrawer}
                 activeOpacity={0.9}
               >
-                <MaterialIcons name="close" size={20} color="#1A1A1A" />
+                <MaterialIcons name="close" size={20} color={colors.textPrimary} />
               </TouchableOpacity>
             </View>
-            <View style={styles.phoneDrawerSearchWrap}>
-              <MaterialIcons name="search" size={18} color="#9CA3AF" />
+            <View
+              style={[
+                styles.phoneDrawerSearchWrap,
+                { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder },
+              ]}
+            >
+              <MaterialIcons name="search" size={18} color={colors.inputPlaceholder} />
               <TextInput
-                style={styles.phoneDrawerSearchInput}
+                style={[styles.phoneDrawerSearchInput, { color: colors.textPrimary }]}
                 value={chatSearch}
                 onChangeText={onChatSearchChange}
                 placeholder={t("home.searchChats")}
-                placeholderTextColor="#9CA3AF"
+                placeholderTextColor={colors.inputPlaceholder}
               />
             </View>
             <ScrollView
@@ -291,12 +338,14 @@ export function ChatDrawer({
             </View>
 
             <TouchableOpacity
-              style={[styles.newChatButton, styles.historyMenuNewChatButton]}
+              style={[styles.newChatButton, styles.historyMenuNewChatButton, { backgroundColor: colors.accent }]}
               onPress={onCreateChat}
               activeOpacity={0.9}
             >
-              <MaterialIcons name="add" size={18} color="#FFFFFF" />
-              <Text style={styles.newChatButtonText}>{t("home.newPlan")}</Text>
+              <MaterialIcons name="add" size={18} color={colors.buttonTextOnAction} />
+              <Text style={[styles.newChatButtonText, { color: colors.buttonTextOnAction }]}>
+                {t("home.newPlan")}
+              </Text>
             </TouchableOpacity>
 
             <ScrollView
@@ -316,16 +365,10 @@ export function ChatDrawer({
 
 const styles = StyleSheet.create({
   chatListItem: {
-    backgroundColor: "#F5F5F5",
     borderRadius: Radius.lg,
     padding: Spacing.md,
     borderWidth: 1,
-    borderColor: "#E8E8E8",
     marginBottom: Spacing.sm,
-  },
-  chatListItemActive: {
-    backgroundColor: "#E5E7EB",
-    borderColor: "#D1D5DB",
   },
   chatTitleRow: {
     flexDirection: "row",
@@ -334,14 +377,12 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   chatItemTitle: {
-    color: "#1A1A1A",
     ...TypeScale.bodyMd,
     fontWeight: FontWeight.extrabold,
     flex: 1,
     paddingRight: Spacing.sm,
   },
   chatItemMeta: {
-    color: "#9CA3AF",
     ...TypeScale.labelMd,
     marginBottom: Spacing.sm,
   },
@@ -354,20 +395,16 @@ const styles = StyleSheet.create({
     borderRadius: Radius.sm,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#FFFFFF",
     marginRight: Spacing.sm,
   },
   renameWrap: {
     width: "100%",
   },
   renameInput: {
-    backgroundColor: "#FFFFFF",
     borderRadius: Radius.md,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
-    color: "#1A1A1A",
     borderWidth: 1,
-    borderColor: "#E8E8E8",
     marginBottom: Spacing.sm,
   },
   renameActions: {
@@ -377,12 +414,9 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.lg,
     paddingHorizontal: Spacing.md,
     borderRadius: Radius.lg,
-    backgroundColor: "#F5F5F5",
     borderWidth: 1,
-    borderColor: "#E8E8E8",
   },
   emptyChatSearchText: {
-    color: "#9CA3AF",
     ...TypeScale.bodyMd,
     textAlign: "center",
   },
@@ -393,18 +427,15 @@ const styles = StyleSheet.create({
   },
   phoneDrawerBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.3)",
   },
   phoneDrawerPanel: {
     position: "absolute",
     top: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: "#FFFFFF",
     borderTopRightRadius: Radius["2xl"],
     borderBottomRightRadius: Radius["2xl"],
     borderRightWidth: 1,
-    borderColor: "#E8E8E8",
     paddingHorizontal: Spacing.md,
     ...shadow("xl"),
   },
@@ -415,7 +446,6 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   phoneDrawerBrand: {
-    color: "#1A1A1A",
     ...TypeScale.headingMd,
     fontWeight: FontWeight.black,
   },
@@ -425,17 +455,13 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F5F5F5",
     borderWidth: 1,
-    borderColor: "#E8E8E8",
   },
   phoneDrawerSearchWrap: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F5F5F5",
     borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: "#E8E8E8",
     paddingHorizontal: Spacing.md,
     marginBottom: Spacing.md,
   },
@@ -443,7 +469,6 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: Layout.touchTarget,
     marginLeft: Spacing.sm,
-    color: "#1A1A1A",
   },
   phoneDrawerList: {
     flex: 1,
@@ -495,7 +520,6 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   newChatButton: {
-    backgroundColor: "#2D6A4F",
     borderRadius: Radius.lg,
     paddingVertical: Spacing.md,
     paddingHorizontal: Spacing.md,
@@ -504,7 +528,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
   },
   newChatButtonText: {
-    color: "#FFFFFF",
     fontWeight: FontWeight.extrabold,
     marginLeft: Spacing.xs,
   },
@@ -521,7 +544,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: Radius.full,
-    backgroundColor: "#2D6A4F",
     alignItems: "center",
     justifyContent: "center",
     ...shadow("md"),

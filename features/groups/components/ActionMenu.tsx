@@ -8,6 +8,7 @@ import {
   View,
 } from "react-native";
 
+import { useAppTheme } from "../../../components/app-theme-provider";
 import {
   FontWeight,
   Radius,
@@ -31,6 +32,8 @@ export function ActionMenu({
   onUsePrivateKey,
   onCreateTripRequest,
 }: ActionMenuProps) {
+  const { colors } = useAppTheme();
+
   return (
     <Modal
       animationType="fade"
@@ -44,18 +47,18 @@ export function ActionMenu({
           onPress={onClose}
           style={styles.actionMenuDismissArea}
         />
-        <View style={styles.actionMenuCard}>
+        <View style={[styles.actionMenuCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <TouchableOpacity
             activeOpacity={0.9}
             onPress={onCreateGroup}
             style={styles.actionMenuItem}
           >
-            <View style={styles.actionMenuIconWrap}>
-              <MaterialIcons color="#FFFFFF" name="group-add" size={18} />
+            <View style={[styles.actionMenuIconWrap, { backgroundColor: colors.accent }]}>
+              <MaterialIcons color={colors.buttonTextOnAction} name="group-add" size={18} />
             </View>
             <View style={styles.actionMenuTextWrap}>
-              <Text style={styles.actionMenuTitle}>Create group</Text>
-              <Text style={styles.actionMenuSubtitle}>
+              <Text style={[styles.actionMenuTitle, { color: colors.textPrimary }]}>Create group</Text>
+              <Text style={[styles.actionMenuSubtitle, { color: colors.textSecondary }]}>
                 Create a new public or private group.
               </Text>
             </View>
@@ -66,12 +69,12 @@ export function ActionMenu({
             onPress={onUsePrivateKey}
             style={styles.actionMenuItem}
           >
-            <View style={[styles.actionMenuIconWrap, styles.actionMenuIconWrapAlt]}>
+            <View style={[styles.actionMenuIconWrap, { backgroundColor: colors.warningText }]}>
               <MaterialIcons color="#FFFFFF" name="vpn-key" size={18} />
             </View>
             <View style={styles.actionMenuTextWrap}>
-              <Text style={styles.actionMenuTitle}>Use private key</Text>
-              <Text style={styles.actionMenuSubtitle}>
+              <Text style={[styles.actionMenuTitle, { color: colors.textPrimary }]}>Use private key</Text>
+              <Text style={[styles.actionMenuSubtitle, { color: colors.textSecondary }]}>
                 Join a private group with the creator&apos;s key.
               </Text>
             </View>
@@ -82,12 +85,12 @@ export function ActionMenu({
             onPress={onCreateTripRequest}
             style={styles.actionMenuItem}
           >
-            <View style={[styles.actionMenuIconWrap, styles.actionMenuIconWrapRequest]}>
+            <View style={[styles.actionMenuIconWrap, { backgroundColor: "#246A7A" }]}>
               <MaterialIcons color="#FFFFFF" name="tips-and-updates" size={18} />
             </View>
             <View style={styles.actionMenuTextWrap}>
-              <Text style={styles.actionMenuTitle}>Create trip request</Text>
-              <Text style={styles.actionMenuSubtitle}>
+              <Text style={[styles.actionMenuTitle, { color: colors.textPrimary }]}>Create trip request</Text>
+              <Text style={[styles.actionMenuSubtitle, { color: colors.textSecondary }]}>
                 Post a travel idea and collect interested people first.
               </Text>
             </View>
@@ -111,8 +114,6 @@ const styles = StyleSheet.create({
   },
   actionMenuCard: {
     alignSelf: "flex-end",
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E8E8E8",
     borderRadius: Radius.xl,
     borderWidth: 1,
     minWidth: 300,
@@ -128,17 +129,10 @@ const styles = StyleSheet.create({
   },
   actionMenuIconWrap: {
     alignItems: "center",
-    backgroundColor: "#2D6A4F",
     borderRadius: Radius.lg,
     height: Spacing["3xl"],
     justifyContent: "center",
     width: Spacing["3xl"],
-  },
-  actionMenuIconWrapAlt: {
-    backgroundColor: "#BA7517",
-  },
-  actionMenuIconWrapRequest: {
-    backgroundColor: "#246A7A",
   },
   actionMenuTextWrap: {
     flex: 1,
@@ -146,12 +140,10 @@ const styles = StyleSheet.create({
   },
   actionMenuTitle: {
     ...TypeScale.titleSm,
-    color: "#1A1A1A",
     fontWeight: FontWeight.extrabold,
   },
   actionMenuSubtitle: {
     ...TypeScale.bodySm,
-    color: "#6B7280",
     marginTop: 3,
   },
 });

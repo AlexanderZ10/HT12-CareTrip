@@ -10,6 +10,7 @@ import {
 } from "react-native";
 
 import { useAppTheme } from "./app-theme-provider";
+import { FontWeight, Radius, Spacing, TypeScale } from "../constants/design-system";
 
 type ConfirmDialogProps = {
   cancelLabel?: string;
@@ -90,47 +91,45 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    padding: 20,
+    padding: Spacing.xl,
   },
   card: {
     width: "100%",
     maxWidth: 420,
-    borderRadius: 24,
-    padding: 20,
+    borderRadius: Radius["2xl"],
+    padding: Spacing.xl,
   },
   title: {
-    fontSize: 22,
-    fontWeight: "800",
-    marginBottom: 8,
+    ...TypeScale.headingMd,
+    fontWeight: FontWeight.extrabold,
+    marginBottom: Spacing.sm,
   },
   message: {
-    fontSize: 15,
-    lineHeight: 22,
+    ...TypeScale.bodyMd,
   },
   actions: {
     flexDirection: "row",
-    marginTop: 18,
+    marginTop: Spacing.lg,
   },
   button: {
     flex: 1,
     minHeight: 48,
-    borderRadius: 16,
+    borderRadius: Radius.lg,
     alignItems: "center",
     justifyContent: "center",
   },
   cancelButton: {
-    marginRight: 10,
+    marginRight: Spacing.md,
   },
   buttonDisabled: {
     opacity: 0.7,
   },
   cancelLabel: {
-    fontSize: 15,
-    fontWeight: "700",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.bold,
   },
   confirmLabel: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "800",
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
   },
 });

@@ -59,6 +59,7 @@ export default function TabsLayout() {
 
   return (
     <Tabs
+      initialRouteName="home"
       screenOptions={{
         headerShown: false,
         sceneStyle: {
@@ -127,6 +128,18 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, focused }) => (
             <TabIcon name="person-outline" color={color} focused={focused} />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="feed"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="social-profile"
+        options={{
+          href: null,
         }}
       />
     </Tabs>

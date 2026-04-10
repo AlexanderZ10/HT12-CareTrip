@@ -352,6 +352,7 @@ export default function OnboardingScreen() {
             setInterestsNote(value);
             clearError("interests");
           }}
+          maxLength={280}
           multiline
           textAlignVertical="top"
         />
@@ -384,6 +385,7 @@ export default function OnboardingScreen() {
             setAssistanceNote(value);
             clearError("assistance");
           }}
+          maxLength={280}
           multiline
           textAlignVertical="top"
         />
@@ -416,6 +418,7 @@ export default function OnboardingScreen() {
             setSkillsNote(value);
             clearError("skills");
           }}
+          maxLength={280}
           multiline
           textAlignVertical="top"
         />

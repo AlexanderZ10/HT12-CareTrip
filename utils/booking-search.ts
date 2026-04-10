@@ -1,6 +1,7 @@
 import { httpsCallable } from "firebase/functions";
 
 import { functions } from "../firebase";
+import { sanitizeString } from "./sanitize";
 import type {
   LiveStayOffer,
   LiveTravelOffer,
@@ -55,10 +56,6 @@ export type BookingSearchResult = {
 // ---------------------------------------------------------------------------
 // Sanitizers
 // ---------------------------------------------------------------------------
-
-function sanitizeString(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value.trim() : fallback;
-}
 
 function sanitizeNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {

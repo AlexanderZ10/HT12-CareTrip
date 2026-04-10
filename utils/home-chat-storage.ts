@@ -2,9 +2,11 @@ import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 
 import { db } from "../firebase";
 import { normalizeBudgetToEuro } from "./currency";
+import { sanitizeString, sanitizeStringArray } from "./sanitize";
 import {
   formatGroundedTravelPlan,
   type GroundedTravelPlan,
+  type PlannerDayPlan,
 } from "./home-travel-planner";
 
 export type HomePlannerStep =
@@ -72,23 +74,8 @@ type ImportedSharedTrip = {
   sourceKey: string;
   summary: string;
   title: string;
+  tripDays: PlannerDayPlan[];
 };
-
-function sanitizeString(value: unknown, fallback = "") {
-  return typeof value === "string" ? value.trim() : fallback;
-}
-
-function sanitizeStringArray(value: unknown) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .filter((item): item is string => typeof item === "string")
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, 4);
-}
 
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -288,7 +275,7 @@ export function createHomePlannerChatFromSharedTrip(
           summary: trip.summary.trim(),
           title: trip.title.trim(),
           transportOptions: [],
-          tripDays: [],
+          tripDays: trip.tripDays,
         },
         sourceKey: trip.sourceKey.trim() || createId("imported-source"),
       },

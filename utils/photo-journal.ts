@@ -11,6 +11,7 @@ import {
 } from "firebase/firestore";
 
 import { db } from "../firebase";
+import { sanitizeString, toMillis } from "./sanitize";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -31,27 +32,6 @@ export type JournalPhoto = {
 // ---------------------------------------------------------------------------
 // Sanitization helpers
 // ---------------------------------------------------------------------------
-
-function sanitizeString(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value.trim() : fallback;
-}
-
-function toMillis(value: unknown): number {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (
-    value &&
-    typeof value === "object" &&
-    "toMillis" in value &&
-    typeof value.toMillis === "function"
-  ) {
-    return value.toMillis() as number;
-  }
-
-  return 0;
-}
 
 function sanitizeJournalPhoto(
   id: string,

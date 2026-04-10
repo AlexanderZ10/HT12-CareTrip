@@ -4,6 +4,7 @@ import { Platform } from "react-native";
 
 import { functions } from "../firebase";
 import { callAI, getAIApiKey } from "./ai";
+import { sanitizeString } from "./sanitize";
 import { GEMINI_MODEL, type DiscoverProfile } from "./trip-recommendations";
 
 export type LiveTravelOffer = {
@@ -109,10 +110,6 @@ type GeminiFallbackOfferPayload = {
   stayOptions?: Partial<LiveStayOffer>[];
   transportOptions?: Partial<LiveTravelOffer>[];
 };
-
-function sanitizeString(value: unknown, fallback = "") {
-  return typeof value === "string" ? value.trim() : fallback;
-}
 
 function sanitizeNumber(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -565,7 +562,12 @@ async function searchTravelOffersFallback(
     jsonMode: true,
   });
 
-  const payload = JSON.parse(rawJson) as GeminiFallbackOfferPayload;
+  let payload: GeminiFallbackOfferPayload;
+  try {
+    payload = JSON.parse(rawJson) as GeminiFallbackOfferPayload;
+  } catch {
+    throw new Error("fallback-invalid-json");
+  }
 
   return {
     notes: [

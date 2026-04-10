@@ -1,4 +1,5 @@
 import { normalizeBudgetToEuro } from "./currency";
+import { sanitizeString, sanitizeStringArray } from "./sanitize";
 import type { AppLanguage } from "./translations";
 import { type DiscoverProfile } from "./trip-recommendations";
 import { callAI, getAIApiKey } from "./ai";
@@ -114,10 +115,6 @@ const HOME_PLAN_RESPONSE_SCHEMA = {
     "tripDays",
   ],
 } as const;
-
-function sanitizeString(value: unknown, fallback = "") {
-  return typeof value === "string" ? value.trim() : fallback;
-}
 
 function getPlannerLanguageVariant(language?: string): AppLanguage {
   const normalized = (language || "").trim().toLowerCase();
@@ -262,23 +259,11 @@ function getPlannerCopy(language?: string) {
   }
 }
 
-function sanitizeStringArray(value: unknown) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .filter((item): item is string => typeof item === "string")
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, 4);
-}
-
 function extractJsonObject(text: string) {
   const trimmedText = text.trim();
 
   if (!trimmedText) {
-    throw new SyntaxError("empty-json-response");
+    throw new Error("empty-json-response");
   }
 
   const fencedMatch = trimmedText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
@@ -311,7 +296,7 @@ function extractJsonObject(text: string) {
     }
   }
 
-  throw new SyntaxError("invalid-json-response");
+  throw new Error("invalid-json-response");
 }
 
 function dedupeByKey<T>(items: T[], getKey: (item: T) => string) {
@@ -522,28 +507,28 @@ function buildPlannerPrompt(params: {
     "BUDGET_FIT",
     "PROFILE_TIP",
     "",
-    `Trip origin / home base: ${homeBase}`,
-    `Budget (EUR): ${normalizedBudget}`,
-    `Trip length: ${days}`,
-    `Travelers count: ${travelers}`,
-    `Preferred transport: ${transportPreference}`,
-    `Timing / period: ${timing}`,
-    `Destination: ${destination}`,
-    `Username: ${profile.username || "Not provided"}`,
-    `Email: ${profile.email || "Not provided"}`,
-    `Full name: ${profile.personalProfile.fullName || "Not provided"}`,
-    `About me: ${profile.personalProfile.aboutMe || "Not provided"}`,
-    `Dream destinations: ${profile.personalProfile.dreamDestinations || "Not provided"}`,
-    `Travel pace: ${profile.personalProfile.travelPace || "Not provided"}`,
-    `Stay style: ${profile.personalProfile.stayStyle || "Not provided"}`,
-    `Interests: ${profile.interests.selectedOptions.join(", ") || "None provided"}`,
-    `Interests note: ${profile.interests.note || "None"}`,
-    `Accessibility / assistance needs: ${
+    `Trip origin / home base: """${homeBase}"""`,
+    `Budget (EUR): """${normalizedBudget}"""`,
+    `Trip length: """${days}"""`,
+    `Travelers count: """${travelers}"""`,
+    `Preferred transport: """${transportPreference}"""`,
+    `Timing / period: """${timing}"""`,
+    `Destination: """${destination}"""`,
+    `Username: """${profile.username || "Not provided"}"""`,
+    `Email: """${profile.email || "Not provided"}"""`,
+    `Full name: """${profile.personalProfile.fullName || "Not provided"}"""`,
+    `About me: """${profile.personalProfile.aboutMe || "Not provided"}"""`,
+    `Dream destinations: """${profile.personalProfile.dreamDestinations || "Not provided"}"""`,
+    `Travel pace: """${profile.personalProfile.travelPace || "Not provided"}"""`,
+    `Stay style: """${profile.personalProfile.stayStyle || "Not provided"}"""`,
+    `Interests: """${profile.interests.selectedOptions.join(", ") || "None provided"}"""`,
+    `Interests note: """${profile.interests.note || "None"}"""`,
+    `Accessibility / assistance needs: """${
       profile.assistance.selectedOptions.join(", ") || "None provided"
-    }`,
-    `Assistance note: ${profile.assistance.note || "None"}`,
-    `Skills / ways to help: ${profile.skills.selectedOptions.join(", ") || "None provided"}`,
-    `Skills note: ${profile.skills.note || "None"}`,
+    }"""`,
+    `Assistance note: """${profile.assistance.note || "None"}"""`,
+    `Skills / ways to help: """${profile.skills.selectedOptions.join(", ") || "None provided"}"""`,
+    `Skills note: """${profile.skills.note || "None"}"""`,
   ].join("\n");
 }
 

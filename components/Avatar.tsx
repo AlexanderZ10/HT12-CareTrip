@@ -2,6 +2,7 @@ import { Image } from "expo-image";
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 
+import { useAppTheme } from "./app-theme-provider";
 import { FontWeight, Spacing, TypeScale } from "../constants/design-system";
 
 const AVATAR_PALETTE = ["#4D7CFE", "#7C3AED", "#DB2777", "#0EA5E9", "#16A34A", "#F97316"];
@@ -26,7 +27,6 @@ export function getInitials(value: string) {
 }
 
 type AvatarProps = {
-  imageUri?: string;
   label: string;
   photoUrl?: string;
   size?: number;
@@ -34,6 +34,8 @@ type AvatarProps = {
 };
 
 export function Avatar({ label, photoUrl, size = 72, subtitle }: AvatarProps) {
+  const { colors } = useAppTheme();
+
   return (
     <View style={styles.avatarWrap}>
       <View
@@ -43,14 +45,14 @@ export function Avatar({ label, photoUrl, size = 72, subtitle }: AvatarProps) {
         ]}
       >
         {photoUrl ? (
-          <Image contentFit="cover" source={{ uri: photoUrl }} style={styles.avatarImage} />
+          <Image contentFit="cover" source={{ uri: photoUrl }} style={[styles.avatarImage, { backgroundColor: colors.cardAlt }]} />
         ) : (
           <Text style={[styles.avatarText, { fontSize: Math.max(16, size * 0.26) }]}>
             {getInitials(label)}
           </Text>
         )}
       </View>
-      {subtitle ? <Text style={styles.avatarSubtitle}>{subtitle}</Text> : null}
+      {subtitle ? <Text style={[styles.avatarSubtitle, { color: colors.textMuted }]}>{subtitle}</Text> : null}
     </View>
   );
 }
@@ -65,7 +67,6 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   avatarImage: {
-    backgroundColor: "#F5F5F5",
     height: "100%",
     width: "100%",
   },
@@ -75,7 +76,6 @@ const styles = StyleSheet.create({
   },
   avatarSubtitle: {
     ...TypeScale.labelLg,
-    color: "#9CA3AF",
     marginTop: Spacing.xs,
   },
 });

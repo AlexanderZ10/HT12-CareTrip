@@ -50,6 +50,13 @@ const translations = {
     es: "Grupos",
     fr: "Groupes",
   },
+  "tab.feed": {
+    bg: "\u0424\u0438\u0439\u0434",
+    en: "Feed",
+    de: "Feed",
+    es: "Feed",
+    fr: "Feed",
+  },
   "tab.profile": {
     bg: "\u041F\u0440\u043E\u0444\u0438\u043B",
     en: "Profile",

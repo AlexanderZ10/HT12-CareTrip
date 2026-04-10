@@ -1279,7 +1279,7 @@ export default function HomeTabScreen() {
         <KeyboardAvoidingView
           style={styles.flex1}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
-          keyboardVerticalOffset={0}
+          keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
         >
         <View style={styles.chatShell}>
             <View
@@ -1289,37 +1289,35 @@ export default function HomeTabScreen() {
               ]}
             >
               <TouchableOpacity
+                accessibilityLabel="Open chat history"
                 activeOpacity={0.7}
                 onPress={() => setChatMenuVisible(true)}
-                style={[
-                  styles.headerIconBtn,
-                  { backgroundColor: colors.cardAlt, borderColor: colors.border },
-                ]}
+                style={styles.headerIconBtn}
               >
-                <MaterialIcons color={colors.textPrimary} name="menu" size={22} />
+                <MaterialIcons color={colors.textPrimary} name="menu" size={26} />
               </TouchableOpacity>
               <View style={styles.headerCenter}>
                 <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
                   {t("home.aiPlanner")}
                 </Text>
-                <Text
-                  numberOfLines={1}
-                  style={[styles.headerSub, { color: colors.textSecondary }]}
-                >
-                  {currentChat?.title ?? t("home.lastChat")}
-                </Text>
+                {currentChat?.title ? (
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.headerSub, { color: colors.textMuted }]}
+                  >
+                    {currentChat.title}
+                  </Text>
+                ) : null}
               </View>
               <TouchableOpacity
+                accessibilityLabel="Start new chat"
                 activeOpacity={0.7}
                 onPress={() => {
                   void handleCreateChat();
                 }}
-                style={[
-                  styles.headerIconBtn,
-                  { backgroundColor: colors.accent },
-                ]}
+                style={styles.headerIconBtn}
               >
-                <MaterialIcons color={colors.buttonTextOnAction} name="add" size={22} />
+                <MaterialIcons color={colors.textPrimary} name="add-box" size={28} />
               </TouchableOpacity>
             </View>
 
@@ -1423,6 +1421,7 @@ export default function HomeTabScreen() {
 
               {showScrollToBottom ? (
                 <TouchableOpacity
+                  accessibilityLabel="Scroll to bottom"
                   style={[styles.scrollToBottomButton, { backgroundColor: colors.accent }]}
                   onPress={() => {
                     scrollMessagesToBottom(true);
@@ -1447,7 +1446,7 @@ export default function HomeTabScreen() {
                 planning={planning}
                 step={currentPlannerState.step}
                 colors={colors}
-                insetBottom={isKeyboardOpen ? Spacing.md : insets.bottom}
+                insetBottom={isKeyboardOpen ? Spacing.md : insets.bottom + Spacing.md}
                 onChangeText={setChatInput}
                 onSend={() => { void sendPlannerMessage(chatInput); }}
                 onReset={() => { void resetConversation(); }}
@@ -1461,7 +1460,6 @@ export default function HomeTabScreen() {
         chatMenuVisible={chatMenuVisible}
         chatSearch={chatSearch}
         chats={homeStore.chats}
-        colors={colors}
         currentChatId={currentChat?.id ?? null}
         filteredChats={filteredChats}
         insetBottom={insets.bottom}
@@ -1507,7 +1505,6 @@ export default function HomeTabScreen() {
       {latestPlan ? (
         <BookingModal
           visible={bookingModalVisible}
-          colors={colors}
           latestPlan={latestPlan}
           bookingStage={bookingStage}
           bookingForm={bookingForm}
@@ -1553,32 +1550,31 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
-    paddingHorizontal: Spacing.lg,
+    minHeight: 52,
+    paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
-    borderBottomWidth: 1,
   },
   headerIconBtn: {
     alignItems: "center",
-    borderRadius: Radius.full,
-    borderWidth: 1,
-    borderColor: "transparent",
     height: 40,
     justifyContent: "center",
+    padding: 4,
     width: 40,
   },
   headerCenter: {
-    flex: 1,
     alignItems: "center",
-    paddingHorizontal: Spacing.md,
+    flex: 1,
+    paddingHorizontal: Spacing.sm,
   },
   headerTitle: {
-    ...TypeScale.titleMd,
+    fontSize: 18,
     fontWeight: FontWeight.bold,
   },
   headerSub: {
-    ...TypeScale.labelMd,
-    marginTop: 2,
+    ...TypeScale.labelSm,
+    marginTop: 1,
   },
   chatArea: {
     flex: 1,
@@ -1618,7 +1614,7 @@ const styles = StyleSheet.create({
   },
   messagesContent: {
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.sm,
+    paddingTop: Spacing.xs,
     paddingBottom: Spacing["2xl"],
   },
   messageBubble: {
