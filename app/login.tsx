@@ -72,7 +72,7 @@ export default function Login() {
     logoOpacity.value = withTiming(1, { duration: 380 });
     cardTranslateY.value = withDelay(160, withTiming(0, TIMING_FAST));
     cardOpacity.value = withDelay(160, withTiming(1, { duration: 320 }));
-  }, []);
+  }, [cardOpacity, cardTranslateY, logoOpacity, logoScale]);
 
   const logoAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: logoScale.value }],

@@ -32,61 +32,31 @@ type ChatComposerProps = {
 
 function getPlaceholder(step: HomePlannerStep, language: "bg" | "en" | "de" | "es" | "fr") {
   if (language === "en") {
-    if (step === "done") return "Ask about your trip...";
-    if (step === "chatting") return "Write your answer...";
-    if (step === "budget") return "Write your budget in EUR...";
-    if (step === "days") return "Write the number of days...";
-    if (step === "travelers") return "Write how many people are traveling...";
-    if (step === "transport") return "Write your preferred transport...";
-    if (step === "timing") return "Write when you want to travel...";
-    if (step === "destination") return "Write the destination...";
+    if (step === "done") return "Adjust the plan or type generate again...";
+    if (step === "chatting") return "Tell me what kind of trip you want...";
     return "Write a message...";
   }
 
   if (language === "de") {
-    if (step === "done") return "Frag etwas zu deiner Reise...";
-    if (step === "chatting") return "Schreibe deine Antwort...";
-    if (step === "budget") return "Schreibe dein Budget in EUR...";
-    if (step === "days") return "Schreibe die Anzahl der Tage...";
-    if (step === "travelers") return "Schreibe, wie viele Personen reisen...";
-    if (step === "transport") return "Schreibe dein bevorzugtes Verkehrsmittel...";
-    if (step === "timing") return "Schreibe, wann ihr reisen wollt...";
-    if (step === "destination") return "Schreibe das Reiseziel...";
+    if (step === "done") return "Passe den Plan an oder schreibe generate again...";
+    if (step === "chatting") return "Erzahl mir, was fur eine Reise du willst...";
     return "Nachricht schreiben...";
   }
 
   if (language === "es") {
-    if (step === "done") return "Pregunta sobre tu viaje...";
-    if (step === "chatting") return "Escribe tu respuesta...";
-    if (step === "budget") return "Escribe tu presupuesto en EUR...";
-    if (step === "days") return "Escribe el número de días...";
-    if (step === "travelers") return "Escribe cuántas personas viajarán...";
-    if (step === "transport") return "Escribe tu transporte preferido...";
-    if (step === "timing") return "Escribe cuándo quieres viajar...";
-    if (step === "destination") return "Escribe el destino...";
+    if (step === "done") return "Ajusta el plan o escribe generate again...";
+    if (step === "chatting") return "Cuentame que tipo de viaje quieres...";
     return "Escribe un mensaje...";
   }
 
   if (language === "fr") {
-    if (step === "done") return "Pose une question sur ton voyage...";
-    if (step === "chatting") return "Écris ta réponse...";
-    if (step === "budget") return "Écris ton budget en EUR...";
-    if (step === "days") return "Écris le nombre de jours...";
-    if (step === "travelers") return "Écris combien de personnes voyageront...";
-    if (step === "transport") return "Écris ton transport préféré...";
-    if (step === "timing") return "Écris quand vous voulez voyager...";
-    if (step === "destination") return "Écris la destination...";
+    if (step === "done") return "Ajuste le plan ou écris generate again...";
+    if (step === "chatting") return "Dis-moi quel type de voyage tu veux...";
     return "Écris un message...";
   }
 
-  if (step === "done") return "Попитай за пътуването си...";
-  if (step === "chatting") return "Напиши отговор...";
-  if (step === "budget") return "Напиши бюджета в евро...";
-  if (step === "days") return "Напиши броя дни...";
-  if (step === "travelers") return "Напиши колко човека ще пътуват...";
-  if (step === "transport") return "Напиши предпочитан транспорт...";
-  if (step === "timing") return "Напиши кога искате да пътувате...";
-  if (step === "destination") return "Напиши дестинацията...";
+  if (step === "done") return "Промени плана или напиши generate again...";
+  if (step === "chatting") return "Кажи ми какво пътуване искаш...";
   return "Напиши съобщение...";
 }
 
@@ -126,6 +96,13 @@ export function ChatComposer({
           onChangeText={onChangeText}
           editable={!planning}
           multiline
+          blurOnSubmit={false}
+          returnKeyType={Platform.OS === "web" ? undefined : "send"}
+          onSubmitEditing={() => {
+            if (Platform.OS !== "web" && canSend) {
+              onSend();
+            }
+          }}
         />
         <TouchableOpacity
           accessibilityLabel="Send message"

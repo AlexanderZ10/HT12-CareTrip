@@ -12,9 +12,18 @@ export type PendingStripeCheckout = {
   destination: string;
   note: string;
   paymentMethod: string;
+  platformFeeAmount: number | null;
+  platformFeeLabel: string;
+  providerBookingUrl: string;
+  providerLabel: string;
+  reservationMode: string;
+  reservationStatusLabel: string;
   stay: PlannerStayOption | null;
+  subtotalAmount: number | null;
+  subtotalLabel: string;
   timing: string;
   title: string;
+  totalAmount: number | null;
   totalLabel: string;
   transport: PlannerTransportOption | null;
   travelers: string;

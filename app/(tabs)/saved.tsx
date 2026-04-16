@@ -321,7 +321,9 @@ export default function SavedTabScreen() {
             >
               <View style={styles.bookingTopRow}>
                 <View style={[styles.bookingPaidBadge, { backgroundColor: colors.accentMuted }]}>
-                  <Text style={[styles.bookingPaidBadgeText, { color: colors.accent }]}>{t("common.paid")}</Text>
+                  <Text style={[styles.bookingPaidBadgeText, { color: colors.accent }]}>
+                    {booking.bookingStatus === "payment_captured" ? "Paid / handoff" : t("common.paid")}
+                  </Text>
                 </View>
                 <Text style={[styles.dateText, { color: colors.textMuted }]}>{formatSavedDate(booking.createdAtMs)}</Text>
               </View>
@@ -337,6 +339,21 @@ export default function SavedTabScreen() {
 
               <Text style={[styles.bookingTotal, { color: colors.warningText }]}>{booking.totalLabel}</Text>
               <Text style={[styles.bookingPaymentMeta, { color: colors.warningText }]}>{booking.paymentMethod}</Text>
+              {booking.subtotalLabel ? (
+                <Text style={[styles.bookingPaymentMeta, { color: colors.warningText }]}>
+                  Subtotal: {booking.subtotalLabel}
+                </Text>
+              ) : null}
+              {booking.platformFeeLabel ? (
+                <Text style={[styles.bookingPaymentMeta, { color: colors.warningText }]}>
+                  TravelApp fee: {booking.platformFeeLabel}
+                </Text>
+              ) : null}
+              {booking.reservationStatusLabel ? (
+                <Text style={[styles.bookingPaymentMeta, { color: colors.warningText }]}>
+                  {booking.reservationStatusLabel}
+                </Text>
+              ) : null}
 
               {booking.transport ? (
                 <View style={styles.bookingDetailBlock}>

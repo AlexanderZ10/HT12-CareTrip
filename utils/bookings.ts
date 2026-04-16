@@ -9,7 +9,7 @@ import {
 } from "./home-travel-planner";
 
 export type BookingOrder = {
-  bookingStatus: "confirmed";
+  bookingStatus: "confirmed" | "payment_captured";
   budget: string;
   contactEmail: string;
   contactName: string;
@@ -23,8 +23,16 @@ export type BookingOrder = {
   paymentIntentId: string;
   paymentMode: "mock" | "stripe_test";
   paymentProvider: "stripe";
+  platformFeeAmount: number | null;
+  platformFeeLabel: string;
+  providerBookingUrl: string;
+  providerLabel: string;
+  reservationMode: string;
+  reservationStatusLabel: string;
   source: "home";
   stay: PlannerStayOption | null;
+  subtotalAmount: number | null;
+  subtotalLabel: string;
   timing: string;
   title: string;
   totalEstimate: number | null;
@@ -74,7 +82,16 @@ function sanitizeStayOption(value: unknown): PlannerStayOption | null {
     name: sanitizeString(rawValue.name),
     note: sanitizeString(rawValue.note),
     pricePerNight: sanitizeString(rawValue.pricePerNight),
+    providerAccommodationId: sanitizeString(rawValue.providerAccommodationId),
+    providerKey: sanitizeString(rawValue.providerKey),
+    providerPaymentModes: Array.isArray(rawValue.providerPaymentModes)
+      ? rawValue.providerPaymentModes.filter(
+          (item): item is string => typeof item === "string" && !!item.trim()
+        )
+      : [],
+    providerProductId: sanitizeString(rawValue.providerProductId),
     ratingLabel: sanitizeString(rawValue.ratingLabel),
+    reservationMode: sanitizeString(rawValue.reservationMode),
     sourceLabel: sanitizeString(rawValue.sourceLabel),
     type: sanitizeString(rawValue.type),
   };
@@ -115,10 +132,6 @@ export function getBookingEstimate(params: {
   transport: PlannerTransportOption | null;
   travelers: string;
 }) {
-  const travelerCount = extractCount(params.travelers, 1);
-  const nightCount = extractCount(params.days, 1);
-  const roomCount = Math.max(1, Math.ceil(travelerCount / 2));
-
   const transportAmount = extractFirstEuroAmount(params.transport?.price ?? "");
   const stayAmount = extractFirstEuroAmount(params.stay?.pricePerNight ?? "");
 
@@ -126,12 +139,12 @@ export function getBookingEstimate(params: {
   let hasAnyAmount = false;
 
   if (transportAmount !== null) {
-    total += transportAmount * travelerCount;
+    total += transportAmount;
     hasAnyAmount = true;
   }
 
   if (stayAmount !== null) {
-    total += stayAmount * nightCount * roomCount;
+    total += stayAmount;
     hasAnyAmount = true;
   }
 
@@ -160,9 +173,19 @@ export function buildBookingOrder(params: {
   paymentMethod: string;
   paymentIntentId: string;
   paymentMode: "mock" | "stripe_test";
+  platformFeeAmount: number | null;
+  platformFeeLabel: string;
+  providerBookingUrl: string;
+  providerLabel: string;
+  reservationMode: string;
+  reservationStatusLabel: string;
   stay: PlannerStayOption | null;
+  subtotalAmount: number | null;
+  subtotalLabel: string;
   timing: string;
   title: string;
+  totalAmount: number | null;
+  totalLabel: string;
   transport: PlannerTransportOption | null;
   travelers: string;
 }) {
@@ -174,7 +197,10 @@ export function buildBookingOrder(params: {
   });
 
   return {
-    bookingStatus: "confirmed",
+    bookingStatus:
+      params.providerBookingUrl || params.reservationMode === "provider_redirect"
+        ? "payment_captured"
+        : "confirmed",
     budget: normalizeBudgetToEuro(params.budget),
     contactEmail: params.contactEmail.trim(),
     contactName: params.contactName.trim(),
@@ -188,12 +214,23 @@ export function buildBookingOrder(params: {
     paymentMode: params.paymentMode,
     paymentProvider: "stripe",
     paymentStatus: "paid",
+    platformFeeAmount: params.platformFeeAmount,
+    platformFeeLabel: params.platformFeeLabel.trim(),
+    providerBookingUrl: sanitizeString(params.providerBookingUrl),
+    providerLabel: sanitizeString(params.providerLabel),
+    reservationMode: sanitizeString(params.reservationMode),
+    reservationStatusLabel: sanitizeString(params.reservationStatusLabel),
     source: "home",
     stay: sanitizeStayOption(params.stay),
+    subtotalAmount: params.subtotalAmount,
+    subtotalLabel: params.subtotalLabel.trim(),
     timing: params.timing.trim(),
     title: params.title.trim(),
-    totalEstimate: estimate.totalEstimate,
-    totalLabel: estimate.totalLabel,
+    totalEstimate:
+      typeof params.totalAmount === "number" && Number.isFinite(params.totalAmount)
+        ? params.totalAmount
+        : estimate.totalEstimate,
+    totalLabel: normalizeTotalLabel(params.totalLabel || estimate.totalLabel),
     transport: sanitizeTransportOption(params.transport),
     travelers: params.travelers.trim(),
   } satisfies BookingOrder;
@@ -211,7 +248,10 @@ export function parseBookingOrders(profileData: Record<string, unknown>): Bookin
     .map(
       (booking, index) =>
         ({
-          bookingStatus: "confirmed",
+          bookingStatus:
+            sanitizeString(booking.bookingStatus) === "payment_captured"
+              ? "payment_captured"
+              : "confirmed",
           budget: normalizeBudgetToEuro(sanitizeString(booking.budget)),
           contactEmail: sanitizeString(booking.contactEmail),
           contactName: sanitizeString(booking.contactName),
@@ -226,8 +266,16 @@ export function parseBookingOrders(profileData: Record<string, unknown>): Bookin
           paymentMode: booking.paymentMode === "stripe_test" ? "stripe_test" : "mock",
           paymentProvider: "stripe",
           paymentStatus: "paid",
+          platformFeeAmount: sanitizeNumber(booking.platformFeeAmount),
+          platformFeeLabel: sanitizeString(booking.platformFeeLabel),
+          providerBookingUrl: sanitizeString(booking.providerBookingUrl),
+          providerLabel: sanitizeString(booking.providerLabel),
+          reservationMode: sanitizeString(booking.reservationMode),
+          reservationStatusLabel: sanitizeString(booking.reservationStatusLabel),
           source: "home",
           stay: sanitizeStayOption(booking.stay),
+          subtotalAmount: sanitizeNumber(booking.subtotalAmount),
+          subtotalLabel: sanitizeString(booking.subtotalLabel),
           timing: sanitizeString(booking.timing),
           title: sanitizeString(booking.title, "Booking"),
           totalEstimate: sanitizeNumber(booking.totalEstimate),

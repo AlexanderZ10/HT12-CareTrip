@@ -13,6 +13,7 @@ import {
 } from "../../../constants/design-system";
 
 export type StoryRailItem = {
+  hasActiveStory?: boolean;
   key: string;
   kind: "current" | "friend";
   label: string;
@@ -21,12 +22,13 @@ export type StoryRailItem = {
 
 type StoryRailProps = {
   items: StoryRailItem[];
+  onAddPress?: (item: StoryRailItem) => void;
   onPress?: (item: StoryRailItem) => void;
 };
 
 const STORY_SIZE = 66;
 
-export function StoryRail({ items, onPress }: StoryRailProps) {
+export function StoryRail({ items, onAddPress, onPress }: StoryRailProps) {
   const { colors } = useAppTheme();
 
   return (
@@ -37,6 +39,7 @@ export function StoryRail({ items, onPress }: StoryRailProps) {
     >
       {items.map((item) => {
         const isCurrent = item.kind === "current";
+        const hasActiveStory = item.hasActiveStory === true;
         const initial = (item.label || "?")[0].toUpperCase();
 
         const inner = (
@@ -65,7 +68,12 @@ export function StoryRail({ items, onPress }: StoryRailProps) {
           >
             <View style={styles.avatarOuter}>
               {isCurrent ? (
-                <View style={[styles.plainRing, { borderColor: colors.border }]}>
+                <View
+                  style={[
+                    styles.plainRing,
+                    { borderColor: hasActiveStory ? colors.accent : colors.border },
+                  ]}
+                >
                   {inner}
                 </View>
               ) : (
@@ -79,14 +87,17 @@ export function StoryRail({ items, onPress }: StoryRailProps) {
                 </LinearGradient>
               )}
               {isCurrent ? (
-                <View
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  hitSlop={{ bottom: 10, left: 10, right: 10, top: 10 }}
+                  onPress={() => onAddPress?.(item)}
                   style={[
                     styles.plusBadge,
                     { backgroundColor: colors.accent, borderColor: colors.card },
                   ]}
                 >
                   <MaterialIcons name="add" size={14} color={colors.buttonTextOnAction} />
-                </View>
+                </TouchableOpacity>
               ) : null}
             </View>
             <Text numberOfLines={1} style={[styles.label, { color: colors.textPrimary }]}>

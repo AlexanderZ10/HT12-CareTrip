@@ -80,7 +80,7 @@ export default function Register() {
     logoOpacity.value = withTiming(1, { duration: 380 });
     cardTranslateY.value = withDelay(160, withTiming(0, TIMING_FAST));
     cardOpacity.value = withDelay(160, withTiming(1, { duration: 320 }));
-  }, []);
+  }, [cardOpacity, cardTranslateY, logoOpacity, logoScale]);
 
   const logoAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: logoScale.value }],
@@ -132,9 +132,11 @@ export default function Register() {
     opacity: matchOpacity.value,
   }));
 
+  const hasConfirmPassword = confirmPassword.length > 0;
+
   useEffect(() => {
-    matchOpacity.value = withTiming(confirmPassword.length > 0 ? 1 : 0, { duration: 200 });
-  }, [confirmPassword.length > 0]);
+    matchOpacity.value = withTiming(hasConfirmPassword ? 1 : 0, { duration: 200 });
+  }, [hasConfirmPassword, matchOpacity]);
 
   const handlePasswordChange = (text: string) => {
     setPassword(text);

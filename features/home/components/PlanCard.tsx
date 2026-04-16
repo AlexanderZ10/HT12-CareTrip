@@ -42,22 +42,26 @@ export function PlanCard({
 }: PlanCardProps) {
   const { colors } = useAppTheme();
   const { language } = useAppLanguage();
+  const hasVisiblePrice = (value?: string) => !!value?.match(/\d/);
+  const hasBookableOptions =
+    latestPlan.plan.transportOptions.some((option) => hasVisiblePrice(option.price)) ||
+    latestPlan.plan.stayOptions.some((stay) => hasVisiblePrice(stay.pricePerNight));
 
   const labels = language === "en"
-    ? { transport: "Transport", stay: "Accommodation", days: "Day-by-day itinerary", profileTip: "Profile tip", viewOffer: "View offer", buyTicket: "Buy ticket", bookStay: "Book stay" }
+    ? { transport: "Transport", stay: "Accommodation", days: "Verified trip structure", profileTip: "Verification", viewOffer: "View offer", buyTicket: "Buy ticket", bookStay: "Book stay", noTransport: "No reliable live transport offers were found for this search yet.", noStay: "No reliable live accommodation offers were found for this search yet.", transportPriceHint: "Exact fare for the selected search", stayPriceHint: "Exact total for the selected dates" }
     : language === "de"
-      ? { transport: "Transport", stay: "Unterkunft", days: "Tagesplan", profileTip: "Profil-Tipp", viewOffer: "Angebot", buyTicket: "Ticket kaufen", bookStay: "Buchen" }
+      ? { transport: "Transport", stay: "Unterkunft", days: "Verifizierte Reisestruktur", profileTip: "Verifizierung", viewOffer: "Angebot", buyTicket: "Ticket kaufen", bookStay: "Buchen", noTransport: "Fur diese Suche wurden noch keine verlasslichen Live-Transportangebote gefunden.", noStay: "Fur diese Suche wurden noch keine verlasslichen Live-Unterkunfte gefunden.", transportPriceHint: "Exakter Preis fur diese Suche", stayPriceHint: "Exakter Gesamtpreis fur die gewahlten Daten" }
       : language === "es"
-        ? { transport: "Transporte", stay: "Alojamiento", days: "Itinerario por días", profileTip: "Consejo del perfil", viewOffer: "Ver oferta", buyTicket: "Comprar billete", bookStay: "Reservar" }
+        ? { transport: "Transporte", stay: "Alojamiento", days: "Estructura verificada del viaje", profileTip: "Verificación", viewOffer: "Ver oferta", buyTicket: "Comprar billete", bookStay: "Reservar", noTransport: "Todavia no se encontraron ofertas fiables de transporte en vivo para esta busqueda.", noStay: "Todavia no se encontraron ofertas fiables de alojamiento en vivo para esta busqueda.", transportPriceHint: "Tarifa exacta para esta búsqueda", stayPriceHint: "Total exacto para las fechas elegidas" }
         : language === "fr"
-          ? { transport: "Transport", stay: "Hébergement", days: "Itinéraire jour par jour", profileTip: "Conseil profil", viewOffer: "Voir l'offre", buyTicket: "Acheter", bookStay: "Réserver" }
-          : { transport: "Транспорт", stay: "Настаняване", days: "Маршрут по дни", profileTip: "Съвет според профила", viewOffer: "Офертата", buyTicket: "Купи билет", bookStay: "Резервирай" };
+          ? { transport: "Transport", stay: "Hébergement", days: "Structure verifiée du voyage", profileTip: "Vérification", viewOffer: "Voir l'offre", buyTicket: "Acheter", bookStay: "Réserver", noTransport: "Aucune offre fiable de transport en direct n'a encore ete trouvee pour cette recherche.", noStay: "Aucune offre fiable d'hebergement en direct n'a encore ete trouvee pour cette recherche.", transportPriceHint: "Tarif exact pour cette recherche", stayPriceHint: "Total exact pour les dates choisies" }
+          : { transport: "Транспорт", stay: "Настаняване", days: "Проверена структура на пътуването", profileTip: "Проверка", viewOffer: "Офертата", buyTicket: "Купи билет", bookStay: "Резервирай", noTransport: "Все още няма достатъчно надеждни live транспортни оферти за това търсене.", noStay: "Все още няма достатъчно надеждни live оферти за настаняване за това търсене.", transportPriceHint: "Точна цена за това търсене", stayPriceHint: "Точна обща цена за избраните дати" };
 
   return (
     <View
       style={[
         styles.planCard,
-        { backgroundColor: colors.warningBackground, borderColor: colors.border },
+        { backgroundColor: colors.card, borderColor: colors.border },
         isPhoneLayout && styles.planCardPhone,
       ]}
     >
@@ -66,19 +70,19 @@ export function PlanCard({
           <Text
             style={[
               styles.planTitle,
-              { color: colors.warningText },
+              { color: colors.textPrimary },
               isPhoneLayout && styles.planTitlePhone,
             ]}
           >
             {latestPlan.plan.title}
           </Text>
-          <Text style={[styles.planMeta, { color: colors.warningText }]}>
+          <Text style={[styles.planMeta, { color: colors.textSecondary }]}>
             {latestPlan.destination} • {latestPlan.days} • {latestPlan.budget}
           </Text>
           {[latestPlan.travelers, latestPlan.transportPreference, latestPlan.timing]
             .filter(Boolean)
             .length > 0 ? (
-            <Text style={[styles.planMetaSecondary, { color: colors.warningText }]}>
+            <Text style={[styles.planMetaSecondary, { color: colors.textMuted }]}>
               {[latestPlan.travelers, latestPlan.transportPreference, latestPlan.timing]
                 .filter(Boolean)
                 .join(" • ")}
@@ -86,13 +90,13 @@ export function PlanCard({
           ) : null}
         </View>
         {!isPhoneLayout ? (
-          <View style={[styles.planHeaderIcon, { backgroundColor: colors.warningBackground }]}>
-            <MaterialIcons name="map" size={24} color={colors.warningText} />
+          <View style={[styles.planHeaderIcon, { backgroundColor: colors.cardAlt }]}>
+            <MaterialIcons name="map" size={24} color={colors.accent} />
           </View>
         ) : null}
       </View>
 
-      <Text style={[styles.planSummary, { color: colors.warningText }]}>
+      <Text style={[styles.planSummary, { color: colors.textSecondary }]}>
         {latestPlan.plan.summary}
       </Text>
 
@@ -107,6 +111,11 @@ export function PlanCard({
 
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{labels.transport}</Text>
+        {latestPlan.plan.transportOptions.length === 0 ? (
+          <Text style={[styles.emptySectionText, { color: colors.textSecondary }]}>
+            {labels.noTransport}
+          </Text>
+        ) : null}
         {latestPlan.plan.transportOptions.map((option, index) => (
           <View
             key={`${option.provider}-${index}`}
@@ -123,9 +132,11 @@ export function PlanCard({
                   {option.mode}
                 </Text>
               </View>
-              <Text style={[styles.optionPrice, { color: colors.warningText }]}>
-                {option.price}
-              </Text>
+              {hasVisiblePrice(option.price) ? (
+                <Text style={[styles.optionPrice, { color: colors.accent }]}>
+                  {option.price}
+                </Text>
+              ) : null}
             </View>
 
             <Text style={[styles.optionProvider, { color: colors.textPrimary }]}>
@@ -135,15 +146,20 @@ export function PlanCard({
               {option.route}
             </Text>
             <Text style={[styles.optionMeta, { color: colors.textMuted }]}>{option.duration}</Text>
+            {hasVisiblePrice(option.price) ? (
+              <Text style={[styles.optionMeta, { color: colors.textMuted }]}>
+                {labels.transportPriceHint}
+              </Text>
+            ) : null}
             {option.sourceLabel ? (
-              <Text style={[styles.offerSourceText, { color: colors.warningText }]}>
+              <Text style={[styles.offerSourceText, { color: colors.accent }]}>
                 Source: {option.sourceLabel}
               </Text>
             ) : null}
             <Text style={[styles.optionNote, { color: colors.textSecondary }]}>{option.note}</Text>
 
             <View style={styles.optionActionsRow}>
-              {option.bookingUrl ? (
+              {option.bookingUrl && hasVisiblePrice(option.price) ? (
                 <TouchableOpacity
                   style={[
                     styles.optionLinkButton,
@@ -165,20 +181,39 @@ export function PlanCard({
                 </TouchableOpacity>
               ) : null}
 
-              <TouchableOpacity
-                style={[
-                  styles.optionActionButton,
-                  { backgroundColor: colors.textPrimary },
-                  option.bookingUrl ? styles.optionHalfButton : null,
-                ]}
-                onPress={() => onBookTransport(index)}
-                activeOpacity={0.9}
-              >
-                <MaterialIcons name="confirmation-number" size={16} color={colors.buttonTextOnAction} />
-                <Text style={[styles.optionActionButtonText, { color: colors.buttonTextOnAction }]}>
-                  {labels.buyTicket}
-                </Text>
-              </TouchableOpacity>
+              {hasVisiblePrice(option.price) ? (
+                <TouchableOpacity
+                  style={[
+                    styles.optionActionButton,
+                    { backgroundColor: colors.textPrimary },
+                    option.bookingUrl ? styles.optionHalfButton : null,
+                  ]}
+                  onPress={() => {
+                    onBookTransport(index);
+                  }}
+                  activeOpacity={0.9}
+                >
+                  <MaterialIcons name="confirmation-number" size={16} color={colors.buttonTextOnAction} />
+                  <Text style={[styles.optionActionButtonText, { color: colors.buttonTextOnAction }]}>
+                    {labels.buyTicket}
+                  </Text>
+                </TouchableOpacity>
+              ) : option.bookingUrl ? (
+                <TouchableOpacity
+                  style={[
+                    styles.optionLinkButton,
+                    { backgroundColor: colors.cardAlt, borderColor: colors.border },
+                    styles.optionSingleButton,
+                  ]}
+                  onPress={() => {
+                    void Linking.openURL(option.bookingUrl!);
+                  }}
+                  activeOpacity={0.9}
+                >
+                  <MaterialIcons name="open-in-new" size={16} color={colors.textPrimary} />
+                  <Text style={[styles.optionLinkButtonText, { color: colors.textPrimary }]}>{labels.viewOffer}</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           </View>
         ))}
@@ -186,6 +221,11 @@ export function PlanCard({
 
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{labels.stay}</Text>
+        {latestPlan.plan.stayOptions.length === 0 ? (
+          <Text style={[styles.emptySectionText, { color: colors.textSecondary }]}>
+            {labels.noStay}
+          </Text>
+        ) : null}
         {latestPlan.plan.stayOptions.map((stay, index) => (
           <View
             key={`${stay.name}-${index}`}
@@ -195,22 +235,29 @@ export function PlanCard({
               <Text style={[styles.optionProvider, { color: colors.textPrimary }]}>
                 {stay.name}
               </Text>
-              <Text style={[styles.optionPrice, { color: colors.warningText }]}>
-                {stay.pricePerNight}
-              </Text>
+              {hasVisiblePrice(stay.pricePerNight) ? (
+                <Text style={[styles.optionPrice, { color: colors.accent }]}>
+                  {stay.pricePerNight}
+                </Text>
+              ) : null}
             </View>
             <Text style={[styles.optionRoute, { color: colors.textSecondary }]}>
               {stay.type} • {stay.area}
             </Text>
+            {hasVisiblePrice(stay.pricePerNight) ? (
+              <Text style={[styles.optionMeta, { color: colors.textMuted }]}>
+                {labels.stayPriceHint}
+              </Text>
+            ) : null}
             {stay.sourceLabel ? (
-              <Text style={[styles.offerSourceText, { color: colors.warningText }]}>
+              <Text style={[styles.offerSourceText, { color: colors.accent }]}>
                 Source: {stay.sourceLabel}
               </Text>
             ) : null}
             <Text style={[styles.optionNote, { color: colors.textSecondary }]}>{stay.note}</Text>
 
             <View style={styles.optionActionsRow}>
-              {stay.bookingUrl ? (
+              {stay.bookingUrl && hasVisiblePrice(stay.pricePerNight) ? (
                 <TouchableOpacity
                   style={[
                     styles.optionLinkButton,
@@ -232,20 +279,39 @@ export function PlanCard({
                 </TouchableOpacity>
               ) : null}
 
-              <TouchableOpacity
-                style={[
-                  styles.optionActionButton,
-                  { backgroundColor: colors.textPrimary },
-                  stay.bookingUrl ? styles.optionHalfButton : null,
-                ]}
-                onPress={() => onBookStay(index)}
-                activeOpacity={0.9}
-              >
-                <MaterialIcons name="hotel" size={16} color={colors.buttonTextOnAction} />
-                <Text style={[styles.optionActionButtonText, { color: colors.buttonTextOnAction }]}>
-                  {labels.bookStay}
-                </Text>
-              </TouchableOpacity>
+              {hasVisiblePrice(stay.pricePerNight) ? (
+                <TouchableOpacity
+                  style={[
+                    styles.optionActionButton,
+                    { backgroundColor: colors.textPrimary },
+                    stay.bookingUrl ? styles.optionHalfButton : null,
+                  ]}
+                  onPress={() => {
+                    onBookStay(index);
+                  }}
+                  activeOpacity={0.9}
+                >
+                  <MaterialIcons name="hotel" size={16} color={colors.buttonTextOnAction} />
+                  <Text style={[styles.optionActionButtonText, { color: colors.buttonTextOnAction }]}>
+                    {labels.bookStay}
+                  </Text>
+                </TouchableOpacity>
+              ) : stay.bookingUrl ? (
+                <TouchableOpacity
+                  style={[
+                    styles.optionLinkButton,
+                    { backgroundColor: colors.cardAlt, borderColor: colors.border },
+                    styles.optionSingleButton,
+                  ]}
+                  onPress={() => {
+                    void Linking.openURL(stay.bookingUrl!);
+                  }}
+                  activeOpacity={0.9}
+                >
+                  <MaterialIcons name="open-in-new" size={16} color={colors.textPrimary} />
+                  <Text style={[styles.optionLinkButtonText, { color: colors.textPrimary }]}>{labels.viewOffer}</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           </View>
         ))}
@@ -320,16 +386,18 @@ export function PlanCard({
         </Text>
       </TouchableOpacity>
 
-      <TouchableOpacity
-        style={[styles.bookNowButton, { backgroundColor: colors.textPrimary }]}
-        onPress={onBookNow}
-        activeOpacity={0.9}
-      >
-        <MaterialIcons name="credit-card" size={18} color={colors.buttonTextOnAction} />
-        <Text style={[styles.bookNowButtonText, { color: colors.buttonTextOnAction }]}>
-          Pay & reserve in app
-        </Text>
-      </TouchableOpacity>
+      {hasBookableOptions ? (
+        <TouchableOpacity
+          style={[styles.bookNowButton, { backgroundColor: colors.textPrimary }]}
+          onPress={onBookNow}
+          activeOpacity={0.9}
+        >
+          <MaterialIcons name="credit-card" size={18} color={colors.buttonTextOnAction} />
+          <Text style={[styles.bookNowButtonText, { color: colors.buttonTextOnAction }]}>
+            Pay & reserve in app
+          </Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -408,6 +476,11 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.extrabold,
     marginBottom: Spacing.sm,
   },
+  emptySectionText: {
+    ...TypeScale.bodySm,
+    marginBottom: Spacing.sm,
+    lineHeight: 20,
+  },
   optionCard: {
     borderRadius: Radius.xl,
     padding: Spacing.md,
@@ -464,6 +537,9 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
   },
   optionHalfButton: {
+    flex: 1,
+  },
+  optionSingleButton: {
     flex: 1,
   },
   optionLinkButton: {

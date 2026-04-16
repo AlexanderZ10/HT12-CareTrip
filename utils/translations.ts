@@ -264,6 +264,13 @@ const translations = {
     es: "Buscando mejores precios...",
     fr: "Recherche des meilleurs prix...",
   },
+  "home.aiThinking": {
+    bg: "\u0414\u043E\u0443\u0442\u043E\u0447\u043D\u044F\u0432\u0430\u043C \u043F\u044A\u0442\u0443\u0432\u0430\u043D\u0435\u0442\u043E...",
+    en: "Refining your trip details...",
+    de: "Ich verfeinere gerade die Reisedetails...",
+    es: "Afinando los detalles del viaje...",
+    fr: "J'affine les details du voyage...",
+  },
   "home.planReady": {
     bg: "\u0413\u043E\u0442\u043E\u0432\u043E! \u0415\u0442\u043E \u043D\u0430\u0439-\u0434\u043E\u0431\u0440\u0438\u044F\u0442 \u043F\u043B\u0430\u043D \u0441\u043F\u043E\u0440\u0435\u0434 \u0432\u0441\u0438\u0447\u043A\u043E, \u043A\u043E\u0435\u0442\u043E \u043C\u0438 \u043A\u0430\u0437\u0430.",
     en: "Done! Here's the best plan based on everything you told me.",

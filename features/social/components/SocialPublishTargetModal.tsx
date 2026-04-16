@@ -1,7 +1,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import React from "react";
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { useAppTheme } from "../../../components/app-theme-provider";
 import {
@@ -14,6 +14,7 @@ import {
 
 type SocialPublishTargetModalProps = {
   imageUri: string;
+  loading?: boolean;
   visible: boolean;
   onClose: () => void;
   onChoosePost: () => void;
@@ -22,6 +23,7 @@ type SocialPublishTargetModalProps = {
 
 export function SocialPublishTargetModal({
   imageUri,
+  loading = false,
   visible,
   onClose,
   onChoosePost,
@@ -46,20 +48,34 @@ export function SocialPublishTargetModal({
           <View style={styles.actionsRow}>
             <TouchableOpacity
               activeOpacity={0.9}
+              disabled={loading}
               onPress={onChooseStory}
               style={[styles.secondaryAction, { backgroundColor: colors.cardAlt, borderColor: colors.border }]}
             >
-              <MaterialIcons name="auto-stories" size={18} color={colors.accent} />
-              <Text style={[styles.secondaryText, { color: colors.textPrimary }]}>Story</Text>
+              {loading ? (
+                <ActivityIndicator size="small" color={colors.accent} />
+              ) : (
+                <>
+                  <MaterialIcons name="auto-stories" size={18} color={colors.accent} />
+                  <Text style={[styles.secondaryText, { color: colors.textPrimary }]}>Story</Text>
+                </>
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity
               activeOpacity={0.9}
+              disabled={loading}
               onPress={onChoosePost}
               style={[styles.primaryAction, { backgroundColor: colors.accent }]}
             >
-              <MaterialIcons name="dynamic-feed" size={18} color={colors.buttonTextOnAction} />
-              <Text style={[styles.primaryText, { color: colors.buttonTextOnAction }]}>Post</Text>
+              {loading ? (
+                <ActivityIndicator size="small" color={colors.buttonTextOnAction} />
+              ) : (
+                <>
+                  <MaterialIcons name="dynamic-feed" size={18} color={colors.buttonTextOnAction} />
+                  <Text style={[styles.primaryText, { color: colors.buttonTextOnAction }]}>Post</Text>
+                </>
+              )}
             </TouchableOpacity>
           </View>
         </View>

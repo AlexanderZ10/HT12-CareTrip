@@ -28,11 +28,15 @@ type BookingModalProps = {
   bookingError: string;
   bookingEstimateLabel: string;
   bookingForm: BookingForm;
+  bookingPlatformFeeLabel: string;
   bookingProcessing: boolean;
   bookingProgressLabel: string;
   bookingProgress: number;
+  bookingProviderLabel: string;
   bookingReceipt: BookingReceipt | null;
+  bookingReservationStatusLabel: string;
   bookingStage: BookingCheckoutStage;
+  bookingSubtotalLabel: string;
   paymentMethods: string[];
   latestPlan: NonNullable<StoredHomePlan>;
   onClose: () => void;
@@ -51,11 +55,15 @@ export function BookingModal({
   bookingError,
   bookingEstimateLabel,
   bookingForm,
+  bookingPlatformFeeLabel,
   bookingProcessing,
   bookingProgress,
   bookingProgressLabel,
+  bookingProviderLabel,
   bookingReceipt,
+  bookingReservationStatusLabel,
   bookingStage,
+  bookingSubtotalLabel,
   paymentMethods,
   latestPlan,
   onClose,
@@ -69,9 +77,7 @@ export function BookingModal({
   setSelectedTransportIndex,
   visible,
 }: BookingModalProps) {
-  const { language } = useAppLanguage();
   const { colors } = useAppTheme();
-  const locale = getLanguageLocale(language);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -88,15 +94,15 @@ export function BookingModal({
                 <Text style={[styles.bookingModalKicker, { color: colors.accent }]}>Secure checkout</Text>
                 <Text style={[styles.bookingModalTitle, { color: colors.textPrimary }]}>
                   {bookingStage === "success"
-                    ? "Потвърдено плащане"
-                    : latestPlan?.plan.title || "Потвърди резервацията"}
+                    ? "Тестовото плащане е потвърдено"
+                    : latestPlan?.plan.title || "Потвърди плащането"}
                 </Text>
                 <Text style={[styles.bookingModalSubtitle, { color: colors.textSecondary }]}>
                   {bookingStage === "processing"
-                    ? "Подготвяме плащането и потвърждението на резервацията."
+                    ? "Подготвяме Stripe test checkout и provider handoff-а."
                     : bookingStage === "success"
-                      ? "Сумата е обработена успешно и резервацията е потвърдена."
-                      : "Избери транспорт, място за престой и потвърди плащането директно от приложението."}
+                      ? "Плащането е отчетено. Ако има външен доставчик, следва provider потвърждение."
+                      : "Избери транспорт и stay, плати тестово през Stripe и продължи към доставчика при нужда."}
                 </Text>
               </View>
               <TouchableOpacity
@@ -132,17 +138,21 @@ export function BookingModal({
                 bookingError={bookingError}
                 bookingEstimateLabel={bookingEstimateLabel}
                 bookingForm={bookingForm}
+                bookingPlatformFeeLabel={bookingPlatformFeeLabel}
                 bookingProcessing={bookingProcessing}
                 latestPlan={latestPlan}
                 onConfirm={onConfirm}
                 onUpdateForm={onUpdateForm}
                 paymentMethods={paymentMethods}
+                providerLabel={bookingProviderLabel}
+                reservationStatusLabel={bookingReservationStatusLabel}
                 selectedStay={selectedStay}
                 selectedStayIndex={selectedStayIndex}
                 selectedTransport={selectedTransport}
                 selectedTransportIndex={selectedTransportIndex}
                 setSelectedStayIndex={setSelectedStayIndex}
                 setSelectedTransportIndex={setSelectedTransportIndex}
+                subtotalLabel={bookingSubtotalLabel}
                 colors={colors}
               />
             )}
@@ -194,7 +204,7 @@ function ProcessingView({
         <Text style={[styles.bookingSummaryLine, { color: colors.warningText }]}>{destination || "Дестинация"}</Text>
         <Text style={[styles.bookingSummaryLine, { color: colors.warningText }]}>{estimateLabel}</Text>
         <Text style={[styles.bookingSummaryHint, { color: colors.warningText }]}>
-          Сумата е изчислена според избрания транспорт и мястото за престой.
+          Сумата е изчислена само от точните live цени, които provider-ът е върнал за избраните дати и търсене.
         </Text>
       </View>
     </View>
@@ -226,7 +236,7 @@ function SuccessView({
       </View>
       <Text style={[styles.checkoutSuccessTitle, { color: colors.textPrimary }]}>Плащането мина успешно</Text>
       <Text style={[styles.checkoutSuccessSubtitle, { color: colors.textSecondary }]}>
-        Резервацията е потвърдена и детайлите са готови за преглед.
+        Stripe test плащането е готово, а ако има външен доставчик, следва provider потвърждение.
       </Text>
       <View style={[styles.checkoutReceiptCard, { backgroundColor: colors.warningBackground, borderColor: colors.warningBorder }]}>
         <Text style={[styles.checkoutReceiptKicker, { color: colors.warningText }]}>Потвърждение</Text>
@@ -237,6 +247,11 @@ function SuccessView({
           Метод: {getPaymentMethodDisplayLabel(bookingReceipt?.paymentMethod || bookingForm.paymentMethod)}
         </Text>
         <Text style={[styles.checkoutReceiptLine, { color: colors.warningText }]}>Статус: Потвърдено</Text>
+        {bookingReceipt?.reservationStatusLabel ? (
+          <Text style={[styles.checkoutReceiptLine, { color: colors.warningText }]}>
+            Provider: {bookingReceipt.reservationStatusLabel}
+          </Text>
+        ) : null}
         <Text style={[styles.checkoutReceiptLine, { color: colors.warningText }]}>
           Обработено на: {bookingReceipt?.processedAtLabel || formatProcessedAt(Date.now(), successLocale)}
         </Text>
@@ -248,6 +263,16 @@ function SuccessView({
         ) : null}
         {bookingReceipt?.selectedStayLabel ? (
           <Text style={[styles.checkoutReceiptLine, { color: colors.warningText }]}>Престой: {bookingReceipt.selectedStayLabel}</Text>
+        ) : null}
+        {bookingReceipt?.subtotalLabel ? (
+          <Text style={[styles.checkoutReceiptLine, { color: colors.warningText }]}>
+            Subtotal: {bookingReceipt.subtotalLabel}
+          </Text>
+        ) : null}
+        {bookingReceipt?.serviceFeeLabel ? (
+          <Text style={[styles.checkoutReceiptLine, { color: colors.warningText }]}>
+            TravelApp fee: {bookingReceipt.serviceFeeLabel}
+          </Text>
         ) : null}
         <Text style={[styles.checkoutReceiptTotal, { color: colors.warningText }]}>
           Обща сума: {bookingReceipt?.totalLabel || bookingEstimateLabel}
@@ -268,35 +293,51 @@ function FormView({
   bookingError,
   bookingEstimateLabel,
   bookingForm,
+  bookingPlatformFeeLabel,
   bookingProcessing,
   colors,
   latestPlan,
   onConfirm,
   onUpdateForm,
   paymentMethods,
+  providerLabel,
+  reservationStatusLabel,
   selectedStay,
   selectedStayIndex,
   selectedTransport,
   selectedTransportIndex,
   setSelectedStayIndex,
   setSelectedTransportIndex,
+  subtotalLabel,
 }: {
   bookingError: string;
   bookingEstimateLabel: string;
   bookingForm: BookingForm;
+  bookingPlatformFeeLabel: string;
   bookingProcessing: boolean;
   colors: ThemeColors;
   latestPlan: NonNullable<StoredHomePlan>;
   onConfirm: () => void;
   onUpdateForm: (updater: (current: BookingForm) => BookingForm) => void;
   paymentMethods: string[];
+  providerLabel: string;
+  reservationStatusLabel: string;
   selectedStay: PlannerStayOption | null;
   selectedStayIndex: number | null;
   selectedTransport: PlannerTransportOption | null;
   selectedTransportIndex: number | null;
   setSelectedStayIndex: (index: number | null) => void;
   setSelectedTransportIndex: (index: number | null) => void;
+  subtotalLabel: string;
 }) {
+  const hasVisiblePrice = (value?: string) => !!value?.match(/\d/);
+  const bookableTransportOptions = latestPlan.plan.transportOptions
+    .map((option, index) => ({ index, option }))
+    .filter(({ option }) => hasVisiblePrice(option.price));
+  const bookableStayOptions = latestPlan.plan.stayOptions
+    .map((stay, index) => ({ index, stay }))
+    .filter(({ stay }) => hasVisiblePrice(stay.pricePerNight));
+
   return (
     <>
       <View style={styles.bookingSection}>
@@ -322,25 +363,33 @@ function FormView({
             </Text>
           </TouchableOpacity>
         </View>
-        {latestPlan.plan.transportOptions.map((option, index) => {
-          const isSelected = selectedTransportIndex === index;
+        {bookableTransportOptions.length === 0 ? (
+          <Text style={[styles.bookingOptionNote, { color: colors.textMuted }]}>
+            Все още няма transport опции с точна цена за in-app checkout. Отвори provider линка от плана.
+          </Text>
+        ) : null}
+        {bookableTransportOptions.map(({ index: originalIndex, option }) => {
+          const isSelected = selectedTransportIndex === originalIndex;
           return (
             <TouchableOpacity
-              key={`${option.provider}-${index}`}
+              key={`${option.provider}-${originalIndex}`}
               style={[
                 styles.bookingOptionCard,
                 { backgroundColor: colors.card, borderColor: colors.border },
                 isSelected && { borderColor: colors.accent, backgroundColor: colors.inputBackground },
               ]}
-              onPress={() => setSelectedTransportIndex(index)}
+              onPress={() => setSelectedTransportIndex(originalIndex)}
               activeOpacity={0.9}
             >
               <View style={styles.bookingOptionTopRow}>
                 <Text style={[styles.bookingOptionTitle, { color: colors.textPrimary }]}>{option.mode}</Text>
-                <Text style={[styles.bookingOptionPrice, { color: colors.warningText }]}>{option.price}</Text>
+                <Text style={[styles.bookingOptionPrice, { color: colors.accent }]}>{option.price}</Text>
               </View>
               <Text style={[styles.bookingOptionMeta, { color: colors.textSecondary }]}>{option.provider}</Text>
               <Text style={[styles.bookingOptionMeta, { color: colors.textSecondary }]}>{option.route}</Text>
+              <Text style={[styles.bookingOptionNote, { color: colors.textMuted }]}>
+                Точна цена за това търсене
+              </Text>
               <Text style={[styles.bookingOptionNote, { color: colors.textMuted }]}>{option.note}</Text>
             </TouchableOpacity>
           );
@@ -370,24 +419,32 @@ function FormView({
             </Text>
           </TouchableOpacity>
         </View>
-        {latestPlan.plan.stayOptions.map((stay, index) => {
-          const isSelected = selectedStayIndex === index;
+        {bookableStayOptions.length === 0 ? (
+          <Text style={[styles.bookingOptionNote, { color: colors.textMuted }]}>
+            Все още няма stay опции с точна цена за in-app checkout. Отвори provider линка от плана.
+          </Text>
+        ) : null}
+        {bookableStayOptions.map(({ index: originalIndex, stay }) => {
+          const isSelected = selectedStayIndex === originalIndex;
           return (
             <TouchableOpacity
-              key={`${stay.name}-${index}`}
+              key={`${stay.name}-${originalIndex}`}
               style={[
                 styles.bookingOptionCard,
                 { backgroundColor: colors.card, borderColor: colors.border },
                 isSelected && { borderColor: colors.accent, backgroundColor: colors.inputBackground },
               ]}
-              onPress={() => setSelectedStayIndex(index)}
+              onPress={() => setSelectedStayIndex(originalIndex)}
               activeOpacity={0.9}
             >
               <View style={styles.bookingOptionTopRow}>
                 <Text style={[styles.bookingOptionTitle, { color: colors.textPrimary }]}>{stay.name}</Text>
-                <Text style={[styles.bookingOptionPrice, { color: colors.warningText }]}>{stay.pricePerNight}</Text>
+                <Text style={[styles.bookingOptionPrice, { color: colors.accent }]}>{stay.pricePerNight}</Text>
               </View>
               <Text style={[styles.bookingOptionMeta, { color: colors.textSecondary }]}>{stay.type} • {stay.area}</Text>
+              <Text style={[styles.bookingOptionNote, { color: colors.textMuted }]}>
+                Точен total за избраните дати
+              </Text>
               <Text style={[styles.bookingOptionNote, { color: colors.textMuted }]}>{stay.note}</Text>
             </TouchableOpacity>
           );
@@ -471,9 +528,18 @@ function FormView({
             Престой: {selectedStay.name} • {selectedStay.pricePerNight}
           </Text>
         ) : null}
+        <Text style={[styles.bookingSummaryLine, { color: colors.warningText }]}>
+          Subtotal: {subtotalLabel}
+        </Text>
+        <Text style={[styles.bookingSummaryLine, { color: colors.warningText }]}>
+          TravelApp fee (4%): {bookingPlatformFeeLabel}
+        </Text>
+        <Text style={[styles.bookingSummaryLine, { color: colors.warningText }]}>
+          Provider: {providerLabel}
+        </Text>
         <Text style={[styles.bookingSummaryTotal, { color: colors.warningText }]}>{bookingEstimateLabel}</Text>
         <Text style={[styles.bookingSummaryHint, { color: colors.warningText }]}>
-          Сумата е изчислена спрямо избрания транспорт и мястото за престой.
+          {reservationStatusLabel}
         </Text>
       </View>
 
@@ -487,7 +553,7 @@ function FormView({
       >
         <MaterialIcons name="lock" size={18} color={colors.buttonTextOnAction} />
         <Text style={[styles.bookingPayButtonText, { color: colors.buttonTextOnAction }]}>
-          {bookingProcessing ? "Обработваме..." : "Плати и потвърди"}
+          {bookingProcessing ? "Обработваме..." : "Плати тестово и продължи"}
         </Text>
       </TouchableOpacity>
     </>

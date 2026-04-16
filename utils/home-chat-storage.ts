@@ -9,15 +9,7 @@ import {
   type PlannerDayPlan,
 } from "./home-travel-planner";
 
-export type HomePlannerStep =
-  | "budget"
-  | "chatting"
-  | "days"
-  | "travelers"
-  | "transport"
-  | "timing"
-  | "destination"
-  | "done";
+export type HomePlannerStep = "chatting" | "done";
 
 export type HomeChatMessage = {
   createdAtMs: number;
@@ -39,13 +31,16 @@ export type StoredHomePlan = {
 } | null;
 
 export type StoredHomePlannerState = {
+  aiQuestionCount: number;
   budget: string;
   days: string;
   destination: string;
   followUpMessages: HomeChatMessage[];
+  notes: string;
   timing: string;
   transportPreference: string;
   travelers: string;
+  tripStyle: string;
   latestPlan: StoredHomePlan;
   messages: HomeChatMessage[];
   step: HomePlannerStep;
@@ -205,16 +200,19 @@ export function createHomeChatMessage(
 
 export function createEmptyPlannerState(initialAssistantMessage: string): StoredHomePlannerState {
   return {
+    aiQuestionCount: 0,
     budget: "",
     days: "",
     destination: "",
     followUpMessages: [],
+    notes: "",
     timing: "",
     transportPreference: "",
     travelers: "",
+    tripStyle: "",
     latestPlan: null,
     messages: [createHomeChatMessage("assistant", initialAssistantMessage)],
-    step: "budget",
+    step: "chatting",
   };
 }
 
@@ -236,13 +234,16 @@ export function createHomePlannerChat(
 
 export function isHomePlannerChatUntouched(chat: HomePlannerChatThread) {
   return (
-    chat.state.step === "budget" &&
+    chat.state.step === "chatting" &&
+    chat.state.aiQuestionCount === 0 &&
     !chat.state.budget &&
     !chat.state.days &&
     !chat.state.destination &&
+    !chat.state.notes &&
     !chat.state.timing &&
     !chat.state.transportPreference &&
     !chat.state.travelers &&
+    !chat.state.tripStyle &&
     !chat.state.latestPlan &&
     chat.state.followUpMessages.length === 0 &&
     chat.state.messages.length === 1 &&
@@ -262,6 +263,7 @@ export function createHomePlannerChatFromSharedTrip(
     id: createId("chat-imported"),
     pinned: false,
     state: {
+      aiQuestionCount: 0,
       budget: normalizedBudget,
       days: normalizedDays,
       destination: trip.destination.trim(),
@@ -294,10 +296,12 @@ export function createHomePlannerChatFromSharedTrip(
           "Imported from a group. You can continue this trip here without changing the original chat."
         ),
       ],
+      notes: "",
       step: "done",
       timing: "",
       transportPreference: "",
       travelers: "",
+      tripStyle: "",
     },
     title: trip.title.trim() || `Trip for ${trip.destination.trim()}`,
     updatedAtMs: now,
@@ -305,16 +309,7 @@ export function createHomePlannerChatFromSharedTrip(
 }
 
 function parsePlannerStep(value: unknown): HomePlannerStep {
-  return value === "budget" ||
-    value === "chatting" ||
-    value === "days" ||
-    value === "travelers" ||
-    value === "transport" ||
-    value === "timing" ||
-    value === "destination" ||
-    value === "done"
-    ? value
-    : "budget";
+  return value === "done" ? "done" : "chatting";
 }
 
 function parsePlannerMessages(value: unknown): HomeChatMessage[] {
@@ -345,22 +340,54 @@ function parsePlannerStateFromRaw(
 ): StoredHomePlannerState {
   const parsedStep = parsePlannerStep(rawState.step);
   const parsedLatestPlan = parseStoredHomePlan(rawState.latestPlan);
+  const messages = parsePlannerMessages(rawState.chatMessages ?? rawState.messages);
+  const followUpMessages = parsePlannerMessages(rawState.followUpMessages);
+  const budget = normalizeBudgetToEuro(sanitizeString(rawState.budget));
+  const days = sanitizeString(rawState.days);
+  const destination = sanitizeString(rawState.destination);
+  const notes = sanitizeString(rawState.notes);
+  const timing = sanitizeString(rawState.timing);
+  const transportPreference = sanitizeString(rawState.transportPreference);
+  const travelers = sanitizeString(rawState.travelers);
+  const tripStyle = sanitizeString(rawState.tripStyle);
 
-  if (parsedStep === "chatting" || (parsedStep === "done" && !parsedLatestPlan)) {
+  if (
+    parsedStep === "done" &&
+    !parsedLatestPlan
+  ) {
     return createEmptyPlannerState(initialAssistantMessage);
   }
 
-  const messages = parsePlannerMessages(rawState.chatMessages ?? rawState.messages);
-  const followUpMessages = parsePlannerMessages(rawState.followUpMessages);
+  if (
+    parsedStep === "chatting" &&
+    messages.length <= 1 &&
+    !budget &&
+    !days &&
+    !destination &&
+    !notes &&
+    !timing &&
+    !transportPreference &&
+    !travelers &&
+    !tripStyle &&
+    !parsedLatestPlan
+  ) {
+    return createEmptyPlannerState(initialAssistantMessage);
+  }
 
   return {
-    budget: normalizeBudgetToEuro(sanitizeString(rawState.budget)),
-    days: sanitizeString(rawState.days),
-    destination: sanitizeString(rawState.destination),
+    aiQuestionCount:
+      typeof rawState.aiQuestionCount === "number" && Number.isFinite(rawState.aiQuestionCount)
+        ? Math.max(0, Math.round(rawState.aiQuestionCount))
+        : 0,
+    budget,
+    days,
+    destination,
     followUpMessages,
-    timing: sanitizeString(rawState.timing),
-    transportPreference: sanitizeString(rawState.transportPreference),
-    travelers: sanitizeString(rawState.travelers),
+    notes,
+    timing,
+    transportPreference,
+    travelers,
+    tripStyle,
     latestPlan: parsedLatestPlan,
     messages:
       messages.length > 0
@@ -472,6 +499,7 @@ export async function saveHomePlannerStoreForUser(
           title: chat.title.trim(),
           updatedAtMs: chat.updatedAtMs,
           state: {
+            aiQuestionCount: chat.state.aiQuestionCount,
             budget: normalizeBudgetToEuro(chat.state.budget),
             days: chat.state.days.trim(),
             destination: chat.state.destination.trim(),
@@ -484,9 +512,11 @@ export async function saveHomePlannerStoreForUser(
                 role: message.role,
                 text: message.text.trim(),
               })),
+            notes: chat.state.notes.trim(),
             timing: chat.state.timing.trim(),
             transportPreference: chat.state.transportPreference.trim(),
             travelers: chat.state.travelers.trim(),
+            tripStyle: chat.state.tripStyle.trim(),
             latestPlan: chat.state.latestPlan
               ? {
                   budget: normalizeBudgetToEuro(chat.state.latestPlan.budget),

@@ -1,7 +1,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -17,6 +17,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "../../components/Avatar";
+import { useAppLanguage } from "../../components/app-language-provider";
 import { useAppTheme } from "../../components/app-theme-provider";
 import {
   FontWeight,
@@ -28,11 +29,17 @@ import { SocialMediaSourceModal } from "../../features/social/components/SocialM
 import { SocialPostComposerModal } from "../../features/social/components/SocialPostComposerModal";
 import { SocialPublishTargetModal } from "../../features/social/components/SocialPublishTargetModal";
 import {
+  SocialStoryViewerModal,
+  type SocialStoryViewerData,
+} from "../../features/social/components/SocialStoryViewerModal";
+import {
   SOCIAL_DOCK_BOTTOM_GAP,
   SOCIAL_DOCK_CONTENT_SPACER,
   SOCIAL_DOCK_HEIGHT,
   SocialTabsDock,
 } from "../../features/social/components/SocialTabsDock";
+import { formatRelativeTime } from "../../utils/formatting";
+import { getLanguageLocale } from "../../utils/translations";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const GRID_COLUMNS = 3;
@@ -43,12 +50,15 @@ type GridTab = "posts" | "tagged";
 
 export default function SocialProfileTabScreen() {
   const { colors } = useAppTheme();
+  const { language } = useAppLanguage();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const vm = useGroupsScreen();
+  const locale = getLanguageLocale(language);
   const [sourceModalVisible, setSourceModalVisible] = useState(false);
   const [targetModalVisible, setTargetModalVisible] = useState(false);
   const [postComposerVisible, setPostComposerVisible] = useState(false);
+  const [selectedStory, setSelectedStory] = useState<SocialStoryViewerData | null>(null);
   const [activeTab, setActiveTab] = useState<GridTab>("posts");
 
   const handleEditProfile = () => {
@@ -74,10 +84,14 @@ export default function SocialProfileTabScreen() {
     router.push("/profile");
   };
 
-  const closePublishFlow = () => {
+  const dismissPublishModals = () => {
     setSourceModalVisible(false);
     setTargetModalVisible(false);
     setPostComposerVisible(false);
+  };
+
+  const closePublishFlow = () => {
+    dismissPublishModals();
     vm.resetPostDraft();
   };
 
@@ -94,7 +108,7 @@ export default function SocialProfileTabScreen() {
     const published = await vm.publishStoryFromDraft();
 
     if (published) {
-      setTargetModalVisible(false);
+      dismissPublishModals();
     }
   };
 
@@ -102,7 +116,7 @@ export default function SocialProfileTabScreen() {
     const published = await vm.handleCreateSocialPost();
 
     if (published) {
-      setPostComposerVisible(false);
+      dismissPublishModals();
     }
   };
 
@@ -113,6 +127,45 @@ export default function SocialProfileTabScreen() {
   const myPostsWithImages = useMemo(
     () => vm.mySocialPosts.filter((post) => !!post.imageUri),
     [vm.mySocialPosts]
+  );
+
+  const activeStoriesByAuthorId = useMemo(
+    () => new Map(vm.activeStories.map((story) => [story.authorId, story] as const)),
+    [vm.activeStories]
+  );
+
+  const currentUserStory = activeStoriesByAuthorId.get(vm.userId);
+
+  const openStoryViewer = useCallback(
+    (authorId: string) => {
+      const story = activeStoriesByAuthorId.get(authorId);
+
+      if (!story) {
+        return;
+      }
+
+      const authorProfile =
+        authorId === vm.userId ? null : vm.publicProfilesById[authorId];
+
+      setSelectedStory({
+        authorLabel:
+          authorId === vm.userId
+            ? "Your story"
+            : authorProfile?.displayName || story.authorLabel || "Story",
+        authorUsername:
+          authorId === vm.userId ? vm.userHandle : authorProfile?.username || story.authorUsername,
+        avatarUrl:
+          authorId === vm.userId
+            ? vm.profileAvatarUrl
+            : authorProfile?.photoUrl || authorProfile?.avatarUrl,
+        caption: story.caption,
+        imageUri: story.imageUri,
+        isCurrentUser: authorId === vm.userId,
+        location: story.location,
+        timestampLabel: formatRelativeTime(story.createdAtMs, locale),
+      });
+    },
+    [activeStoriesByAuthorId, locale, vm.profileAvatarUrl, vm.publicProfilesById, vm.userHandle, vm.userId]
   );
 
   if (vm.loading) {
@@ -240,6 +293,23 @@ export default function SocialProfileTabScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.highlightsRow}
             >
+              {currentUserStory ? (
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => openStoryViewer(vm.userId)}
+                  style={styles.highlightItem}
+                >
+                  <View style={[styles.highlightCircle, { borderColor: colors.accent }]}>
+                    <Image
+                      source={{ uri: currentUserStory.imageUri }}
+                      style={styles.highlightImage}
+                      contentFit="cover"
+                    />
+                  </View>
+                  <Text style={[styles.highlightLabel, { color: colors.textPrimary }]}>Your story</Text>
+                </TouchableOpacity>
+              ) : null}
+
               <TouchableOpacity
                 activeOpacity={0.8}
                 onPress={() => setSourceModalVisible(true)}
@@ -257,14 +327,19 @@ export default function SocialProfileTabScreen() {
               </TouchableOpacity>
 
               {vm.activeStories.slice(0, 8).map((story) => {
+                if (story.authorId === vm.userId) {
+                  return null;
+                }
+
                 const profile = vm.publicProfilesById[story.authorId];
-                const photoUrl = profile?.photoUrl || profile?.avatarUrl || "";
+                const photoUrl = story.imageUri || profile?.photoUrl || profile?.avatarUrl || "";
                 const label = profile?.username || story.authorLabel || "story";
 
                 return (
                   <TouchableOpacity
                     key={story.id}
                     activeOpacity={0.8}
+                    onPress={() => openStoryViewer(story.authorId)}
                     style={styles.highlightItem}
                   >
                     <View style={[styles.highlightCircle, { borderColor: colors.border }]}>
@@ -390,6 +465,7 @@ export default function SocialProfileTabScreen() {
       />
       <SocialPublishTargetModal
         imageUri={vm.postImageUri}
+        loading={vm.postingSocialPost}
         visible={targetModalVisible}
         onChoosePost={() => {
           setTargetModalVisible(false);
@@ -417,6 +493,17 @@ export default function SocialProfileTabScreen() {
         }}
         onPublish={() => {
           void handlePublishPost();
+        }}
+      />
+      <SocialStoryViewerModal
+        story={selectedStory}
+        visible={!!selectedStory}
+        onAddPress={() => {
+          setSelectedStory(null);
+          setSourceModalVisible(true);
+        }}
+        onClose={() => {
+          setSelectedStory(null);
         }}
       />
     </SafeAreaView>

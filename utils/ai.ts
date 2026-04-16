@@ -120,6 +120,7 @@ export async function callAI(params: {
   prompt: string;
   systemPrompt?: string;
   jsonMode?: boolean;
+  googleSearchGrounding?: boolean;
   conversationHistory?: { role: "user" | "assistant"; content: string }[];
 }): Promise<string> {
   const endpoint = `${GEMINI_API_BASE_URL}/models/${AI_MODEL}:generateContent`;
@@ -142,6 +143,10 @@ export async function callAI(params: {
     body.systemInstruction = {
       parts: [{ text: systemInstruction }],
     };
+  }
+
+  if (params.googleSearchGrounding) {
+    body.tools = [{ google_search: {} }];
   }
 
   for (let attempt = 0; attempt <= MAX_AI_RETRIES; attempt += 1) {

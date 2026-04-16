@@ -8,7 +8,7 @@ import {
 } from "../../utils/home-travel-planner";
 import { getHomeSavedSourceKey } from "../../utils/saved-trips";
 import type { DiscoverProfile } from "../../utils/trip-recommendations";
-import type { HomePlannerStep, StoredHomePlan } from "../../utils/home-chat-storage";
+import type { StoredHomePlan } from "../../utils/home-chat-storage";
 import {
   GROUND_DESTINATIONS,
   HIGH_BUDGET_DESTINATIONS,
@@ -34,7 +34,7 @@ function getHomeCopy(language: AppLanguage) {
       duration: "Duration",
       generate: "Suggestions",
       initialAssistant: (profileName: string) =>
-        `Hi, ${profileName}! I'm your travel assistant. I'll ask you a few quick questions to plan the perfect trip. Let's start with your budget in EUR.`,
+        `Hi, ${profileName}! Tell me what kind of trip you want and I'll guide you with a few smart questions before I build the plan.`,
       planning: "Planning",
       timingFallback: "Flexible",
       timing: "When",
@@ -67,7 +67,7 @@ function getHomeCopy(language: AppLanguage) {
       duration: "Dauer",
       generate: "Vorschl\u00E4ge",
       initialAssistant: (profileName: string) =>
-        `Hallo, ${profileName}! Ich bin dein Reiseassistent. Ich stelle dir ein paar kurze Fragen, um die perfekte Reise zu planen. Wir starten mit deinem Budget in EUR.`,
+        `Hallo, ${profileName}! Erzahl mir, was fur eine Reise du suchst, und ich fuhre dich mit ein paar klugen Fragen zum Plan.`,
       planning: "Planung",
       timingFallback: "Flexibel",
       timing: "Wann",
@@ -100,7 +100,7 @@ function getHomeCopy(language: AppLanguage) {
       duration: "Duraci\u00F3n",
       generate: "Sugerencias",
       initialAssistant: (profileName: string) =>
-        `\u00A1Hola, ${profileName}! Soy tu asistente de viajes. Te har\u00E9 unas preguntas rápidas para planificar el viaje perfecto. Empecemos con tu presupuesto en EUR.`,
+        `\u00A1Hola, ${profileName}! Cu\u00E9ntame qu\u00E9 tipo de viaje quieres y te guiar\u00E9 con unas pocas preguntas inteligentes antes de armar el plan.`,
       planning: "Planificaci\u00F3n",
       timingFallback: "Flexible",
       timing: "Cu\u00E1ndo",
@@ -133,7 +133,7 @@ function getHomeCopy(language: AppLanguage) {
       duration: "Dur\u00E9e",
       generate: "Suggestions",
       initialAssistant: (profileName: string) =>
-        `Salut, ${profileName} ! Je suis ton assistant voyage. Je vais te poser quelques questions rapides pour planifier le voyage parfait. On commence par ton budget en EUR.`,
+        `Salut, ${profileName} ! Dis-moi quel type de voyage tu veux et je vais te guider avec quelques questions intelligentes avant de construire le plan.`,
       planning: "Planification",
       timingFallback: "Flexible",
       timing: "Quand",
@@ -165,7 +165,7 @@ function getHomeCopy(language: AppLanguage) {
     duration: "Продължителност",
     generate: "Предложения",
     initialAssistant: (profileName: string) =>
-      `Здравей, ${profileName}! Аз съм твоят travel асистент. Ще ти задам няколко бързи въпроса, за да планираме перфектното пътуване. Започваме с бюджета ти в евро.`,
+      `Здравей, ${profileName}! Кажи ми какво пътуване искаш и ще те преведа през няколко умни въпроса, преди да сглобя плана.`,
     planning: "Планиране",
     timingFallback: "Гъвкаво",
     timing: "Кога",
@@ -187,47 +187,6 @@ export function buildInitialAssistantMessage(
   language: AppLanguage = "bg"
 ) {
   return getHomeCopy(language).initialAssistant(profileName);
-}
-
-export function buildDaysQuestion(budget: string, language: AppLanguage = "bg") {
-  return getHomeCopy(language).daysQuestion(budget);
-}
-
-export function buildTravelersQuestion(days: string, language: AppLanguage = "bg") {
-  return getHomeCopy(language).travelersQuestion(days);
-}
-
-export function buildTransportQuestion(
-  travelers: string,
-  language: AppLanguage = "bg"
-) {
-  return getHomeCopy(language).transportQuestion(travelers);
-}
-
-export function buildTimingQuestion(
-  transportPreference: string,
-  language: AppLanguage = "bg"
-) {
-  return getHomeCopy(language).timingQuestion(transportPreference);
-}
-
-export function buildDestinationQuestion(
-  profile: DiscoverProfile,
-  timing: string,
-  travelers: string,
-  language: AppLanguage = "bg"
-) {
-  const copy = getHomeCopy(language);
-  const dreamDestination = profile.personalProfile.dreamDestinations
-    .split(/[,;\n]/)
-    .map((item) => item.trim())
-    .filter(Boolean)[0];
-
-  if (dreamDestination) {
-    return copy.destinationFromDream(travelers, timing, dreamDestination);
-  }
-
-  return copy.destinationGeneric(travelers, timing);
 }
 
 export function normalizeDaysLabel(value: string) {
@@ -431,18 +390,6 @@ export function normalizeLatestPlan(plan: StoredHomePlan): StoredHomePlan {
         formattedPlanText,
       }),
   };
-}
-
-export function getStepTitle(step: HomePlannerStep, language: AppLanguage = "bg") {
-  const copy = getHomeCopy(language);
-
-  if (step === "chatting") return copy.planning;
-  if (step === "budget") return copy.budget;
-  if (step === "days") return copy.duration;
-  if (step === "travelers") return copy.travelers;
-  if (step === "transport") return copy.transport;
-  if (step === "timing") return copy.timing;
-  return copy.generate;
 }
 
 export function getDefaultChatTitle(chatCount: number, language: AppLanguage = "bg") {

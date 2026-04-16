@@ -69,6 +69,9 @@ function getStripeClient() {
 exports.createTestCheckoutSession = (0, https_1.onCall)({ invoker: "public", region: "us-central1", secrets: ["STRIPE_SECRET_KEY"] }, async (request) => {
     const data = (request.data ?? {});
     const amountCents = sanitizeNumber(data.amountCents);
+    const requestedSubtotalCents = sanitizeNumber(data.subtotalCents, amountCents);
+    const subtotalCents = requestedSubtotalCents > 0 ? requestedSubtotalCents : amountCents;
+    const platformFeeCents = sanitizeNumber(data.platformFeeCents, Math.max(amountCents - subtotalCents, 0));
     const currency = sanitizeString(data.currency, "eur").toLowerCase();
     if (amountCents <= 0) {
         throw new https_1.HttpsError("invalid-argument", "amountCents must be a positive integer.");
@@ -85,12 +88,27 @@ exports.createTestCheckoutSession = (0, https_1.onCall)({ invoker: "public", reg
                         currency,
                         product_data: {
                             description: sanitizeString(data.destination) || undefined,
-                            name: sanitizeString(data.description, "TravelApp reservation"),
+                            name: sanitizeString(data.description, "TravelApp reservation subtotal"),
                         },
-                        unit_amount: Math.round(amountCents),
+                        unit_amount: Math.max(Math.round(subtotalCents), 1),
                     },
                     quantity: 1,
                 },
+                ...(platformFeeCents > 0
+                    ? [
+                        {
+                            price_data: {
+                                currency,
+                                product_data: {
+                                    description: "TravelApp platform fee",
+                                    name: "TravelApp service fee (4%)",
+                                },
+                                unit_amount: Math.round(platformFeeCents),
+                            },
+                            quantity: 1,
+                        },
+                    ]
+                    : []),
             ],
             metadata: {
                 contactEmail: sanitizeString(data.contactEmail),
@@ -98,6 +116,11 @@ exports.createTestCheckoutSession = (0, https_1.onCall)({ invoker: "public", reg
                 destination: sanitizeString(data.destination),
                 paymentMethod: sanitizeString(data.paymentMethod),
                 paymentMode: "stripe_checkout_test",
+                platformFeeCents: String(Math.max(platformFeeCents, 0)),
+                providerBookingUrl: sanitizeString(data.providerBookingUrl),
+                providerLabel: sanitizeString(data.providerLabel),
+                reservationMode: sanitizeString(data.reservationMode),
+                subtotalCents: String(Math.max(subtotalCents, 0)),
                 userId: sanitizeString(data.userId),
             },
             mode: "payment",

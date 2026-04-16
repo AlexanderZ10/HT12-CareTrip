@@ -1,6 +1,8 @@
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 
 import { searchBusbudOffers } from "../../travel-providers/busbud";
+import { searchBookingDemandStayOffers } from "../../travel-providers/booking-demand";
+import { buildStaySearchLinkOffers } from "../../travel-providers/stay-links";
 import {
   searchSkyscannerFlightOffers,
   searchSkyscannerHotelOffers,
@@ -112,23 +114,90 @@ function normalizeStayType(stayStyle: string, type: string) {
   return type || "Хотел";
 }
 
+function mergeStayOffers(
+  primaryOffers: Array<{
+    area: string;
+    bookingUrl: string;
+    imageUrl: string;
+    name: string;
+    note: string;
+    priceAmount: number | null;
+    priceCurrency: string;
+    ratingLabel: string;
+    sourceLabel: string;
+    type: string;
+    providerAccommodationId?: string;
+    providerKey?: string;
+    providerPaymentModes?: string[];
+    providerProductId?: string;
+    reservationMode?: string;
+  }>,
+  secondaryOffers: Array<{
+    area: string;
+    bookingUrl: string;
+    imageUrl: string;
+    name: string;
+    note: string;
+    priceAmount: number | null;
+    priceCurrency: string;
+    ratingLabel: string;
+    sourceLabel: string;
+    type: string;
+    providerAccommodationId?: string;
+    providerKey?: string;
+    providerPaymentModes?: string[];
+    providerProductId?: string;
+    reservationMode?: string;
+  }>
+) {
+  const seenKeys = new Set<string>();
+
+  return [...primaryOffers, ...secondaryOffers].filter((offer) => {
+    const key = [
+      offer.providerKey || "",
+      offer.providerAccommodationId || "",
+      offer.providerProductId || "",
+      offer.bookingUrl,
+      offer.name,
+      offer.area,
+      offer.priceAmount ?? "",
+    ]
+      .join("|")
+      .toLowerCase();
+
+    if (!key || seenKeys.has(key)) {
+      return false;
+    }
+
+    seenKeys.add(key);
+    return true;
+  });
+}
+
 export const searchOffers = onCall({ region: "us-central1" }, async (request) => {
   const data = (request.data ?? {}) as SearchOffersPayload;
   const destinationQuery = sanitizeString(data.destinationQuery);
   const originQuery = sanitizeString(data.originQuery);
   const departureDate = sanitizeString(data.departureDate);
   const returnDate = sanitizeString(data.returnDate);
+  const transportPreference = sanitizeString(data.transportPreference);
 
   if (!destinationQuery || !originQuery || !departureDate || !returnDate) {
     throw new HttpsError("invalid-argument", "Missing search inputs.");
   }
 
   const skyscannerApiKey = sanitizeString(process.env.SKYSCANNER_API_KEY);
+  const bookingDemandToken = sanitizeString(
+    process.env.BOOKING_DEMAND_API_TOKEN || process.env.BOOKING_DEMAND_TOKEN
+  );
+  const bookingAffiliateId = sanitizeString(process.env.BOOKING_AFFILIATE_ID);
+  const hasSkyscanner = !!skyscannerApiKey;
+  const hasBookingDemand = !!bookingDemandToken && !!bookingAffiliateId;
+  const notes: string[] = [];
 
-  if (!skyscannerApiKey) {
-    throw new HttpsError(
-      "failed-precondition",
-      "Missing SKYSCANNER_API_KEY in Firebase Functions environment."
+  if (!hasSkyscanner && !hasBookingDemand) {
+    notes.push(
+      "Running with free stay sources and provider search links. Configure SKYSCANNER_API_KEY or BOOKING_DEMAND credentials for richer live offers."
     );
   }
 
@@ -136,34 +205,75 @@ export const searchOffers = onCall({ region: "us-central1" }, async (request) =>
   const locale = sanitizeString(data.locale, "bg-BG");
   const market = sanitizeString(data.market, "BG");
   const currency = "EUR";
-  const notes: string[] = [];
+  const checkInDate = parseIsoDate(departureDate);
+  const checkOutDate = parseIsoDate(returnDate);
 
-  const [flights, hotels] = await Promise.all([
-    searchSkyscannerFlightOffers({
-      adults,
-      apiKey: skyscannerApiKey,
-      checkInDate: parseIsoDate(departureDate),
-      checkOutDate: parseIsoDate(returnDate),
-      currency,
-      destinationQuery,
-      locale,
-      market,
-      maxResults: 4,
-      originQuery,
-    }),
-    searchSkyscannerHotelOffers({
-      adults,
-      apiKey: skyscannerApiKey,
-      checkInDate: parseIsoDate(departureDate),
-      checkOutDate: parseIsoDate(returnDate),
-      currency,
-      destinationQuery,
-      locale,
-      market,
-      maxResults: 4,
-      originQuery,
-    }),
-  ]);
+  let flights: Awaited<ReturnType<typeof searchSkyscannerFlightOffers>> = [];
+  if (hasSkyscanner) {
+    try {
+      flights = await searchSkyscannerFlightOffers({
+        adults,
+        apiKey: skyscannerApiKey,
+        checkInDate,
+        checkOutDate,
+        currency,
+        destinationQuery,
+        locale,
+        market,
+        maxResults: 4,
+        originQuery,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Skyscanner flight search failed";
+      notes.push(`Skyscanner flights not available: ${message}`);
+    }
+  } else {
+    notes.push("Flight offers require SKYSCANNER_API_KEY.");
+  }
+
+  let skyscannerHotels: Awaited<ReturnType<typeof searchSkyscannerHotelOffers>> = [];
+  if (hasSkyscanner) {
+    try {
+      skyscannerHotels = await searchSkyscannerHotelOffers({
+        adults,
+        apiKey: skyscannerApiKey,
+        checkInDate,
+        checkOutDate,
+        currency,
+        destinationQuery,
+        locale,
+        market,
+        maxResults: 4,
+        originQuery,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Skyscanner hotel search failed";
+      notes.push(`Skyscanner stays not available: ${message}`);
+    }
+  }
+
+  let bookingHotels: Awaited<ReturnType<typeof searchBookingDemandStayOffers>> = [];
+  if (hasBookingDemand) {
+    try {
+      bookingHotels = await searchBookingDemandStayOffers({
+        adults,
+        affiliateId: bookingAffiliateId,
+        checkInDate,
+        checkOutDate,
+        currency,
+        destinationQuery,
+        locale,
+        market,
+        maxResults: 4,
+        token: bookingDemandToken,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Booking.com stay search failed";
+      notes.push(`Booking.com stays not available: ${message}`);
+    }
+  } else {
+    notes.push("Booking.com Demand API is unavailable, so Rome2Rio hotel search fallback will be used.");
+  }
 
   let buses: Awaited<ReturnType<typeof searchBusbudOffers>> = [];
   const busbudEndpoint = sanitizeString(process.env.BUSBUD_SEARCH_ENDPOINT);
@@ -188,7 +298,27 @@ export const searchOffers = onCall({ region: "us-central1" }, async (request) =>
     notes.push("Bus offers require BUSBUD_SEARCH_ENDPOINT and BUSBUD_API_KEY.");
   }
 
-  if (flights.length === 0 && hotels.length === 0 && buses.length === 0) {
+  const hotels = mergeStayOffers(bookingHotels, skyscannerHotels);
+  const staySearchLinkOffers =
+    hotels.length === 0
+      ? buildStaySearchLinkOffers({
+          adults,
+          checkInDate,
+          checkOutDate,
+          currency,
+          destinationQuery,
+          originQuery,
+          transportPreference,
+        })
+      : [];
+
+  if (staySearchLinkOffers.length > 0) {
+    notes.push("No verified stay inventory was returned, so provider search links were added.");
+  }
+
+  const finalStayOffers = mergeStayOffers(hotels, staySearchLinkOffers);
+
+  if (flights.length === 0 && finalStayOffers.length === 0 && buses.length === 0) {
     throw new HttpsError("not-found", "No live offers were returned by the configured providers.");
   }
 
@@ -206,7 +336,7 @@ export const searchOffers = onCall({ region: "us-central1" }, async (request) =>
       returnDate,
       windowLabel: `${departureDate} → ${returnDate}`,
     },
-    stayOptions: hotels
+    stayOptions: finalStayOffers
       .slice(0, 4)
       .map((offer) => ({
         area: offer.area,
@@ -216,7 +346,17 @@ export const searchOffers = onCall({ region: "us-central1" }, async (request) =>
         note: offer.ratingLabel ? `${offer.note} • ${offer.ratingLabel}` : offer.note,
         priceAmount: offer.priceAmount,
         priceCurrency: offer.priceCurrency,
+        providerAccommodationId:
+          "providerAccommodationId" in offer ? offer.providerAccommodationId || "" : "",
+        providerKey: "providerKey" in offer ? offer.providerKey || "" : "",
+        providerPaymentModes:
+          "providerPaymentModes" in offer && Array.isArray(offer.providerPaymentModes)
+            ? offer.providerPaymentModes
+            : [],
+        providerProductId:
+          "providerProductId" in offer ? offer.providerProductId || "" : "",
         ratingLabel: offer.ratingLabel,
+        reservationMode: "reservationMode" in offer ? offer.reservationMode || "" : "",
         sourceLabel: offer.sourceLabel,
         type: normalizeStayType(sanitizeString(data.stayStyle), offer.type),
       })),

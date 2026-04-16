@@ -27,6 +27,10 @@ import { useGroupsScreen } from "../../features/groups/useGroupsScreen";
 import { SocialMediaSourceModal } from "../../features/social/components/SocialMediaSourceModal";
 import { SocialPostComposerModal } from "../../features/social/components/SocialPostComposerModal";
 import { SocialPublishTargetModal } from "../../features/social/components/SocialPublishTargetModal";
+import {
+  SocialStoryViewerModal,
+  type SocialStoryViewerData,
+} from "../../features/social/components/SocialStoryViewerModal";
 import { StoryRail } from "../../features/social/components/StoryRail";
 import {
   SOCIAL_DOCK_BOTTOM_GAP,
@@ -51,6 +55,7 @@ export default function FeedTabScreen() {
   const [sourceModalVisible, setSourceModalVisible] = useState(false);
   const [targetModalVisible, setTargetModalVisible] = useState(false);
   const [postComposerVisible, setPostComposerVisible] = useState(false);
+  const [selectedStory, setSelectedStory] = useState<SocialStoryViewerData | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -71,35 +76,78 @@ export default function FeedTabScreen() {
     [vm.feedPosts, vm.userId]
   );
 
+  const activeStoriesByAuthorId = useMemo(
+    () => new Map(vm.activeStories.map((story) => [story.authorId, story] as const)),
+    [vm.activeStories]
+  );
+
   const storyItems = useMemo(() => {
-    const activeStoriesByAuthorId = new Map(
-      vm.activeStories.map((story) => [story.authorId, story] as const)
-    );
+    const currentUserStory = activeStoriesByAuthorId.get(vm.userId);
     const items = [
       {
+        hasActiveStory: !!currentUserStory,
         key: "your-story",
         kind: "current" as const,
         label: "Your story",
-        photoUrl: vm.profileAvatarUrl,
+        photoUrl: currentUserStory?.imageUri || vm.profileAvatarUrl,
       },
       ...vm.friendProfiles
         .filter((friend) => activeStoriesByAuthorId.has(friend.uid))
         .slice(0, 10)
         .map((friend) => ({
+          hasActiveStory: true,
           key: `friend-${friend.uid}`,
           kind: "friend" as const,
           label: friend.username || friend.label,
-          photoUrl: friend.photoUrl,
+          photoUrl:
+            activeStoriesByAuthorId.get(friend.uid)?.imageUri ||
+            friend.photoUrl,
         })),
     ];
 
     return items;
-  }, [vm.activeStories, vm.friendProfiles, vm.profileAvatarUrl]);
+  }, [activeStoriesByAuthorId, vm.friendProfiles, vm.profileAvatarUrl, vm.userId]);
 
-  const closePublishFlow = () => {
+  const openStoryViewer = useCallback(
+    (authorId: string) => {
+      const story = activeStoriesByAuthorId.get(authorId);
+
+      if (!story) {
+        return;
+      }
+
+      const authorProfile =
+        authorId === vm.userId ? null : vm.publicProfilesById[authorId];
+
+      setSelectedStory({
+        authorLabel:
+          authorId === vm.userId
+            ? "Your story"
+            : authorProfile?.displayName || story.authorLabel || "Story",
+        authorUsername:
+          authorId === vm.userId ? vm.userHandle : authorProfile?.username || story.authorUsername,
+        avatarUrl:
+          authorId === vm.userId
+            ? vm.profileAvatarUrl
+            : authorProfile?.photoUrl || authorProfile?.avatarUrl,
+        caption: story.caption,
+        imageUri: story.imageUri,
+        isCurrentUser: authorId === vm.userId,
+        location: story.location,
+        timestampLabel: formatRelativeTime(story.createdAtMs, locale),
+      });
+    },
+    [activeStoriesByAuthorId, locale, vm.profileAvatarUrl, vm.publicProfilesById, vm.userHandle, vm.userId]
+  );
+
+  const dismissPublishModals = () => {
     setSourceModalVisible(false);
     setTargetModalVisible(false);
     setPostComposerVisible(false);
+  };
+
+  const closePublishFlow = () => {
+    dismissPublishModals();
     vm.resetPostDraft();
   };
 
@@ -116,7 +164,7 @@ export default function FeedTabScreen() {
     const published = await vm.publishStoryFromDraft();
 
     if (published) {
-      setTargetModalVisible(false);
+      dismissPublishModals();
     }
   };
 
@@ -124,7 +172,7 @@ export default function FeedTabScreen() {
     const published = await vm.handleCreateSocialPost();
 
     if (published) {
-      setPostComposerVisible(false);
+      dismissPublishModals();
     }
   };
 
@@ -340,10 +388,21 @@ export default function FeedTabScreen() {
           <View style={[styles.storiesWrap, { borderBottomColor: colors.border }]}>
             <StoryRail
               items={storyItems}
+              onAddPress={() => {
+                setSourceModalVisible(true);
+              }}
               onPress={(item) => {
-                if (item.kind === "current") {
+                if (item.kind === "current" && !item.hasActiveStory) {
                   setSourceModalVisible(true);
+                  return;
                 }
+
+                const authorId =
+                  item.kind === "current"
+                    ? vm.userId
+                    : item.key.replace(/^friend-/, "");
+
+                openStoryViewer(authorId);
               }}
             />
           </View>
@@ -391,6 +450,7 @@ export default function FeedTabScreen() {
       />
       <SocialPublishTargetModal
         imageUri={vm.postImageUri}
+        loading={vm.postingSocialPost}
         visible={targetModalVisible}
         onChoosePost={() => {
           setTargetModalVisible(false);
@@ -418,6 +478,17 @@ export default function FeedTabScreen() {
         }}
         onPublish={() => {
           void handlePublishPost();
+        }}
+      />
+      <SocialStoryViewerModal
+        story={selectedStory}
+        visible={!!selectedStory}
+        onAddPress={() => {
+          setSelectedStory(null);
+          setSourceModalVisible(true);
+        }}
+        onClose={() => {
+          setSelectedStory(null);
         }}
       />
     </SafeAreaView>

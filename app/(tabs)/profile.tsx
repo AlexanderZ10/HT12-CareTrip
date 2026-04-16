@@ -176,7 +176,7 @@ export default function ProfileTabScreen() {
     sec3Y.value = withDelay(240, withTiming(0, TIMING_ENTRANCE));
     sec4Op.value = withDelay(320, withTiming(1, TIMING_ENTRANCE));
     sec4Y.value = withDelay(320, withTiming(0, TIMING_ENTRANCE));
-  }, []);
+  }, [avatarOp, avatarScale, sec1Op, sec1Y, sec2Op, sec2Y, sec3Op, sec3Y, sec4Op, sec4Y]);
 
   const avatarAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: avatarScale.value }],
@@ -224,7 +224,7 @@ export default function ProfileTabScreen() {
     noticeOpacity.value = withTiming(0, { duration: 180 }, (finished) => {
       if (finished) runOnJS(clearNoticeState)();
     });
-  }, [clearNoticeState]);
+  }, [clearNoticeState, noticeOpacity, noticeTranslateY]);
 
   const noticePanGesture = useMemo(
     () =>
@@ -242,7 +242,7 @@ export default function ProfileTabScreen() {
             noticeTranslateY.value = withSpring(0, SPRING_TOAST);
           }
         }),
-    [clearNoticeState]
+    [clearNoticeState, noticeOpacity, noticeTranslateY]
   );
 
   const showFloatingNotice = useCallback(
@@ -258,7 +258,7 @@ export default function ProfileTabScreen() {
       noticeOpacity.value = withTiming(1, { duration: 200 });
       floatingNoticeTimeoutRef.current = setTimeout(dismissNotice, 3000);
     },
-    [dismissNotice]
+    [dismissNotice, noticeOpacity, noticeTranslateY]
   );
 
   const sortedCountries = useMemo(() => getCountriesSorted(language), [language]);
@@ -416,7 +416,7 @@ export default function ProfileTabScreen() {
       unsubscribeProfile?.();
       unsubscribeAuth();
     };
-  }, [router, triggerEntrance]);
+  }, [language, router, triggerEntrance]);
 
   // ── Handlers ───────────────────────────────────────────────────────────
   const updateField = (field: keyof ProfileFormState, value: string) => {

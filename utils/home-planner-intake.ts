@@ -1,0 +1,417 @@
+import { getAIApiKey, callAI } from "./ai";
+import type { HomeChatMessage } from "./home-chat-storage";
+import type { DiscoverProfile } from "./trip-recommendations";
+import type { AppLanguage } from "./translations";
+
+export type PlannerIntakeSnapshot = {
+  budget: string;
+  days: string;
+  destination: string;
+  notes: string;
+  questionCount: number;
+  timing: string;
+  transportPreference: string;
+  travelers: string;
+  tripStyle: string;
+};
+
+type PlannerIntakeField =
+  | "budget"
+  | "days"
+  | "destination"
+  | "notes"
+  | "timing"
+  | "transportPreference"
+  | "travelers"
+  | "tripStyle";
+
+type PlannerIntakeResult = {
+  budget?: string;
+  days?: string;
+  destination?: string;
+  missingFields?: string[];
+  nextQuestion?: string;
+  notes?: string;
+  questionCount?: number;
+  readyToGenerate?: boolean;
+  timing?: string;
+  transportPreference?: string;
+  travelers?: string;
+  tripStyle?: string;
+};
+
+export type PlannerIntakeTurn = {
+  nextQuestion: string;
+  questionCount: number;
+  readyToGenerate: boolean;
+  snapshot: PlannerIntakeSnapshot;
+};
+
+const REQUIRED_FIELDS: PlannerIntakeField[] = [
+  "destination",
+  "timing",
+  "days",
+  "travelers",
+  "transportPreference",
+  "budget",
+];
+
+function normalizeLanguage(language?: AppLanguage) {
+  if (language === "en" || language === "de" || language === "es" || language === "fr") {
+    return language;
+  }
+
+  return "bg" as const;
+}
+
+function getLanguageLabel(language: AppLanguage) {
+  if (language === "en") return "English";
+  if (language === "de") return "German";
+  if (language === "es") return "Spanish";
+  if (language === "fr") return "French";
+  return "Bulgarian";
+}
+
+function sanitizeString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function parseJsonObjectFromText<T>(rawText: string): T | null {
+  const trimmedText = rawText.trim();
+
+  if (!trimmedText) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(trimmedText) as T;
+  } catch {
+    const fencedMatch = trimmedText.match(/```(?:json)?\s*([\s\S]*?)```/i);
+
+    if (fencedMatch?.[1]) {
+      try {
+        return JSON.parse(fencedMatch[1].trim()) as T;
+      } catch {
+        // Continue to brace extraction below.
+      }
+    }
+
+    const firstBraceIndex = trimmedText.indexOf("{");
+    const lastBraceIndex = trimmedText.lastIndexOf("}");
+
+    if (firstBraceIndex >= 0 && lastBraceIndex > firstBraceIndex) {
+      try {
+        return JSON.parse(
+          trimmedText.slice(firstBraceIndex, lastBraceIndex + 1)
+        ) as T;
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
+  }
+}
+
+function parseQuestionCount(value: unknown, fallback: number) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.round(value));
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsedValue = Number(value);
+    return Number.isFinite(parsedValue) ? Math.max(0, Math.round(parsedValue)) : fallback;
+  }
+
+  return fallback;
+}
+
+function summarizeProfile(profile: DiscoverProfile) {
+  const interests = profile.interests.selectedOptions.filter(Boolean).slice(0, 5);
+  const assistance = [
+    ...profile.assistance.selectedOptions,
+    profile.assistance.note,
+  ]
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+
+  return [
+    `Home base: ${profile.personalProfile.homeBase || "Not provided"}`,
+    `Dream destinations: ${profile.personalProfile.dreamDestinations || "Not provided"}`,
+    `Travel pace: ${profile.personalProfile.travelPace || "Not provided"}`,
+    `Stay style: ${profile.personalProfile.stayStyle || "Not provided"}`,
+    `About me: ${profile.personalProfile.aboutMe || "Not provided"}`,
+    `Interests: ${interests.join(", ") || "Not provided"}`,
+    `Accessibility: ${assistance.join(", ") || "Not provided"}`,
+  ].join("\n");
+}
+
+function buildConversationHistory(messages: HomeChatMessage[]) {
+  return messages.slice(-12).map((message) => ({
+    content: message.text,
+    role: message.role,
+  })) satisfies { content: string; role: "assistant" | "user" }[];
+}
+
+function fallbackQuestion(language: AppLanguage, missingFields: PlannerIntakeField[]) {
+  const fallbackCopy = {
+    bg: {
+      budget: "Какъв е общият ти бюджет за пътуването?",
+      days: "За колко дни искаш да е пътуването?",
+      destination: "Коя е точната дестинация?",
+      notes: "Има ли нещо важно, което искаш задължително да включа?",
+      timing: "Кога искаш да пътуваш?",
+      transportPreference: "Какъв транспорт предпочиташ?",
+      travelers: "Колко човека ще пътуват?",
+      tripStyle: "Какъв да е вайбът на пътуването: chill, food, culture, nightlife, nature?",
+    },
+    en: {
+      budget: "What is your total trip budget?",
+      days: "How many days should the trip be?",
+      destination: "What is the exact destination?",
+      notes: "Is there anything important I should definitely include?",
+      timing: "When do you want to travel?",
+      transportPreference: "What transport do you prefer?",
+      travelers: "How many people are traveling?",
+      tripStyle: "What vibe should the trip have: chill, food, culture, nightlife, nature?",
+    },
+    de: {
+      budget: "Wie hoch ist dein Gesamtbudget fur die Reise?",
+      days: "Wie viele Tage soll die Reise dauern?",
+      destination: "Was ist das genaue Reiseziel?",
+      notes: "Gibt es etwas Wichtiges, das ich unbedingt einplanen soll?",
+      timing: "Wann mochtest du reisen?",
+      transportPreference: "Welchen Transport bevorzugst du?",
+      travelers: "Wie viele Personen reisen?",
+      tripStyle: "Welchen Vibe soll die Reise haben: entspannt, Food, Kultur, Nightlife, Natur?",
+    },
+    es: {
+      budget: "Cual es tu presupuesto total para el viaje?",
+      days: "Cuantos dias debe durar el viaje?",
+      destination: "Cual es el destino exacto?",
+      notes: "Hay algo importante que deba incluir si o si?",
+      timing: "Cuando quieres viajar?",
+      transportPreference: "Que transporte prefieres?",
+      travelers: "Cuantas personas viajaran?",
+      tripStyle: "Que vibe quieres para el viaje: chill, food, cultura, nightlife, naturaleza?",
+    },
+    fr: {
+      budget: "Quel est ton budget total pour le voyage ?",
+      days: "Combien de jours doit durer le voyage ?",
+      destination: "Quelle est la destination exacte ?",
+      notes: "Y a-t-il quelque chose d'important que je dois absolument inclure ?",
+      timing: "Quand veux-tu voyager ?",
+      transportPreference: "Quel transport preferes-tu ?",
+      travelers: "Combien de personnes voyagent ?",
+      tripStyle: "Quelle ambiance veux-tu pour le voyage : chill, food, culture, nightlife, nature ?",
+    },
+  } as const;
+
+  const copy = fallbackCopy[language];
+  return copy[missingFields[0] ?? "destination"];
+}
+
+function parseMissingFields(value: unknown): PlannerIntakeField[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => sanitizeString(item))
+    .filter(
+      (item): item is PlannerIntakeField =>
+        item === "budget" ||
+        item === "days" ||
+        item === "destination" ||
+        item === "notes" ||
+        item === "timing" ||
+        item === "transportPreference" ||
+        item === "travelers" ||
+        item === "tripStyle"
+    );
+}
+
+function mergeSnapshot(
+  currentSnapshot: PlannerIntakeSnapshot,
+  result: PlannerIntakeResult
+) {
+  return {
+    budget: sanitizeString(result.budget) || currentSnapshot.budget,
+    days: sanitizeString(result.days) || currentSnapshot.days,
+    destination: sanitizeString(result.destination) || currentSnapshot.destination,
+    notes: sanitizeString(result.notes) || currentSnapshot.notes,
+    questionCount: parseQuestionCount(result.questionCount, currentSnapshot.questionCount),
+    timing: sanitizeString(result.timing) || currentSnapshot.timing,
+    transportPreference:
+      sanitizeString(result.transportPreference) || currentSnapshot.transportPreference,
+    travelers: sanitizeString(result.travelers) || currentSnapshot.travelers,
+    tripStyle: sanitizeString(result.tripStyle) || currentSnapshot.tripStyle,
+  } satisfies PlannerIntakeSnapshot;
+}
+
+function getMissingRequiredFields(snapshot: PlannerIntakeSnapshot) {
+  return REQUIRED_FIELDS.filter((field) => !snapshot[field].trim());
+}
+
+function buildSystemPrompt(language: AppLanguage) {
+  return [
+    "You are the CareTrip AI planner intake orchestrator.",
+    `Always write in ${getLanguageLabel(language)}.`,
+    "Your job is to collect enough information to generate a real travel plan with live transport and stay options.",
+    "Ask at most 7 assistant questions in total.",
+    "Ask only one focused question at a time, unless you are at question 6 and still missing multiple required fields, then ask one compact final question covering all remaining required items.",
+    "Extract any details the user already gave, even if they answered several fields in one message.",
+    "Keep questions short, natural, and practical.",
+    "Do not ask for information that is already present in the profile unless it is directly needed for the trip.",
+    "Required fields: destination, timing, days, travelers, transportPreference, budget.",
+    "Optional fields: tripStyle, notes.",
+    "If all required fields are clear, set readyToGenerate to true and leave nextQuestion empty.",
+    "Return JSON only.",
+  ].join("\n");
+}
+
+function buildPrompt(params: {
+  language: AppLanguage;
+  latestUserInput: string;
+  profile: DiscoverProfile;
+  snapshot: PlannerIntakeSnapshot;
+}) {
+  return [
+    "Current structured trip snapshot:",
+    JSON.stringify(params.snapshot, null, 2),
+    "",
+    "Traveler profile:",
+    summarizeProfile(params.profile),
+    "",
+    "Latest user input:",
+    params.latestUserInput,
+    "",
+    "Return a JSON object with this exact shape:",
+    `{
+  "budget": "string",
+  "days": "string",
+  "destination": "string",
+  "timing": "string",
+  "travelers": "string",
+  "transportPreference": "string",
+  "tripStyle": "string",
+  "notes": "string",
+  "missingFields": ["destination", "timing"],
+  "nextQuestion": "string",
+  "questionCount": 3,
+  "readyToGenerate": false
+}`,
+    "",
+    "Rules:",
+    "- Keep field values concise and user-friendly.",
+    "- Preserve already known values unless the latest message clearly corrects them.",
+    "- If the user gives a correction, replace the older field value.",
+    "- questionCount should represent how many assistant intake questions have been asked after this turn.",
+    "- Do not exceed 7.",
+    "- If enough information is available, set readyToGenerate to true.",
+    "- If readyToGenerate is true, nextQuestion must be an empty string.",
+  ].join("\n");
+}
+
+export async function runPlannerIntakeTurn(params: {
+  language?: AppLanguage;
+  latestUserInput: string;
+  messages: HomeChatMessage[];
+  profile: DiscoverProfile;
+  snapshot: PlannerIntakeSnapshot;
+}): Promise<PlannerIntakeTurn> {
+  const language = normalizeLanguage(params.language);
+  const apiKey = getAIApiKey();
+
+  if (!apiKey) {
+    const missingFields = getMissingRequiredFields(params.snapshot);
+
+    return {
+      nextQuestion: fallbackQuestion(language, missingFields),
+      questionCount: Math.min(params.snapshot.questionCount + 1, 7),
+      readyToGenerate: missingFields.length === 0,
+      snapshot: params.snapshot,
+    };
+  }
+
+  const rawJson = await callAI({
+    apiKey,
+    conversationHistory: buildConversationHistory(params.messages),
+    jsonMode: true,
+    prompt: buildPrompt({
+      language,
+      latestUserInput: params.latestUserInput,
+      profile: params.profile,
+      snapshot: params.snapshot,
+    }),
+    systemPrompt: buildSystemPrompt(language),
+  });
+
+  const parsedResult = parseJsonObjectFromText<PlannerIntakeResult>(rawJson);
+
+  if (!parsedResult) {
+    const missingFields = getMissingRequiredFields(params.snapshot);
+
+    return {
+      nextQuestion: fallbackQuestion(language, missingFields),
+      questionCount: Math.min(params.snapshot.questionCount + 1, 7),
+      readyToGenerate: missingFields.length === 0,
+      snapshot: params.snapshot,
+    };
+  }
+
+  const mergedSnapshot = mergeSnapshot(params.snapshot, parsedResult);
+  const missingRequiredFields = getMissingRequiredFields(mergedSnapshot);
+  const aiMissingFields = parseMissingFields(parsedResult.missingFields);
+  const nextQuestionCount = Math.min(
+    Math.max(mergedSnapshot.questionCount, params.snapshot.questionCount),
+    7
+  );
+  const readyToGenerate =
+    parsedResult.readyToGenerate === true && missingRequiredFields.length === 0;
+  const fallbackNextQuestion = fallbackQuestion(
+    language,
+    missingRequiredFields.length > 0 ? missingRequiredFields : aiMissingFields
+  );
+  const nextQuestion =
+    !readyToGenerate && nextQuestionCount >= 7 && missingRequiredFields.length > 0
+      ? fallbackNextQuestion
+      : sanitizeString(parsedResult.nextQuestion) || (!readyToGenerate ? fallbackNextQuestion : "");
+
+  return {
+    nextQuestion,
+    questionCount:
+      !readyToGenerate && nextQuestion
+        ? Math.min(Math.max(nextQuestionCount, params.snapshot.questionCount + 1), 7)
+        : nextQuestionCount,
+    readyToGenerate,
+    snapshot: {
+      ...mergedSnapshot,
+      questionCount:
+        !readyToGenerate && nextQuestion
+          ? Math.min(Math.max(nextQuestionCount, params.snapshot.questionCount + 1), 7)
+          : nextQuestionCount,
+    },
+  };
+}
+
+export function getPlannerIntakeErrorMessage(language: AppLanguage = "bg") {
+  if (language === "en") {
+    return "I couldn't continue the planner chat right now. Please send your answer again.";
+  }
+
+  if (language === "de") {
+    return "Ich konnte den Planner-Chat gerade nicht fortsetzen. Bitte sende deine Antwort erneut.";
+  }
+
+  if (language === "es") {
+    return "No pude continuar el chat del planner ahora mismo. Envia tu respuesta otra vez.";
+  }
+
+  if (language === "fr") {
+    return "Je n'ai pas pu continuer le chat du planner pour le moment. Envoie ta reponse encore une fois.";
+  }
+
+  return "Не успях да продължа planner чата в момента. Изпрати отговора си още веднъж.";
+}

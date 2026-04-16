@@ -1,7 +1,7 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Linking, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAppTheme } from "../components/app-theme-provider";
@@ -25,6 +25,11 @@ type ReceiptState = {
   kicker: string;
   lines: string[];
   paymentIntentId: string;
+  providerBookingUrl: string;
+  providerLabel: string;
+  reservationStatusLabel: string;
+  serviceFeeLabel: string;
+  subtotalLabel: string;
   targetGroupId: string | null;
   targetLabel: string;
   totalLabel: string;
@@ -203,6 +208,11 @@ export default function PaymentReturnScreen() {
               `Обработено на: ${formatProcessedAt(Date.now())}`,
             ],
             paymentIntentId: verification.paymentIntentId,
+            providerBookingUrl: "",
+            providerLabel: "",
+            reservationStatusLabel: "",
+            serviceFeeLabel: "",
+            subtotalLabel: pendingExpenseCheckout.amountLabel,
             targetGroupId: pendingExpenseCheckout.groupId,
             targetLabel: "Обратно към групата",
             totalLabel: pendingExpenseCheckout.amountLabel,
@@ -261,9 +271,19 @@ export default function PaymentReturnScreen() {
             paymentIntentId: verification.paymentIntentId,
             paymentMethod: pendingCheckout.paymentMethod,
             paymentMode: verification.mode,
+            platformFeeAmount: pendingCheckout.platformFeeAmount,
+            platformFeeLabel: pendingCheckout.platformFeeLabel,
+            providerBookingUrl: pendingCheckout.providerBookingUrl,
+            providerLabel: pendingCheckout.providerLabel,
+            reservationMode: pendingCheckout.reservationMode,
+            reservationStatusLabel: pendingCheckout.reservationStatusLabel,
             stay: pendingCheckout.stay,
+            subtotalAmount: pendingCheckout.subtotalAmount,
+            subtotalLabel: pendingCheckout.subtotalLabel,
             timing: pendingCheckout.timing,
             title: pendingCheckout.title,
+            totalAmount: pendingCheckout.totalAmount,
+            totalLabel: pendingCheckout.totalLabel,
             transport: pendingCheckout.transport,
             travelers: pendingCheckout.travelers,
           })
@@ -283,6 +303,11 @@ export default function PaymentReturnScreen() {
             `Обработено на: ${formatProcessedAt(Date.now())}`,
           ],
           paymentIntentId: verification.paymentIntentId,
+          providerBookingUrl: pendingCheckout.providerBookingUrl,
+          providerLabel: pendingCheckout.providerLabel,
+          reservationStatusLabel: pendingCheckout.reservationStatusLabel,
+          serviceFeeLabel: pendingCheckout.platformFeeLabel,
+          subtotalLabel: pendingCheckout.subtotalLabel,
           targetGroupId: null,
           targetLabel: "Обратно към Home",
           totalLabel: pendingCheckout.totalLabel,
@@ -290,7 +315,11 @@ export default function PaymentReturnScreen() {
         setReturnTargetGroupId(null);
         setReturnTargetLabel("Обратно към Home");
         setStage("success");
-        setMessage("Stripe test payment was confirmed and the booking was added to Trips.");
+        setMessage(
+          pendingCheckout.providerBookingUrl
+            ? `Stripe test плащането е потвърдено. Продължи към ${pendingCheckout.providerLabel} за финалното provider потвърждение.`
+            : "Stripe test плащането е потвърдено и тестовата резервация е добавена в Trips."
+        );
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message.trim() : "";
         setStage("error");
@@ -318,6 +347,14 @@ export default function PaymentReturnScreen() {
     }
 
     router.replace("/home");
+  };
+
+  const handleOpenProvider = async () => {
+    if (!receipt?.providerBookingUrl) {
+      return;
+    }
+
+    await Linking.openURL(receipt.providerBookingUrl);
   };
 
   const buttonLabel =
@@ -350,6 +387,26 @@ export default function PaymentReturnScreen() {
                     {line}
                   </Text>
                 ))}
+                {receipt.providerLabel ? (
+                  <Text style={[styles.receiptLine, { color: colors.textSecondary }]}>
+                    Provider: {receipt.providerLabel}
+                  </Text>
+                ) : null}
+                {receipt.reservationStatusLabel ? (
+                  <Text style={[styles.receiptLine, { color: colors.textSecondary }]}>
+                    Статус: {receipt.reservationStatusLabel}
+                  </Text>
+                ) : null}
+                {receipt.subtotalLabel ? (
+                  <Text style={[styles.receiptLine, { color: colors.textSecondary }]}>
+                    Subtotal: {receipt.subtotalLabel}
+                  </Text>
+                ) : null}
+                {receipt.serviceFeeLabel ? (
+                  <Text style={[styles.receiptLine, { color: colors.textSecondary }]}>
+                    TravelApp fee: {receipt.serviceFeeLabel}
+                  </Text>
+                ) : null}
                 <Text style={[styles.receiptLine, { color: colors.textSecondary }]}>
                   Референция: {formatCheckoutReference(receipt.paymentIntentId)}
                 </Text>
@@ -371,6 +428,23 @@ export default function PaymentReturnScreen() {
             <Text style={[styles.title, { color: colors.textPrimary }]}>Проблем при връщане от Stripe</Text>
             <Text style={[styles.text, { color: colors.textSecondary }]}>{message}</Text>
           </>
+        ) : null}
+
+        {stage === "success" && receipt?.providerBookingUrl ? (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={() => {
+              void handleOpenProvider();
+            }}
+            style={[
+              styles.secondaryButton,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.secondaryButtonText, { color: colors.textPrimary }]}>
+              Продължи към {receipt.providerLabel || "доставчика"}
+            </Text>
+          </TouchableOpacity>
         ) : null}
 
         {stage !== "processing" ? (
@@ -440,6 +514,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
     width: "100%",
+  },
+  secondaryButton: {
+    alignItems: "center",
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    marginTop: Spacing.lg,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    width: "100%",
+  },
+  secondaryButtonText: {
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
   },
   buttonText: {
     ...TypeScale.bodyMd,
