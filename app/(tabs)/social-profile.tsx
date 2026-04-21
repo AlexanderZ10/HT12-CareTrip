@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   Dimensions,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   Share,
@@ -24,7 +25,7 @@ import {
   Spacing,
   TypeScale,
 } from "../../constants/design-system";
-import { useGroupsScreen } from "../../features/groups/useGroupsScreen";
+import { useSharedGroupsScreen } from "../../features/groups/GroupsScreenProvider";
 import { SocialMediaSourceModal } from "../../features/social/components/SocialMediaSourceModal";
 import { SocialPostComposerModal } from "../../features/social/components/SocialPostComposerModal";
 import { SocialPublishTargetModal } from "../../features/social/components/SocialPublishTargetModal";
@@ -47,19 +48,21 @@ const GRID_GAP = 2;
 const GRID_TILE_SIZE = (SCREEN_WIDTH - GRID_GAP * (GRID_COLUMNS - 1)) / GRID_COLUMNS;
 
 type GridTab = "posts" | "tagged";
+type FollowListKind = "followers" | "following";
 
 export default function SocialProfileTabScreen() {
   const { colors } = useAppTheme();
   const { language } = useAppLanguage();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const vm = useGroupsScreen();
+  const vm = useSharedGroupsScreen();
   const locale = getLanguageLocale(language);
   const [sourceModalVisible, setSourceModalVisible] = useState(false);
   const [targetModalVisible, setTargetModalVisible] = useState(false);
   const [postComposerVisible, setPostComposerVisible] = useState(false);
   const [selectedStory, setSelectedStory] = useState<SocialStoryViewerData | null>(null);
   const [activeTab, setActiveTab] = useState<GridTab>("posts");
+  const [followListKind, setFollowListKind] = useState<FollowListKind | null>(null);
 
   const handleEditProfile = () => {
     router.push("/profile");
@@ -121,8 +124,60 @@ export default function SocialProfileTabScreen() {
   };
 
   const postCount = vm.mySocialPosts.length;
-  const followersCount = vm.friendCount;
-  const followingCount = vm.friendCount;
+  const followersCount = vm.friendCount + vm.pendingIncomingFriendships.length;
+  const followingCount = vm.friendCount + vm.pendingOutgoingFriendships.length;
+  const followListProfiles =
+    followListKind === "followers"
+      ? vm.followerProfiles
+      : followListKind === "following"
+        ? vm.followingProfiles
+        : [];
+  const followListTitle = followListKind === "followers" ? "Followers" : "Following";
+  const followListEmptyText =
+    followListKind === "followers"
+      ? "No followers yet."
+      : "You are not following anyone yet.";
+
+  const getFollowActionLabel = (profile: (typeof followListProfiles)[number]) => {
+    return vm.getFollowActionLabelForProfile(profile.uid);
+  };
+
+  const handleFollowProfileAction = (profile: (typeof followListProfiles)[number]) => {
+    const connection = profile.connection;
+    const connectionState = vm.getConnectionStateForProfile(profile.uid);
+
+    if (connectionState === "mutual") {
+      setFollowListKind(null);
+      vm.openComposer(profile.uid);
+      return;
+    }
+
+    if (connectionState === "followed-by" && connection) {
+      void vm.acceptFriendRequest(connection);
+      return;
+    }
+
+    if (connectionState === "following") {
+      return;
+    }
+
+    const publicProfile = vm.publicProfilesById[profile.uid] ?? {
+      aboutMe: profile.aboutMe,
+      avatarUrl: "",
+      displayName: profile.label,
+      homeBase: profile.homeBase,
+      id: profile.uid,
+      photoUrl: profile.photoUrl,
+      uid: profile.uid,
+      updatedAtMs: null,
+      username: profile.username,
+      usernameLower: profile.username.toLowerCase(),
+    };
+
+    if (publicProfile) {
+      void vm.sendFriendRequest(publicProfile);
+    }
+  };
 
   const myPostsWithImages = useMemo(
     () => vm.mySocialPosts.filter((post) => !!post.imageUri),
@@ -236,14 +291,24 @@ export default function SocialProfileTabScreen() {
                 <Text style={[styles.statValue, { color: colors.textPrimary }]}>{postCount}</Text>
                 <Text style={[styles.statLabel, { color: colors.textPrimary }]}>posts</Text>
               </View>
-              <View style={styles.statItem}>
+              <TouchableOpacity
+                accessibilityRole="button"
+                activeOpacity={0.72}
+                onPress={() => setFollowListKind("followers")}
+                style={styles.statItem}
+              >
                 <Text style={[styles.statValue, { color: colors.textPrimary }]}>{followersCount}</Text>
                 <Text style={[styles.statLabel, { color: colors.textPrimary }]}>followers</Text>
-              </View>
-              <View style={styles.statItem}>
+              </TouchableOpacity>
+              <TouchableOpacity
+                accessibilityRole="button"
+                activeOpacity={0.72}
+                onPress={() => setFollowListKind("following")}
+                style={styles.statItem}
+              >
                 <Text style={[styles.statValue, { color: colors.textPrimary }]}>{followingCount}</Text>
                 <Text style={[styles.statLabel, { color: colors.textPrimary }]}>following</Text>
-              </View>
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -452,6 +517,110 @@ export default function SocialProfileTabScreen() {
       </KeyboardAvoidingView>
 
       <SocialTabsDock />
+      <Modal
+        animationType="slide"
+        transparent
+        visible={!!followListKind}
+        onRequestClose={() => setFollowListKind(null)}
+      >
+        <View style={styles.followModalOverlay}>
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={() => setFollowListKind(null)}
+            style={styles.followModalBackdrop}
+          />
+          <View
+            style={[
+              styles.followSheet,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.followSheetHeader}>
+              <Text style={[styles.followSheetTitle, { color: colors.textPrimary }]}>
+                {followListTitle}
+              </Text>
+              <TouchableOpacity
+                accessibilityLabel="Close"
+                activeOpacity={0.7}
+                onPress={() => setFollowListKind(null)}
+                style={styles.followCloseButton}
+              >
+                <MaterialIcons name="close" size={22} color={colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              contentContainerStyle={styles.followListContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {followListProfiles.length === 0 ? (
+                <Text style={[styles.followEmptyText, { color: colors.textSecondary }]}>
+                  {followListEmptyText}
+                </Text>
+              ) : (
+                followListProfiles.map((profile) => {
+                  const actionLabel = getFollowActionLabel(profile);
+                  const connectionState = vm.getConnectionStateForProfile(profile.uid);
+                  const actionDisabled = connectionState === "following";
+                  const loading = vm.isUpdatingConnectionWithProfile(profile.uid);
+
+                  return (
+                    <View key={profile.uid} style={styles.followRow}>
+                      <Avatar label={profile.label} photoUrl={profile.photoUrl} size={44} />
+                      <View style={styles.followRowText}>
+                        <Text
+                          numberOfLines={1}
+                          style={[styles.followName, { color: colors.textPrimary }]}
+                        >
+                          {profile.label}
+                        </Text>
+                        <Text
+                          numberOfLines={1}
+                          style={[styles.followMeta, { color: colors.textSecondary }]}
+                        >
+                          {profile.username ? `@${profile.username}` : profile.homeBase || "Traveler"}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        activeOpacity={0.8}
+                        disabled={actionDisabled || loading}
+                        onPress={() => handleFollowProfileAction(profile)}
+                        style={[
+                          styles.followActionButton,
+                          {
+                            backgroundColor:
+                              actionDisabled || loading
+                                ? colors.inputBackground
+                                : colors.accent,
+                          },
+                        ]}
+                      >
+                        {loading ? (
+                          <ActivityIndicator size="small" color={colors.buttonTextOnAction} />
+                        ) : (
+                          <Text
+                            style={[
+                              styles.followActionText,
+                              {
+                                color:
+                                  actionDisabled
+                                    ? colors.textSecondary
+                                    : colors.buttonTextOnAction,
+                              },
+                            ]}
+                          >
+                            {actionLabel}
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
       <SocialMediaSourceModal
         visible={sourceModalVisible}
         loading={vm.pickingPostImage}
@@ -562,6 +731,8 @@ const styles = StyleSheet.create({
   },
   statItem: {
     alignItems: "center",
+    minWidth: 76,
+    paddingVertical: 4,
   },
   statValue: {
     ...TypeScale.headingMd,
@@ -724,5 +895,71 @@ const styles = StyleSheet.create({
   gridImage: {
     height: "100%",
     width: "100%",
+  },
+  followModalOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  followModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.35)",
+  },
+  followSheet: {
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    maxHeight: "72%",
+    paddingBottom: Spacing.lg,
+  },
+  followSheetHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+  },
+  followSheetTitle: {
+    ...TypeScale.headingSm,
+    fontWeight: FontWeight.bold,
+  },
+  followCloseButton: {
+    padding: 4,
+  },
+  followListContent: {
+    paddingHorizontal: Spacing.lg,
+  },
+  followEmptyText: {
+    ...TypeScale.bodyMd,
+    paddingVertical: Spacing.xl,
+    textAlign: "center",
+  },
+  followRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  followRowText: {
+    flex: 1,
+  },
+  followName: {
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.bold,
+  },
+  followMeta: {
+    ...TypeScale.labelLg,
+    marginTop: 2,
+  },
+  followActionButton: {
+    alignItems: "center",
+    borderRadius: 8,
+    justifyContent: "center",
+    minHeight: 34,
+    minWidth: 86,
+    paddingHorizontal: Spacing.md,
+  },
+  followActionText: {
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.bold,
   },
 });

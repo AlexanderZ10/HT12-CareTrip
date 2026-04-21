@@ -23,7 +23,7 @@ import {
   TypeScale,
 } from "../../constants/design-system";
 import { SocialPostCard } from "../../features/groups/components/SocialPostCard";
-import { useGroupsScreen } from "../../features/groups/useGroupsScreen";
+import { useSharedGroupsScreen } from "../../features/groups/GroupsScreenProvider";
 import { SocialMediaSourceModal } from "../../features/social/components/SocialMediaSourceModal";
 import { SocialPostComposerModal } from "../../features/social/components/SocialPostComposerModal";
 import { SocialPublishTargetModal } from "../../features/social/components/SocialPublishTargetModal";
@@ -50,7 +50,7 @@ export default function FeedTabScreen() {
   const { language } = useAppLanguage();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const vm = useGroupsScreen();
+  const vm = useSharedGroupsScreen();
   const locale = getLanguageLocale(language);
   const [sourceModalVisible, setSourceModalVisible] = useState(false);
   const [targetModalVisible, setTargetModalVisible] = useState(false);
@@ -178,7 +178,7 @@ export default function FeedTabScreen() {
 
   const renderFeedPost = (post: (typeof travelPosts)[number]) => {
     const profilePreview = vm.buildSocialProfilePreview(post.authorId);
-    const connection = profilePreview.connection;
+    const connectionState = vm.getConnectionStateForProfile(post.authorId);
     const authorProfile = vm.publicProfilesById[post.authorId];
     let actionLabel: string | undefined;
     let onActionPress: (() => void) | undefined;
@@ -187,21 +187,20 @@ export default function FeedTabScreen() {
 
     if (post.authorId === vm.userId) {
       badge = "You";
-    } else if (connection?.status === "accepted") {
-      badge = "Friend";
-    } else if (connection?.status === "pending" && connection.recipientId === vm.userId) {
-      badge = "Request";
-      actionLabel = "Accept";
+    } else if (connectionState === "mutual" || connectionState === "following") {
+      badge = "Following";
+    } else if (connectionState === "followed-by") {
+      badge = "Follows you";
+      actionLabel = "Follow back";
       onActionPress = () => {
-        void vm.acceptFriendRequest(connection);
+        const connection = profilePreview.connection;
+
+        if (connection) {
+          void vm.acceptFriendRequest(connection);
+        }
       };
-    } else if (connection?.status === "pending") {
-      badge = "Pending";
-      actionLabel = "Pending";
-      actionDisabled = true;
-      onActionPress = () => undefined;
     } else if (authorProfile) {
-      actionLabel = "Add friend";
+      actionLabel = "Follow";
       onActionPress = () => {
         void vm.sendFriendRequest(authorProfile);
       };
@@ -213,9 +212,16 @@ export default function FeedTabScreen() {
         actionLabel={actionLabel}
         authorProfile={authorProfile}
         badge={badge}
+        comments={vm.commentsByPostId[post.id] ?? []}
+        commentAuthorProfiles={vm.publicProfilesById}
+        commentError={vm.commentErrorsByPostId[post.id]}
+        commenting={vm.commentingPostId === post.id}
+        currentUserLabel={vm.profileName}
+        currentUserPhotoUrl={vm.profileAvatarUrl}
         key={post.id}
-        loading={vm.updatingFriendshipId === profilePreview.connection?.id}
+        loading={vm.isUpdatingConnectionWithProfile(post.authorId)}
         onActionPress={onActionPress}
+        onCommentSubmit={(text) => vm.addSocialPostComment(post.id, text)}
         post={post}
         timestampLabel={formatRelativeTime(post.createdAtMs, locale)}
       />
@@ -249,20 +255,10 @@ export default function FeedTabScreen() {
           contentContainerStyle={styles.suggestionsRail}
         >
           {vm.suggestedProfiles.slice(0, RAIL_LIMIT).map((profile) => {
-            const connection = vm.buildSocialProfilePreview(profile.uid).connection;
-            const isPendingFromMe =
-              connection?.status === "pending" && connection.requesterId === vm.userId;
-            const isPendingToMe =
-              connection?.status === "pending" && connection.recipientId === vm.userId;
+            const connectionState = vm.getConnectionStateForProfile(profile.uid);
 
-            let actionLabel = "Follow";
-            let actionDisabled = false;
-            if (isPendingFromMe) {
-              actionLabel = "Requested";
-              actionDisabled = true;
-            } else if (isPendingToMe) {
-              actionLabel = "Accept";
-            }
+            const actionLabel = vm.getFollowActionLabelForProfile(profile.uid);
+            const actionDisabled = connectionState === "following";
 
             const handle = profile.username
               ? `@${profile.username}`
@@ -275,11 +271,13 @@ export default function FeedTabScreen() {
                 actionLabel={actionLabel}
                 handle={handle}
                 label={profile.displayName}
-                loading={vm.updatingFriendshipId === connection?.id}
+                loading={vm.isUpdatingConnectionWithProfile(profile.uid)}
                 onActionPress={() => {
-                  if (isPendingToMe && connection) {
+                  const connection = vm.buildSocialProfilePreview(profile.uid).connection;
+
+                  if (connectionState === "followed-by" && connection) {
                     void vm.acceptFriendRequest(connection);
-                  } else if (!isPendingFromMe) {
+                  } else if (connectionState === "none") {
                     void vm.sendFriendRequest(profile);
                   }
                 }}

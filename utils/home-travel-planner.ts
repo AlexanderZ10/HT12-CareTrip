@@ -288,6 +288,27 @@ function sanitizeStringArray(value: unknown) {
     .filter(Boolean);
 }
 
+function hasPositiveAmount(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function hasExactProviderTransportOffer(offer: LiveTravelOffersResponse["transportOptions"][number]) {
+  return (
+    hasPositiveAmount(offer.priceAmount) &&
+    !!offer.bookingUrl.trim() &&
+    !!offer.provider.trim()
+  );
+}
+
+function hasExactProviderStayOffer(offer: LiveTravelOffersResponse["stayOptions"][number]) {
+  return (
+    hasPositiveAmount(offer.priceAmount) &&
+    !!offer.bookingUrl.trim() &&
+    !!offer.name.trim() &&
+    !!(offer.sourceLabel.trim() || offer.providerKey?.trim())
+  );
+}
+
 function getPlannerCopy(language: AppLanguage) {
   if (language === "en") {
     return {
@@ -1087,13 +1108,8 @@ export async function generateGroundedTravelPlan(params: {
 }) {
   const language = normalizePlannerLanguage(params.language);
   const offers = await searchTravelOffers(params);
-  const presentedStayOffers: LiveTravelOffersResponse["stayOptions"] = offers.stayOptions.filter(
-    (offer) => typeof offer.priceAmount === "number" && offer.priceAmount > 0
-  );
-  const presentedTransportOffers: LiveTravelOffersResponse["transportOptions"] =
-    offers.transportOptions.filter(
-      (offer) => typeof offer.priceAmount === "number" && offer.priceAmount > 0
-    );
+  const presentedStayOffers = offers.stayOptions.filter(hasExactProviderStayOffer);
+  const presentedTransportOffers = offers.transportOptions.filter(hasExactProviderTransportOffer);
   const presentedOffers = {
     ...offers,
     stayOptions: presentedStayOffers,
@@ -1130,14 +1146,14 @@ export async function generateGroundedTravelPlan(params: {
 
   const deterministicPlan = buildDeterministicPlan({
     budget: params.budget,
-      days: params.days,
-      destination: params.destination,
-      language,
-      notes: params.notes,
-      offers: presentedOffers,
-      stayOptions,
-      transportOptions,
-      travelers: params.travelers,
+    days: params.days,
+    destination: params.destination,
+    language,
+    notes: params.notes,
+    offers: presentedOffers,
+    stayOptions,
+    transportOptions,
+    travelers: params.travelers,
   });
 
   const apiKey = getAIApiKey();

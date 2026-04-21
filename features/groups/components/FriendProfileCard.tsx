@@ -115,9 +115,9 @@ const styles = StyleSheet.create({
   row: {
     alignItems: "center",
     flexDirection: "row",
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    width: 280,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.md,
+    width: 300,
   },
   rowFullWidth: {
     width: "100%",
@@ -125,6 +125,7 @@ const styles = StyleSheet.create({
   textWrap: {
     flex: 1,
     marginLeft: Spacing.md,
+    minWidth: 0,
   },
   handle: {
     ...TypeScale.bodyMd,
@@ -132,28 +133,33 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     ...TypeScale.bodySm,
-    marginTop: 1,
+    marginTop: 2,
   },
   actionsWrap: {
     alignItems: "center",
     flexDirection: "row",
-    gap: Spacing.xs,
+    gap: Spacing.sm,
+    flexShrink: 0,
     marginLeft: Spacing.sm,
   },
   primaryButton: {
-    borderRadius: Radius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 7,
+    alignItems: "center",
+    borderRadius: Radius.lg,
+    minWidth: 84,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
   },
   primaryButtonText: {
     ...TypeScale.labelLg,
     fontWeight: FontWeight.bold,
   },
   secondaryButton: {
-    borderRadius: Radius.md,
+    alignItems: "center",
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 6,
+    minWidth: 84,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: 7,
   },
   secondaryButtonText: {
     ...TypeScale.labelLg,

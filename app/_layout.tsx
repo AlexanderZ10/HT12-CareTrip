@@ -8,6 +8,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../firebase";
 import { AppLanguageProvider } from "../components/app-language-provider";
 import { AppThemeProvider, useAppTheme } from "../components/app-theme-provider";
+import { GroupsScreenProvider } from "../features/groups/GroupsScreenProvider";
 import {
   addNotificationReceivedListener,
   addNotificationResponseListener,
@@ -87,7 +88,9 @@ export default function RootLayout() {
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <AppLanguageProvider>
           <AppThemeProvider>
-            <RootNavigator />
+            <GroupsScreenProvider>
+              <RootNavigator />
+            </GroupsScreenProvider>
           </AppThemeProvider>
         </AppLanguageProvider>
       </SafeAreaProvider>

@@ -7,9 +7,19 @@ const DEFAULT_AI_MODEL = "gemini-2.5-flash-lite";
 const RETRYABLE_AI_STATUS_CODES = new Set([429, 503]);
 const MAX_AI_RETRIES = 3;
 
+function normalizeConfiguredAIModel(value: string) {
+  const normalizedValue = value.trim();
+
+  if (!normalizedValue || normalizedValue === "gemini-2.5-flash-lte") {
+    return DEFAULT_AI_MODEL;
+  }
+
+  return normalizedValue;
+}
+
 function resolveAIModel() {
   const configuredModel = process.env.EXPO_PUBLIC_GEMINI_MODEL?.trim();
-  return configuredModel || DEFAULT_AI_MODEL;
+  return normalizeConfiguredAIModel(configuredModel || DEFAULT_AI_MODEL);
 }
 
 export const AI_MODEL = resolveAIModel();

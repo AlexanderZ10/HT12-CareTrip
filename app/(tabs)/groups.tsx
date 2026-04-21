@@ -33,7 +33,7 @@ import { GroupRow } from "../../features/groups/components/GroupRow";
 import { JoinGroupModal } from "../../features/groups/components/JoinGroupModal";
 import { TripRequestCard } from "../../features/groups/components/TripRequestCard";
 import { TripRequestComposerModal } from "../../features/groups/components/TripRequestComposerModal";
-import { useGroupsScreen } from "../../features/groups/useGroupsScreen";
+import { useSharedGroupsScreen } from "../../features/groups/GroupsScreenProvider";
 import {
   getLastSocialTab,
   SOCIAL_DOCK_BOTTOM_GAP,
@@ -44,8 +44,6 @@ import {
 import { formatRelativeTime } from "../../utils/formatting";
 import { getLanguageLocale } from "../../utils/translations";
 
-const noop = () => {};
-
 export default function GroupsTabScreen() {
   const { colors } = useAppTheme();
   const { language, t } = useAppLanguage();
@@ -54,7 +52,7 @@ export default function GroupsTabScreen() {
   const router = useRouter();
   const isFocused = useIsFocused();
   const hasRestoredTab = useRef(false);
-  const vm = useGroupsScreen();
+  const vm = useSharedGroupsScreen();
   const isSearching = vm.searchQuery.trim().length > 0;
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(() => {
@@ -97,22 +95,25 @@ export default function GroupsTabScreen() {
   ) => {
     const preview = vm.buildSocialProfilePreview(profile.uid);
     const connection = preview.connection;
+    const connectionState = vm.getConnectionStateForProfile(profile.uid);
+    const actionLoading = vm.isUpdatingConnectionWithProfile(profile.uid);
 
-    if (connection?.status === "accepted") {
+    if (connection && (connectionState === "following" || connectionState === "mutual")) {
       return (
         <FriendProfileCard
-          actionLabel="Write"
-          badge="Friend"
+          actionDisabled={connectionState === "following"}
+          actionLabel={connectionState === "mutual" ? "Message" : "Following"}
+          badge="Following"
           fullWidth={fullWidth}
           key={profile.uid}
           label={preview.label}
-          loading={vm.updatingFriendshipId === connection.id}
+          loading={actionLoading}
           onActionPress={() => vm.openComposer(preview.uid)}
           onSecondaryActionPress={() => {
             void vm.removeFriendship(connection);
           }}
           photoUrl={preview.photoUrl}
-          secondaryActionLabel="Remove"
+          secondaryActionLabel="Unfollow"
           username={preview.username}
           aboutMe={preview.aboutMe}
           homeBase={preview.homeBase}
@@ -120,15 +121,15 @@ export default function GroupsTabScreen() {
       );
     }
 
-    if (connection?.status === "pending" && connection.recipientId === vm.userId) {
+    if (connection && connectionState === "followed-by") {
       return (
         <FriendProfileCard
-          actionLabel="Accept"
-          badge="Request"
+          actionLabel="Follow back"
+          badge="Follows you"
           fullWidth={fullWidth}
           key={profile.uid}
           label={preview.label}
-          loading={vm.updatingFriendshipId === connection.id}
+          loading={actionLoading}
           onActionPress={() => {
             void vm.acceptFriendRequest(connection);
           }}
@@ -144,36 +145,14 @@ export default function GroupsTabScreen() {
       );
     }
 
-    if (connection?.status === "pending") {
-      return (
-        <FriendProfileCard
-          actionDisabled
-          actionLabel="Pending"
-          badge="Pending"
-          fullWidth={fullWidth}
-          key={profile.uid}
-          label={preview.label}
-          loading={vm.updatingFriendshipId === connection.id}
-          onActionPress={noop}
-          onSecondaryActionPress={() => {
-            void vm.removeFriendship(connection);
-          }}
-          photoUrl={preview.photoUrl}
-          secondaryActionLabel="Cancel"
-          username={preview.username}
-          aboutMe={preview.aboutMe}
-          homeBase={preview.homeBase}
-        />
-      );
-    }
-
     return (
       <FriendProfileCard
-        actionLabel="Add friend"
+        actionLabel="Follow"
         badge="Public profile"
         fullWidth={fullWidth}
         key={profile.uid}
         label={preview.label}
+        loading={actionLoading}
         onActionPress={() => {
           void vm.sendFriendRequest({
             aboutMe: profile.aboutMe ?? "",
@@ -709,11 +688,11 @@ const styles = StyleSheet.create({
   },
   searchShell: {
     alignItems: "center",
-    borderRadius: Radius.md,
+    borderRadius: Radius.full,
     flexDirection: "row",
-    marginBottom: Spacing.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 9,
+    marginBottom: Spacing.lg,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: 10,
   },
   searchInput: {
     ...TypeScale.bodyMd,
@@ -777,13 +756,13 @@ const styles = StyleSheet.create({
   alertIconWrap: {
     alignItems: "center",
     borderRadius: Radius.full,
-    height: 38,
+    height: 40,
     justifyContent: "center",
-    width: 38,
+    width: 40,
   },
   alertTextWrap: {
     flex: 1,
-    marginLeft: Spacing.sm,
+    marginLeft: Spacing.md,
     marginRight: Spacing.xs,
   },
   alertTitle: {
@@ -792,31 +771,32 @@ const styles = StyleSheet.create({
   },
   alertBody: {
     ...TypeScale.bodySm,
-    marginTop: 2,
+    marginTop: 3,
+    lineHeight: 18,
   },
   // ── Friend rail (top horizontal scroll) ──
   friendRailWrap: {
     marginHorizontal: -Spacing.xl,
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.lg,
   },
   friendRail: {
-    gap: Spacing.lg,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.xs,
+    gap: Spacing.md,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.sm,
   },
   friendRailItem: {
     alignItems: "center",
-    width: 70,
+    width: 74,
   },
   friendRailRing: {
     borderRadius: 999,
-    borderWidth: 1,
+    borderWidth: 2,
     padding: 2,
   },
   friendRailLabel: {
     ...TypeScale.labelSm,
-    marginTop: 4,
-    maxWidth: 70,
+    marginTop: 5,
+    maxWidth: 74,
     textAlign: "center",
   },
   // ── DM section header ──
@@ -825,23 +805,27 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     paddingHorizontal: 0,
-    paddingVertical: Spacing.xs,
+    paddingVertical: Spacing.sm,
   },
   dmHeaderSpaced: {
-    marginTop: Spacing.md,
+    marginTop: Spacing.lg,
+    marginBottom: Spacing.xs,
   },
   dmHeaderTitle: {
-    ...TypeScale.bodyMd,
+    ...TypeScale.titleMd,
     fontWeight: FontWeight.bold,
   },
   dmRequestsLink: {
     ...TypeScale.bodyMd,
-    fontWeight: FontWeight.semibold,
+    fontWeight: FontWeight.bold,
   },
   emptyState: {
     alignItems: "center",
+    borderRadius: Radius.xl,
+    borderWidth: 1,
     paddingHorizontal: Spacing.xl,
     paddingVertical: Spacing["3xl"],
+    marginVertical: Spacing.sm,
   },
   emptyStateTitle: {
     ...TypeScale.titleMd,
@@ -850,8 +834,9 @@ const styles = StyleSheet.create({
   },
   emptyStateText: {
     ...TypeScale.bodyMd,
-    marginTop: Spacing.xs,
+    marginTop: Spacing.sm,
     textAlign: "center",
+    lineHeight: 22,
   },
   requestCardsContent: {
     gap: Spacing.md,

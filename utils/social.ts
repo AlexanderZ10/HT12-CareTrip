@@ -1,4 +1,7 @@
+import { sanitizeString, sanitizeStringArray, toMillis } from "./sanitize";
+
 export type FriendshipStatus = "pending" | "accepted";
+export type SocialConnectionState = "none" | "following" | "followed-by" | "mutual";
 
 export type Friendship = {
   id: string;
@@ -15,7 +18,6 @@ export type Friendship = {
 };
 
 export type SocialPostVisibility = "public";
-import { sanitizeString, sanitizeStringArray, toMillis } from "./sanitize";
 
 export type SocialPostKind = "post" | "story";
 
@@ -32,6 +34,17 @@ export type SocialPost = {
   location: string;
   updatedAtMs: number | null;
   visibility: SocialPostVisibility;
+};
+
+export type SocialPostComment = {
+  authorId: string;
+  authorLabel: string;
+  authorUsername: string;
+  createdAtMs: number | null;
+  id: string;
+  postId: string;
+  text: string;
+  updatedAtMs: number | null;
 };
 
 function sanitizeSocialPostKind(value: unknown): SocialPostKind {
@@ -64,6 +77,65 @@ export function getFriendshipOtherUsername(friendship: Friendship, currentUserId
   return friendship.requesterId === currentUserId
     ? friendship.recipientUsername
     : friendship.requesterUsername;
+}
+
+export function getSocialConnectionState(
+  friendship: Friendship | null | undefined,
+  currentUserId: string
+): SocialConnectionState {
+  if (!friendship || !currentUserId) {
+    return "none";
+  }
+
+  if (friendship.status === "accepted") {
+    return "mutual";
+  }
+
+  if (friendship.requesterId === currentUserId) {
+    return "following";
+  }
+
+  if (friendship.recipientId === currentUserId) {
+    return "followed-by";
+  }
+
+  return "none";
+}
+
+export function isFollowingConnection(state: SocialConnectionState) {
+  return state === "following" || state === "mutual";
+}
+
+export function isFollowerConnection(state: SocialConnectionState) {
+  return state === "followed-by" || state === "mutual";
+}
+
+export function getFollowActionLabel(state: SocialConnectionState) {
+  if (state === "mutual") {
+    return "Message";
+  }
+
+  if (state === "following") {
+    return "Following";
+  }
+
+  if (state === "followed-by") {
+    return "Follow back";
+  }
+
+  return "Follow";
+}
+
+export function getFollowBadgeLabel(state: SocialConnectionState) {
+  if (state === "mutual" || state === "following") {
+    return "Following";
+  }
+
+  if (state === "followed-by") {
+    return "Follows you";
+  }
+
+  return "";
 }
 
 export function parseFriendship(
@@ -126,5 +198,42 @@ export function sortSocialPostsByCreatedAt(posts: SocialPost[]) {
     const leftValue = left.createdAtMs ?? left.updatedAtMs ?? 0;
     const rightValue = right.createdAtMs ?? right.updatedAtMs ?? 0;
     return rightValue - leftValue;
+  });
+}
+
+export function parseSocialPostComment(
+  id: string,
+  data: Record<string, unknown> | undefined
+): SocialPostComment {
+  return {
+    authorId: sanitizeString(data?.authorId),
+    authorLabel: sanitizeString(data?.authorLabel, "Traveler"),
+    authorUsername: sanitizeString(data?.authorUsername),
+    createdAtMs: toMillis(data?.createdAtMs ?? data?.createdAt ?? data?.serverCreatedAt),
+    id,
+    postId: sanitizeString(data?.postId),
+    text: sanitizeString(data?.text),
+    updatedAtMs: toMillis(data?.updatedAtMs ?? data?.updatedAt),
+  };
+}
+
+export function sortSocialPostCommentsByCreatedAt(comments: SocialPostComment[]) {
+  return [...comments].sort((left, right) => {
+    const leftValue = left.createdAtMs ?? left.updatedAtMs ?? 0;
+    const rightValue = right.createdAtMs ?? right.updatedAtMs ?? 0;
+    return leftValue - rightValue;
+  });
+}
+
+export function dedupeSocialPostComments(comments: SocialPostComment[]) {
+  const seenIds = new Set<string>();
+
+  return comments.filter((comment) => {
+    if (!comment.id || seenIds.has(comment.id)) {
+      return false;
+    }
+
+    seenIds.add(comment.id);
+    return true;
   });
 }

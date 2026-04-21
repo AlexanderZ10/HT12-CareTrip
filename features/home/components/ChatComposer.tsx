@@ -1,9 +1,17 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import React from "react";
-import { Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  type LayoutChangeEvent,
+  Platform,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
 import { useAppLanguage } from "../../../components/app-language-provider";
-import { FontWeight, Radius, Spacing, TypeScale } from "../../../constants/design-system";
+import { Radius, Spacing, TypeScale } from "../../../constants/design-system";
 import type { HomePlannerStep } from "../../../utils/home-chat-storage";
 
 type ChatComposerProps = {
@@ -12,8 +20,11 @@ type ChatComposerProps = {
   colors: {
     accent: string;
     buttonTextOnAction: string;
+    card: string;
+    cardAlt: string;
     disabledBackground: string;
     disabledText: string;
+    elevated: string;
     inputBackground: string;
     inputBorder: string;
     inputPlaceholder: string;
@@ -24,6 +35,8 @@ type ChatComposerProps = {
   };
   insetBottom: number;
   onChangeText: (text: string) => void;
+  onFocus: () => void;
+  onLayout: (event: LayoutChangeEvent) => void;
   onReset: () => void;
   onSend: () => void;
   planning: boolean;
@@ -66,6 +79,8 @@ export function ChatComposer({
   colors,
   insetBottom,
   onChangeText,
+  onFocus,
+  onLayout,
   onReset,
   onSend,
   planning,
@@ -75,12 +90,26 @@ export function ChatComposer({
 
   return (
     <View
+      onLayout={onLayout}
       style={[
         styles.composer,
-        { backgroundColor: colors.screen, borderTopColor: colors.border },
+        { backgroundColor: colors.elevated, borderColor: colors.border },
         { paddingBottom: Math.max(insetBottom, 8) },
       ]}
     >
+      <TouchableOpacity
+        accessibilityLabel="Start new plan"
+        style={[
+          styles.resetButton,
+          { backgroundColor: colors.cardAlt, borderColor: colors.border },
+          planning && styles.actionDisabled,
+        ]}
+        onPress={onReset}
+        disabled={planning}
+        activeOpacity={0.9}
+      >
+        <MaterialIcons name="refresh" size={18} color={colors.textMuted} />
+      </TouchableOpacity>
       <View
         style={[
           styles.composerInputRow,
@@ -90,10 +119,18 @@ export function ChatComposer({
         <TextInput
           accessibilityLabel="Message input"
           style={[styles.input, { color: colors.textPrimary }]}
-          placeholder={getPlaceholder(step, language)}
+          placeholder={
+            planning
+              ? step === "done"
+                ? t("home.searchingPrices")
+                : t("home.aiThinking")
+              : getPlaceholder(step, language)
+          }
           placeholderTextColor={colors.inputPlaceholder}
           value={chatInput}
           onChangeText={onChangeText}
+          onFocus={onFocus}
+          onContentSizeChange={() => onFocus()}
           editable={!planning}
           multiline
           blurOnSubmit={false}
@@ -114,70 +151,68 @@ export function ChatComposer({
           disabled={!canSend}
           activeOpacity={0.9}
         >
-          <MaterialIcons
-            name="arrow-upward"
-            size={20}
-            color={canSend ? colors.buttonTextOnAction : colors.disabledText}
-          />
+          {planning ? (
+            <ActivityIndicator size="small" color={colors.disabledText} />
+          ) : (
+            <MaterialIcons
+              name="arrow-upward"
+              size={20}
+              color={canSend ? colors.buttonTextOnAction : colors.disabledText}
+            />
+          )}
         </TouchableOpacity>
       </View>
-      <TouchableOpacity
-        accessibilityLabel="Start new plan"
-        style={styles.resetButton}
-        onPress={onReset}
-        disabled={planning}
-        activeOpacity={0.9}
-      >
-        <MaterialIcons name="refresh" size={14} color={colors.textMuted} />
-        <Text style={[styles.resetButtonText, { color: colors.textMuted }]}>
-          {t("home.newPlan")}
-        </Text>
-      </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   composer: {
+    alignItems: "flex-end",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: Spacing.sm,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
-    borderTopWidth: 1,
   },
   composerInputRow: {
     flexDirection: "row",
     alignItems: "flex-end",
-    borderRadius: Radius["2xl"],
+    borderRadius: Radius.xl,
     borderWidth: 1,
+    flex: 1,
     paddingLeft: Spacing.lg,
     paddingRight: Spacing.xs,
     paddingVertical: Spacing.xs,
   },
   input: {
     flex: 1,
-    minHeight: 40,
+    minHeight: 42,
     maxHeight: 120,
     ...TypeScale.bodyMd,
     textAlignVertical: "top",
-    paddingTop: Platform.OS === "ios" ? 10 : 8,
-    paddingBottom: Platform.OS === "ios" ? 10 : 8,
+    paddingTop: Platform.OS === "ios" ? 11 : 9,
+    paddingBottom: Platform.OS === "ios" ? 11 : 9,
   },
   sendButton: {
-    width: 36,
-    height: 36,
+    width: 38,
+    height: 38,
     borderRadius: Radius.full,
     alignItems: "center",
     justifyContent: "center",
     marginLeft: Spacing.sm,
+    marginBottom: 1,
   },
   resetButton: {
-    flexDirection: "row",
     alignItems: "center",
-    alignSelf: "center",
-    paddingVertical: Spacing.sm,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    height: 44,
+    justifyContent: "center",
+    marginBottom: 1,
+    width: 44,
   },
-  resetButtonText: {
-    ...TypeScale.labelSm,
-    fontWeight: FontWeight.semibold,
-    marginLeft: Spacing.xs,
+  actionDisabled: {
+    opacity: 0.52,
   },
 });

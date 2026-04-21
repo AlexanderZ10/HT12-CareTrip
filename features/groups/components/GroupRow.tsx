@@ -119,8 +119,8 @@ const styles = StyleSheet.create({
   row: {
     alignItems: "center",
     flexDirection: "row",
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm + 2,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.md,
   },
   avatarWrap: {
     position: "relative",
@@ -158,7 +158,7 @@ const styles = StyleSheet.create({
   previewRow: {
     alignItems: "center",
     flexDirection: "row",
-    marginTop: 2,
+    marginTop: 3,
   },
   preview: {
     ...TypeScale.bodySm,
@@ -171,10 +171,10 @@ const styles = StyleSheet.create({
     ...TypeScale.bodySm,
   },
   actionPill: {
-    borderRadius: Radius.md,
+    borderRadius: Radius.lg,
     marginLeft: Spacing.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 7,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
   },
   actionText: {
     ...TypeScale.labelLg,

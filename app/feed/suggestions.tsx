@@ -19,12 +19,12 @@ import {
   Spacing,
   TypeScale,
 } from "../../constants/design-system";
-import { useGroupsScreen } from "../../features/groups/useGroupsScreen";
+import { useSharedGroupsScreen } from "../../features/groups/GroupsScreenProvider";
 
 export default function FeedSuggestionsScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
-  const vm = useGroupsScreen();
+  const vm = useSharedGroupsScreen();
 
   if (vm.loading) {
     return (
@@ -80,26 +80,15 @@ export default function FeedSuggestionsScreen() {
             </Text>
 
             {vm.suggestedProfiles.map((profile) => {
-              const connection = vm.buildSocialProfilePreview(profile.uid).connection;
-              const isPendingFromMe =
-                connection?.status === "pending" && connection.requesterId === vm.userId;
-              const isPendingToMe =
-                connection?.status === "pending" && connection.recipientId === vm.userId;
-
-              let actionLabel = "Follow";
-              let actionDisabled = false;
-              if (isPendingFromMe) {
-                actionLabel = "Requested";
-                actionDisabled = true;
-              } else if (isPendingToMe) {
-                actionLabel = "Accept";
-              }
+              const connectionState = vm.getConnectionStateForProfile(profile.uid);
+              const actionLabel = vm.getFollowActionLabelForProfile(profile.uid);
+              const actionDisabled = connectionState === "following";
 
               const handle = profile.username
                 ? `@${profile.username}`
                 : profile.displayName.toLowerCase().replace(/\s+/g, "_");
 
-              const isLoading = vm.updatingFriendshipId === connection?.id;
+              const isLoading = vm.isUpdatingConnectionWithProfile(profile.uid);
 
               return (
                 <View key={profile.uid} style={styles.row}>
@@ -132,9 +121,11 @@ export default function FeedSuggestionsScreen() {
                     activeOpacity={0.85}
                     disabled={actionDisabled || isLoading}
                     onPress={() => {
-                      if (isPendingToMe && connection) {
+                      const connection = vm.buildSocialProfilePreview(profile.uid).connection;
+
+                      if (connectionState === "followed-by" && connection) {
                         void vm.acceptFriendRequest(connection);
-                      } else if (!isPendingFromMe) {
+                      } else if (connectionState === "none") {
                         void vm.sendFriendRequest(profile);
                       }
                     }}

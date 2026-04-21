@@ -139,9 +139,11 @@ export default function HomeTabScreen() {
     null
   );
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [composerHeight, setComposerHeight] = useState(0);
   const phoneDrawerTranslateX = useRef(new Animated.Value(-320)).current;
   const phoneDrawerWidth = Math.min(width * 0.84, 330);
   const typingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const homeFocusHandledRef = useRef(false);
   const [typingMessageId, setTypingMessageId] = useState<string | null>(null);
   const [typingVisibleText, setTypingVisibleText] = useState("");
@@ -212,6 +214,33 @@ export default function HomeTabScreen() {
   );
   const messagesScrollRef = useRef<ScrollView | null>(null);
   const scrollViewLayoutHeight = useRef(0);
+  const shouldStickToBottomRef = useRef(true);
+  const lastPlannerMessage =
+    currentPlannerState.messages[currentPlannerState.messages.length - 1] ?? null;
+  const lastFollowUpMessage = followUpMessages[followUpMessages.length - 1] ?? null;
+  const lastConversationMessageCreatedAtMs = Math.max(
+    lastPlannerMessage?.createdAtMs ?? 0,
+    lastFollowUpMessage?.createdAtMs ?? 0
+  );
+  const latestPlanIsCurrent =
+    !!latestPlan &&
+    (lastConversationMessageCreatedAtMs <= 0 ||
+      latestPlan.createdAtMs >= lastConversationMessageCreatedAtMs - 500);
+  const shouldShowLatestPlan = !!latestPlan && !planning && latestPlanIsCurrent;
+  const plannerStatusText = planning
+    ? currentPlannerState.step === "done"
+      ? t("home.searchingPrices")
+      : t("home.aiThinking")
+    : currentChat?.title ?? t("home.newPlan");
+  const conversationContentKey = [
+    currentChat?.id ?? "no-chat",
+    currentPlannerState.messages.length,
+    lastPlannerMessage?.id ?? "no-message",
+    followUpMessages.length,
+    lastFollowUpMessage?.id ?? "no-follow-up",
+    planning ? "planning" : "idle",
+    shouldShowLatestPlan ? latestPlan?.sourceKey ?? "plan" : "no-plan",
+  ].join("|");
   const selectedTransport =
     selectedTransportIndex !== null
       ? latestPlan?.plan.transportOptions[selectedTransportIndex] ?? null
@@ -328,12 +357,16 @@ export default function HomeTabScreen() {
   );
 
   const scrollMessagesToBottom = useCallback((animated: boolean) => {
-    const timer = setTimeout(() => {
+    if (scrollTimerRef.current) {
+      clearTimeout(scrollTimerRef.current);
+    }
+
+    scrollTimerRef.current = setTimeout(() => {
+      scrollTimerRef.current = null;
+      shouldStickToBottomRef.current = true;
       setShowScrollToBottom(false);
       messagesScrollRef.current?.scrollToEnd({ animated });
-    }, 0);
-
-    return () => clearTimeout(timer);
+    }, Platform.OS === "android" ? 16 : 8);
   }, []);
 
   const handleMessagesScroll = useCallback(
@@ -345,8 +378,10 @@ export default function HomeTabScreen() {
       } = event.nativeEvent;
       const distanceFromBottom =
         contentSize.height - (contentOffset.y + layoutMeasurement.height);
+      const isNearBottom = distanceFromBottom < 96;
 
-      setShowScrollToBottom(distanceFromBottom > 96);
+      shouldStickToBottomRef.current = isNearBottom;
+      setShowScrollToBottom(!isNearBottom);
     },
     []
   );
@@ -354,8 +389,23 @@ export default function HomeTabScreen() {
   useEffect(() => {
     return () => {
       clearTypingAnimation();
+      if (scrollTimerRef.current) {
+        clearTimeout(scrollTimerRef.current);
+      }
     };
   }, [clearTypingAnimation]);
+
+  useEffect(() => {
+    if (shouldStickToBottomRef.current || planning || isKeyboardOpenRef.current) {
+      scrollMessagesToBottom(true);
+    }
+  }, [conversationContentKey, planning, scrollMessagesToBottom]);
+
+  useEffect(() => {
+    if (typingMessageId && shouldStickToBottomRef.current) {
+      scrollMessagesToBottom(false);
+    }
+  }, [scrollMessagesToBottom, typingMessageId, typingVisibleText]);
 
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -506,7 +556,8 @@ export default function HomeTabScreen() {
     setTypingMessageId(null);
     setTypingVisibleText("");
     setShowScrollToBottom(false);
-    return scrollMessagesToBottom(false);
+    shouldStickToBottomRef.current = true;
+    scrollMessagesToBottom(false);
   }, [clearTypingAnimation, currentChat?.id, scrollMessagesToBottom]);
 
   const canSend = chatInput.trim().length > 0 && !planning;
@@ -871,6 +922,7 @@ export default function HomeTabScreen() {
       const formattedPlanText = formatGroundedTravelPlan(plan, language);
       const nextLatestPlan = normalizeLatestPlan({
         budget: snapshot.budget,
+        createdAtMs: readyMessage.createdAtMs,
         days: snapshot.days,
         destination: snapshot.destination,
         formattedPlanText,
@@ -950,6 +1002,7 @@ export default function HomeTabScreen() {
 
     // Show the user's message and planning state immediately
     setPlanning(true);
+    shouldStickToBottomRef.current = true;
     const nextChats = sortHomePlannerChats(
       homeStore.chats.map((chat) =>
         chat.id === currentChat.id
@@ -1352,23 +1405,45 @@ export default function HomeTabScreen() {
               <TouchableOpacity
                 accessibilityLabel="Open chat history"
                 activeOpacity={0.7}
-                onPress={() => setChatMenuVisible(true)}
+                onPress={() => {
+                  if (isPhoneLayout) {
+                    setIsPhoneChatMenuOpen(true);
+                    return;
+                  }
+
+                  setChatMenuVisible(true);
+                }}
                 style={styles.headerIconBtn}
               >
                 <MaterialIcons color={colors.textPrimary} name="menu" size={26} />
               </TouchableOpacity>
+              <View
+                style={[
+                  styles.headerAssistantAvatar,
+                  { backgroundColor: colors.accentMuted, borderColor: colors.border },
+                ]}
+              >
+                <MaterialIcons name="auto-awesome" size={17} color={colors.accent} />
+                <View
+                  style={[
+                    styles.headerStatusDot,
+                    {
+                      backgroundColor: planning ? colors.warning : colors.success,
+                      borderColor: colors.screen,
+                    },
+                  ]}
+                />
+              </View>
               <View style={styles.headerCenter}>
                 <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
                   {t("home.aiPlanner")}
                 </Text>
-                {currentChat?.title ? (
-                  <Text
-                    numberOfLines={1}
-                    style={[styles.headerSub, { color: colors.textMuted }]}
-                  >
-                    {currentChat.title}
-                  </Text>
-                ) : null}
+                <Text
+                  numberOfLines={1}
+                  style={[styles.headerSub, { color: colors.textMuted }]}
+                >
+                  {plannerStatusText}
+                </Text>
               </View>
               <TouchableOpacity
                 accessibilityLabel="Start new chat"
@@ -1416,9 +1491,13 @@ export default function HomeTabScreen() {
                 scrollEventThrottle={16}
                 onLayout={(e) => {
                   scrollViewLayoutHeight.current = e.nativeEvent.layout.height;
+                  scrollMessagesToBottom(false);
                 }}
                 onContentSizeChange={(_, contentHeight) => {
-                  if (contentHeight > scrollViewLayoutHeight.current && (isKeyboardOpenRef.current || !showScrollToBottom)) {
+                  if (
+                    contentHeight > scrollViewLayoutHeight.current &&
+                    (shouldStickToBottomRef.current || isKeyboardOpenRef.current || planning)
+                  ) {
                     scrollMessagesToBottom(false);
                   }
                 }}
@@ -1442,28 +1521,45 @@ export default function HomeTabScreen() {
                 ))}
 
                 {planning ? (
-                  <View
-                    style={[
-                      styles.messageBubble,
-                      styles.assistantBubble,
-                      { backgroundColor: colors.cardAlt },
-                    ]}
-                  >
-                    <Text style={[styles.messageRoleLabel, { color: colors.textMuted }]}>{t("home.aiPlanner")}</Text>
-                    <View style={styles.typingRow}>
-                      <ActivityIndicator size="small" color={colors.accent} style={{ marginRight: 8 }} />
-                      <Text style={[styles.assistantMessageText, { color: colors.textPrimary }]}>
-                        {currentPlannerState.step === "done"
-                          ? t("home.searchingPrices")
-                          : t("home.aiThinking")}
+                  <View style={styles.planningMessageRow}>
+                    <View
+                      style={[
+                        styles.planningAvatar,
+                        { backgroundColor: colors.accentMuted, borderColor: colors.border },
+                      ]}
+                    >
+                      <MaterialIcons name="auto-awesome" size={15} color={colors.accent} />
+                    </View>
+                    <View style={styles.planningMessageColumn}>
+                      <Text style={[styles.messageRoleLabel, { color: colors.textMuted }]}>
+                        {t("home.aiPlanner")}
                       </Text>
+                      <View
+                        style={[
+                          styles.planningBubble,
+                          { backgroundColor: colors.card, borderColor: colors.border },
+                        ]}
+                      >
+                        <View style={styles.typingRow}>
+                          <ActivityIndicator
+                            size="small"
+                            color={colors.accent}
+                            style={styles.typingSpinner}
+                          />
+                          <Text style={[styles.planningText, { color: colors.textSecondary }]}>
+                            {currentPlannerState.step === "done"
+                              ? t("home.searchingPrices")
+                              : t("home.aiThinking")}
+                          </Text>
+                        </View>
+                      </View>
                     </View>
                   </View>
                 ) : null}
 
                 {error ? <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text> : null}
 
-                {latestPlan ? (
+                {shouldShowLatestPlan && latestPlan ? (
                   <PlanCard
                     latestPlan={latestPlan}
                     isPhoneLayout={isPhoneLayout}
@@ -1485,7 +1581,13 @@ export default function HomeTabScreen() {
               {showScrollToBottom ? (
                 <TouchableOpacity
                   accessibilityLabel="Scroll to bottom"
-                  style={[styles.scrollToBottomButton, { backgroundColor: colors.accent }]}
+                  style={[
+                    styles.scrollToBottomButton,
+                    {
+                      backgroundColor: colors.accent,
+                      bottom: Math.max(composerHeight + Spacing.md, Spacing["5xl"]),
+                    },
+                  ]}
                   onPress={() => {
                     scrollMessagesToBottom(true);
                   }}
@@ -1503,6 +1605,8 @@ export default function HomeTabScreen() {
                 colors={colors}
                 insetBottom={isKeyboardOpen ? Spacing.md : insets.bottom + Spacing.md}
                 onChangeText={setChatInput}
+                onFocus={() => scrollMessagesToBottom(true)}
+                onLayout={(event) => setComposerHeight(event.nativeEvent.layout.height)}
                 onSend={() => { void sendPlannerMessage(chatInput); }}
                 onReset={() => { void resetConversation(); }}
               />
@@ -1611,7 +1715,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
-    minHeight: 52,
+    minHeight: 56,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
   },
@@ -1622,10 +1726,29 @@ const styles = StyleSheet.create({
     padding: 4,
     width: 40,
   },
-  headerCenter: {
+  headerAssistantAvatar: {
     alignItems: "center",
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    height: 36,
+    justifyContent: "center",
+    marginLeft: Spacing.xs,
+    position: "relative",
+    width: 36,
+  },
+  headerStatusDot: {
+    borderRadius: Radius.full,
+    borderWidth: 2,
+    bottom: -1,
+    height: 11,
+    position: "absolute",
+    right: -1,
+    width: 11,
+  },
+  headerCenter: {
+    alignItems: "flex-start",
     flex: 1,
-    paddingHorizontal: Spacing.sm,
+    paddingHorizontal: Spacing.md,
   },
   headerTitle: {
     fontSize: 18,
@@ -1639,18 +1762,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contextStrip: {
-    borderRadius: Radius.lg,
+    borderRadius: Radius.xl,
     borderWidth: 1,
-    padding: Spacing.sm,
+    padding: Spacing.md,
     marginHorizontal: Spacing.lg,
-    marginBottom: Spacing.sm,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.md,
   },
   contextStripTitle: {
     ...TypeScale.labelSm,
     fontWeight: FontWeight.bold,
     textTransform: "uppercase",
-    marginBottom: Spacing.xs,
-    letterSpacing: 0.8,
+    marginBottom: Spacing.sm,
+    letterSpacing: 0,
   },
   profileMetaRow: {
     flexDirection: "row",
@@ -1673,8 +1797,8 @@ const styles = StyleSheet.create({
   },
   messagesContent: {
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.xs,
-    paddingBottom: Spacing["2xl"],
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing["3xl"],
   },
   messageBubble: {
     borderRadius: 20,
@@ -1690,14 +1814,45 @@ const styles = StyleSheet.create({
   messageRoleLabel: {
     ...TypeScale.labelSm,
     fontWeight: FontWeight.semibold,
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
     marginBottom: 3,
+    marginLeft: Spacing.xs,
   },
   assistantMessageText: {},
+  planningMessageRow: {
+    alignItems: "flex-end",
+    flexDirection: "row",
+    marginBottom: Spacing.md,
+  },
+  planningAvatar: {
+    alignItems: "center",
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    height: 30,
+    justifyContent: "center",
+    marginBottom: 2,
+    marginRight: Spacing.sm,
+    width: 30,
+  },
+  planningMessageColumn: {
+    maxWidth: "82%",
+  },
+  planningBubble: {
+    borderRadius: Radius.xl,
+    borderTopLeftRadius: Radius.sm,
+    borderWidth: 1,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+  },
   typingRow: {
     flexDirection: "row",
     alignItems: "center",
+  },
+  typingSpinner: {
+    marginRight: Spacing.sm,
+  },
+  planningText: {
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.semibold,
   },
   errorText: {
     ...TypeScale.bodyMd,

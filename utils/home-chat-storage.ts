@@ -20,6 +20,7 @@ export type HomeChatMessage = {
 
 export type StoredHomePlan = {
   budget: string;
+  createdAtMs: number;
   days: string;
   destination: string;
   formattedPlanText: string;
@@ -107,7 +108,12 @@ function parseStructuredPlan(value: unknown): GroundedTravelPlan | null {
             name: sanitizeString(item.name),
             note: sanitizeString(item.note),
             pricePerNight: sanitizeString(item.pricePerNight),
+            providerAccommodationId: sanitizeString(item.providerAccommodationId),
+            providerKey: sanitizeString(item.providerKey),
+            providerPaymentModes: sanitizeStringArray(item.providerPaymentModes),
+            providerProductId: sanitizeString(item.providerProductId),
             ratingLabel: sanitizeString(item.ratingLabel),
+            reservationMode: sanitizeString(item.reservationMode),
             sourceLabel: sanitizeString(item.sourceLabel),
             type: sanitizeString(item.type),
           }))
@@ -152,6 +158,10 @@ function parseStoredHomePlan(value: unknown): StoredHomePlan {
   const rawLatestPlan = value as Record<string, unknown>;
   const structuredPlan = parseStructuredPlan(rawLatestPlan.plan);
   const legacyFormattedPlan = sanitizeString(rawLatestPlan.plan);
+  const createdAtMs =
+    typeof rawLatestPlan.createdAtMs === "number" && Number.isFinite(rawLatestPlan.createdAtMs)
+      ? Math.max(0, Math.round(rawLatestPlan.createdAtMs))
+      : Date.now();
   const formattedPlanText =
     typeof rawLatestPlan.formattedPlanText === "string"
       ? sanitizeString(rawLatestPlan.formattedPlanText)
@@ -165,6 +175,7 @@ function parseStoredHomePlan(value: unknown): StoredHomePlan {
 
   return {
     budget: normalizeBudgetToEuro(sanitizeString(rawLatestPlan.budget)),
+    createdAtMs,
     days: sanitizeString(rawLatestPlan.days),
     destination: sanitizeString(rawLatestPlan.destination),
     formattedPlanText,
@@ -270,6 +281,7 @@ export function createHomePlannerChatFromSharedTrip(
       followUpMessages: [],
       latestPlan: {
         budget: normalizedBudget,
+        createdAtMs: now,
         days: normalizedDays,
         destination: trip.destination.trim(),
         formattedPlanText: trip.details.trim(),
@@ -520,6 +532,7 @@ export async function saveHomePlannerStoreForUser(
             latestPlan: chat.state.latestPlan
               ? {
                   budget: normalizeBudgetToEuro(chat.state.latestPlan.budget),
+                  createdAtMs: chat.state.latestPlan.createdAtMs || Date.now(),
                   days: chat.state.latestPlan.days.trim(),
                   destination: chat.state.latestPlan.destination.trim(),
                   formattedPlanText: chat.state.latestPlan.formattedPlanText.trim(),

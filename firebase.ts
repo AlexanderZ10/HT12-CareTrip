@@ -49,28 +49,62 @@ function createAuth() {
 
 export const auth = createAuth();
 
-function shouldUseFirestoreWebTransportWorkaround() {
+function resolveFirestoreTransportMode() {
+  const forcedMode = process.env.EXPO_PUBLIC_FIRESTORE_TRANSPORT?.trim().toLowerCase();
+
+  if (
+    forcedMode === "default" ||
+    forcedMode === "webchannel" ||
+    forcedMode === "web-channel"
+  ) {
+    return "default" as const;
+  }
+
+  if (
+    forcedMode === "long-polling" ||
+    forcedMode === "long_polling" ||
+    forcedMode === "longpolling"
+  ) {
+    return "long-polling" as const;
+  }
+
+  if (Platform.OS !== "web") {
+    return "long-polling" as const;
+  }
+
   if (typeof window === "undefined") {
-    return false;
+    return "auto-detect" as const;
   }
 
   const hostname = window.location?.hostname ?? "";
-  return (
+  const isLocalHost =
     hostname === "localhost" ||
     hostname === "127.0.0.1" ||
     /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
     /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
-    /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname)
-  );
+    /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname);
+
+  return isLocalHost ? ("long-polling" as const) : ("auto-detect" as const);
 }
 
-export const db = shouldUseFirestoreWebTransportWorkaround()
-  ? initializeFirestore(app, {
-      experimentalForceLongPolling: true,
-      ignoreUndefinedProperties: true,
-      useFetchStreams: false,
-    } as Parameters<typeof initializeFirestore>[1] & Record<string, unknown>)
-  : getFirestore(app);
+const firestoreTransportMode = resolveFirestoreTransportMode();
+const firestoreLongPollingSettings =
+  firestoreTransportMode === "long-polling"
+    ? {
+        experimentalForceLongPolling: true,
+        useFetchStreams: false,
+      }
+    : {
+        experimentalAutoDetectLongPolling: true,
+      };
+
+export const db =
+  firestoreTransportMode === "default"
+    ? getFirestore(app)
+    : initializeFirestore(app, {
+        ...firestoreLongPollingSettings,
+        ignoreUndefinedProperties: true,
+      } as Parameters<typeof initializeFirestore>[1] & Record<string, unknown>);
 
 export const storage = getStorage(app);
 export const functions = getFunctions(

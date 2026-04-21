@@ -5,7 +5,9 @@ import {
   collection,
   deleteDoc,
   doc,
+  limit,
   onSnapshot,
+  orderBy,
   query,
   runTransaction,
   serverTimestamp,
@@ -36,14 +38,23 @@ import { extractPersonalProfile, getProfileDisplayName } from "../../utils/profi
 import { parsePublicProfile, type PublicProfile } from "../../utils/public-profiles";
 import {
   buildFriendshipId,
+  dedupeSocialPostComments,
+  getFollowActionLabel,
   getFriendshipOtherLabel,
   getFriendshipOtherUserId,
   getFriendshipOtherUsername,
+  getSocialConnectionState,
+  isFollowerConnection,
+  isFollowingConnection,
   parseFriendship,
+  parseSocialPostComment,
   parseSocialPost,
   sortFriendshipsByUpdatedAt,
+  sortSocialPostCommentsByCreatedAt,
   sortSocialPostsByCreatedAt,
   type Friendship,
+  type SocialConnectionState,
+  type SocialPostComment,
   type SocialPost,
 } from "../../utils/social";
 import {
@@ -66,8 +77,13 @@ type SocialProfilePreview = {
   username: string;
 };
 
-export function useGroupsScreen() {
+type UseGroupsScreenOptions = {
+  enablePostComments?: boolean;
+};
+
+export function useGroupsScreen(options: UseGroupsScreenOptions = {}) {
   const router = useRouter();
+  const enablePostComments = options.enablePostComments ?? false;
 
   const [user, setUser] = useState<User | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -79,6 +95,7 @@ export function useGroupsScreen() {
   const [savingGroup, setSavingGroup] = useState(false);
   const [savingTripRequest, setSavingTripRequest] = useState(false);
   const [postingSocialPost, setPostingSocialPost] = useState(false);
+  const [commentingPostId, setCommentingPostId] = useState<string | null>(null);
   const [pickingPostImage, setPickingPostImage] = useState(false);
   const [joiningGroupId, setJoiningGroupId] = useState<string | null>(null);
   const [joiningByKey, setJoiningByKey] = useState(false);
@@ -98,6 +115,8 @@ export function useGroupsScreen() {
   const [tripRequests, setTripRequests] = useState<TripRequest[]>([]);
   const [friendships, setFriendships] = useState<Friendship[]>([]);
   const [socialPosts, setSocialPosts] = useState<SocialPost[]>([]);
+  const [commentsByPostId, setCommentsByPostId] = useState<Record<string, SocialPostComment[]>>({});
+  const [commentErrorsByPostId, setCommentErrorsByPostId] = useState<Record<string, string>>({});
 
   const [activeSection, setActiveSection] = useState<"friends" | "groups" | "posts">("groups");
   const [searchQuery, setSearchQuery] = useState("");
@@ -158,6 +177,8 @@ export function useGroupsScreen() {
         setTripRequests([]);
         setFriendships([]);
         setSocialPosts([]);
+        setCommentsByPostId({});
+        setCommentErrorsByPostId({});
         setLoadingProfile(false);
         setLoadingGroups(false);
         setLoadingPublicProfiles(false);
@@ -421,6 +442,15 @@ export function useGroupsScreen() {
     };
   };
 
+  const getConnectionStateForProfile = (targetUserId: string): SocialConnectionState =>
+    getSocialConnectionState(friendshipsByProfileId[targetUserId] ?? null, userId);
+
+  const getFollowActionLabelForProfile = (targetUserId: string) =>
+    getFollowActionLabel(getConnectionStateForProfile(targetUserId));
+
+  const isUpdatingConnectionWithProfile = (targetUserId: string) =>
+    !!targetUserId && updatingFriendshipId === buildFriendshipId(userId, targetUserId);
+
   const friendProfiles = useMemo(
     () =>
       acceptedFriendships
@@ -428,6 +458,38 @@ export function useGroupsScreen() {
         .filter((profile) => !!profile.uid),
     [acceptedFriendships, publicProfilesById, friendshipsByProfileId, userId]
   );
+  const followerProfiles = useMemo(() => {
+    const followerIds = new Set<string>();
+
+    friendships.forEach((friendship) => {
+      const friendId = getFriendshipOtherUserId(friendship, userId);
+      const connectionState = getSocialConnectionState(friendship, userId);
+
+      if (friendId && isFollowerConnection(connectionState)) {
+        followerIds.add(friendId);
+      }
+    });
+
+    return Array.from(followerIds)
+      .map((profileId) => buildSocialProfilePreview(profileId))
+      .filter((profile) => !!profile.uid);
+  }, [friendships, friendshipsByProfileId, publicProfilesById, userId]);
+  const followingProfiles = useMemo(() => {
+    const followingIds = new Set<string>();
+
+    friendships.forEach((friendship) => {
+      const friendId = getFriendshipOtherUserId(friendship, userId);
+      const connectionState = getSocialConnectionState(friendship, userId);
+
+      if (friendId && isFollowingConnection(connectionState)) {
+        followingIds.add(friendId);
+      }
+    });
+
+    return Array.from(followingIds)
+      .map((profileId) => buildSocialProfilePreview(profileId))
+      .filter((profile) => !!profile.uid);
+  }, [friendships, friendshipsByProfileId, publicProfilesById, userId]);
 
   const suggestedProfiles = useMemo(() => {
     const rankForProfile = (profileId: string) => {
@@ -449,7 +511,12 @@ export function useGroupsScreen() {
     };
 
     return [...publicUsers]
-      .filter((profile) => friendshipsByProfileId[profile.uid]?.status !== "accepted")
+      .filter((profile) => {
+        const connection = friendshipsByProfileId[profile.uid];
+        const connectionState = getSocialConnectionState(connection, userId);
+
+        return !isFollowingConnection(connectionState);
+      })
       .sort((left, right) => {
         const rankDiff = rankForProfile(left.uid) - rankForProfile(right.uid);
 
@@ -541,10 +608,13 @@ export function useGroupsScreen() {
 
   const friendIds = useMemo(
     () =>
-      acceptedFriendships
+      friendships
+        .filter((friendship) =>
+          isFollowingConnection(getSocialConnectionState(friendship, userId))
+        )
         .map((friendship) => getFriendshipOtherUserId(friendship, userId))
         .filter(Boolean),
-    [acceptedFriendships, userId]
+    [friendships, userId]
   );
 
   const activeStories = useMemo(() => {
@@ -594,6 +664,74 @@ export function useGroupsScreen() {
       return (right.createdAtMs ?? 0) - (left.createdAtMs ?? 0);
       });
   }, [friendIds, socialPosts, userId]);
+
+  const commentPostIdsKey = useMemo(
+    () => (enablePostComments ? feedPosts.slice(0, 30).map((post) => post.id).join("|") : ""),
+    [enablePostComments, feedPosts]
+  );
+
+  useEffect(() => {
+    const commentPostIds = commentPostIdsKey.split("|").filter(Boolean);
+
+    if (!enablePostComments || !userId || commentPostIds.length === 0) {
+      setCommentsByPostId({});
+      setCommentErrorsByPostId({});
+      return;
+    }
+
+    const allowedPostIds = new Set(commentPostIds);
+    setCommentsByPostId((currentComments) =>
+      Object.fromEntries(
+        Object.entries(currentComments).filter(([postId]) => allowedPostIds.has(postId))
+      )
+    );
+
+    const unsubscribers = commentPostIds.map((postId) =>
+      onSnapshot(
+        query(
+          collection(db, "socialPosts", postId, "comments"),
+          orderBy("createdAtMs", "asc"),
+          limit(50)
+        ),
+        (commentsSnapshot) => {
+          const nextComments = sortSocialPostCommentsByCreatedAt(
+            commentsSnapshot.docs
+              .map((commentDocument) =>
+                parseSocialPostComment(
+                  commentDocument.id,
+                  commentDocument.data() as Record<string, unknown>
+                )
+              )
+              .filter((comment) => comment.text.trim().length > 0)
+          );
+
+          setCommentsByPostId((currentComments) => ({
+            ...currentComments,
+            [postId]: nextComments,
+          }));
+          setCommentErrorsByPostId((currentErrors) => {
+            if (!currentErrors[postId]) {
+              return currentErrors;
+            }
+
+            const nextErrors = { ...currentErrors };
+            delete nextErrors[postId];
+            return nextErrors;
+          });
+        },
+        () => {
+          setCommentErrorsByPostId((currentErrors) => ({
+            ...currentErrors,
+            [postId]: "Comments are temporarily unavailable.",
+          }));
+        }
+      )
+    );
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [commentPostIdsKey, enablePostComments, userId]);
 
   const mySocialPosts = useMemo(
     () =>
@@ -1084,6 +1222,92 @@ export function useGroupsScreen() {
     }
   };
 
+  const addSocialPostComment = async (postId: string, rawText: string) => {
+    if (!user) {
+      return false;
+    }
+
+    const trimmedText = rawText.trim().slice(0, 240);
+
+    if (!postId || !trimmedText) {
+      return false;
+    }
+
+    const now = Date.now();
+    const newCommentRef = doc(collection(db, "socialPosts", postId, "comments"));
+    const optimisticComment: SocialPostComment = {
+      authorId: user.uid,
+      authorLabel: profileName,
+      authorUsername: username,
+      createdAtMs: now,
+      id: `local-${newCommentRef.id}`,
+      postId,
+      text: trimmedText,
+      updatedAtMs: now,
+    };
+
+    try {
+      setCommentingPostId(postId);
+      clearFeedback();
+      setCommentErrorsByPostId((currentErrors) => {
+        if (!currentErrors[postId]) {
+          return currentErrors;
+        }
+
+        const nextErrors = { ...currentErrors };
+        delete nextErrors[postId];
+        return nextErrors;
+      });
+      setCommentsByPostId((currentComments) => ({
+        ...currentComments,
+        [postId]: sortSocialPostCommentsByCreatedAt(
+          dedupeSocialPostComments([
+            ...(currentComments[postId] ?? []),
+            optimisticComment,
+          ])
+        ),
+      }));
+
+      await setDoc(newCommentRef, {
+        authorId: user.uid,
+        authorLabel: profileName,
+        authorUsername: username,
+        createdAtMs: now,
+        postId,
+        text: trimmedText,
+        updatedAtMs: now,
+      });
+
+      setCommentsByPostId((currentComments) => ({
+        ...currentComments,
+        [postId]: sortSocialPostCommentsByCreatedAt(
+          dedupeSocialPostComments([
+            ...(currentComments[postId] ?? []).filter(
+              (comment) => comment.id !== optimisticComment.id && comment.id !== newCommentRef.id
+            ),
+            { ...optimisticComment, id: newCommentRef.id },
+          ])
+        ),
+      }));
+
+      return true;
+    } catch {
+      setCommentsByPostId((currentComments) => ({
+        ...currentComments,
+        [postId]: (currentComments[postId] ?? []).filter(
+          (comment) => comment.id !== optimisticComment.id
+        ),
+      }));
+      setCommentErrorsByPostId((currentErrors) => ({
+        ...currentErrors,
+        [postId]: "Could not publish your comment. Try again.",
+      }));
+      return false;
+    } finally {
+      setCommentingPostId(null);
+    }
+  };
+
   const publishStoryFromDraft = async () => {
     if (!user) {
       return false;
@@ -1132,65 +1356,106 @@ export function useGroupsScreen() {
       return;
     }
 
+    if (!profile.uid.trim()) {
+      setError("Could not follow — invalid profile.");
+      return;
+    }
+
     const friendshipId = buildFriendshipId(user.uid, profile.uid);
+    const safeRecipientLabel = (profile.displayName || profile.username || "Traveler").slice(0, 80);
+    const safeRecipientUsername = (profile.username || "").slice(0, 40);
+    const safeRequesterLabel = (profileName || "Traveler").slice(0, 80);
+    const safeRequesterUsername = (username || "").slice(0, 40);
 
     try {
       setUpdatingFriendshipId(friendshipId);
       clearFeedback();
 
-      const result = await runTransaction(db, async (transaction) => {
-        const friendshipRef = doc(db, "friendships", friendshipId);
-        const friendshipSnapshot = await transaction.get(friendshipRef);
-        const now = Date.now();
+      const friendshipRef = doc(db, "friendships", friendshipId);
+      const now = Date.now();
 
-        if (!friendshipSnapshot.exists()) {
-          transaction.set(friendshipRef, {
+      const nextFriendship = await runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(friendshipRef);
+
+        if (!snapshot.exists()) {
+          const created = {
             createdAtMs: now,
+            id: friendshipId,
             participantIds: [user.uid, profile.uid].sort(),
             recipientId: profile.uid,
-            recipientLabel: profile.displayName || profile.username || "Traveler",
-            recipientUsername: profile.username,
+            recipientLabel: safeRecipientLabel,
+            recipientUsername: safeRecipientUsername,
             requesterId: user.uid,
-            requesterLabel: profileName,
-            requesterUsername: username,
-            status: "pending",
+            requesterLabel: safeRequesterLabel,
+            requesterUsername: safeRequesterUsername,
+            status: "pending" as const,
             updatedAtMs: now,
+          } satisfies Friendship;
+
+          transaction.set(friendshipRef, {
+            createdAtMs: created.createdAtMs,
+            participantIds: created.participantIds,
+            recipientId: created.recipientId,
+            recipientLabel: created.recipientLabel,
+            recipientUsername: created.recipientUsername,
+            requesterId: created.requesterId,
+            requesterLabel: created.requesterLabel,
+            requesterUsername: created.requesterUsername,
+            status: created.status,
+            updatedAtMs: created.updatedAtMs,
           });
-          return "sent";
+          return created;
         }
 
-        const currentFriendship = parseFriendship(
-          friendshipSnapshot.id,
-          friendshipSnapshot.data() as Record<string, unknown>
+        const existing = parseFriendship(
+          snapshot.id,
+          snapshot.data() as Record<string, unknown>
         );
 
-        if (currentFriendship.status === "accepted") {
-          return "accepted";
+        if (existing.status === "accepted") {
+          return existing;
         }
 
-        if (
-          currentFriendship.status === "pending" &&
-          currentFriendship.recipientId === user.uid
-        ) {
-          transaction.update(friendshipRef, {
-            status: "accepted",
-            updatedAtMs: now,
-          });
-          return "accepted";
+        if (existing.status === "pending" && existing.recipientId === user.uid) {
+          transaction.update(friendshipRef, { status: "accepted", updatedAtMs: now });
+          return { ...existing, status: "accepted" as const, updatedAtMs: now };
         }
 
-        return "pending";
+        return existing;
       });
 
-      if (result === "accepted") {
-        setSuccessMessage("You are now travel friends.");
-      } else if (result === "sent") {
-        setSuccessMessage("Friend request sent.");
+      setFriendships((cur) =>
+        sortFriendshipsByUpdatedAt([
+          nextFriendship,
+          ...cur.filter((f) => f.id !== friendshipId),
+        ])
+      );
+      setSuccessMessage(
+        nextFriendship.status === "accepted" ? "You are now travel friends." : "Following."
+      );
+    } catch (followError) {
+      console.warn("sendFriendRequest failed", followError);
+      const errorCode =
+        followError &&
+        typeof followError === "object" &&
+        "code" in followError &&
+        typeof followError.code === "string"
+          ? followError.code
+          : "";
+      const errorMessage =
+        followError instanceof Error ? followError.message : String(followError);
+
+      if (errorCode === "permission-denied" || errorCode === "PERMISSION_DENIED") {
+        setError("Permission denied — you may need to sign in again.");
+      } else if (
+        errorCode === "unavailable" ||
+        errorCode === "deadline-exceeded" ||
+        errorMessage.includes("Failed to fetch")
+      ) {
+        setError("Network issue — check your connection and try again.");
       } else {
-        setSuccessMessage("Friend request is already pending.");
+        setError(`Could not follow this profile: ${errorCode || errorMessage}`);
       }
-    } catch {
-      setError("Could not update the friend request right now.");
     } finally {
       setUpdatingFriendshipId(null);
     }
@@ -1228,9 +1493,37 @@ export function useGroupsScreen() {
         });
       });
 
+      setFriendships((currentFriendships) =>
+        sortFriendshipsByUpdatedAt(
+          currentFriendships.map((currentFriendship) =>
+            currentFriendship.id === friendship.id
+              ? { ...currentFriendship, status: "accepted", updatedAtMs: Date.now() }
+              : currentFriendship
+          )
+        )
+      );
       setSuccessMessage("You are now travel friends.");
-    } catch {
-      setError("Could not accept this friend request.");
+    } catch (acceptError) {
+      console.warn("acceptFriendRequest failed", acceptError);
+      const errorCode =
+        acceptError &&
+        typeof acceptError === "object" &&
+        "code" in acceptError &&
+        typeof acceptError.code === "string"
+          ? acceptError.code
+          : "";
+
+      if (errorCode === "permission-denied" || errorCode === "PERMISSION_DENIED") {
+        setError("Permission denied — you may need to sign in again.");
+      } else if (
+        errorCode === "unavailable" ||
+        errorCode === "deadline-exceeded" ||
+        (acceptError instanceof Error && acceptError.message.includes("Failed to fetch"))
+      ) {
+        setError("Network issue — check your connection and try again.");
+      } else {
+        setError("Could not accept this friend request. Please try again.");
+      }
     } finally {
       setUpdatingFriendshipId(null);
     }
@@ -1246,6 +1539,9 @@ export function useGroupsScreen() {
       clearFeedback();
 
       await deleteDoc(doc(db, "friendships", friendship.id));
+      setFriendships((currentFriendships) =>
+        currentFriendships.filter((currentFriendship) => currentFriendship.id !== friendship.id)
+      );
 
       if (friendship.status === "accepted") {
         setSuccessMessage("Friend removed.");
@@ -1254,8 +1550,9 @@ export function useGroupsScreen() {
       } else {
         setSuccessMessage("Friend request declined.");
       }
-    } catch {
-      setError("Could not update this friendship.");
+    } catch (removeError) {
+      console.warn("removeFriendship failed", removeError);
+      setError("Could not update this connection. Please try again.");
     } finally {
       setUpdatingFriendshipId(null);
     }
@@ -1435,12 +1732,16 @@ export function useGroupsScreen() {
     filteredInviteProfiles,
     publicProfilesById,
     friendProfiles,
+    followerProfiles,
+    followingProfiles,
     pendingIncomingFriendships,
     pendingOutgoingFriendships,
     suggestedProfiles,
     activeStories,
     feedPosts,
     mySocialPosts,
+    commentsByPostId,
+    commentErrorsByPostId,
     smartAlerts,
     dreamDestinations,
     groupBoardsByGroupId,
@@ -1452,6 +1753,7 @@ export function useGroupsScreen() {
     savingGroup,
     savingTripRequest,
     postingSocialPost,
+    commentingPostId,
     pickingPostImage,
     joiningGroupId,
     joiningByKey,
@@ -1485,9 +1787,13 @@ export function useGroupsScreen() {
     resetPostDraft,
     handleCreateSocialPost,
     publishStoryFromDraft,
+    addSocialPostComment,
 
     // Social actions
     buildSocialProfilePreview,
+    getConnectionStateForProfile,
+    getFollowActionLabelForProfile,
+    isUpdatingConnectionWithProfile,
     sendFriendRequest,
     acceptFriendRequest,
     removeFriendship,

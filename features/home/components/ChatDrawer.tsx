@@ -378,7 +378,7 @@ const styles = StyleSheet.create({
   },
   chatItemTitle: {
     ...TypeScale.bodyMd,
-    fontWeight: FontWeight.extrabold,
+    fontWeight: FontWeight.bold,
     flex: 1,
     paddingRight: Spacing.sm,
   },
@@ -388,14 +388,14 @@ const styles = StyleSheet.create({
   },
   chatItemActions: {
     flexDirection: "row",
+    gap: Spacing.xs,
   },
   iconButton: {
-    width: 30,
-    height: 30,
-    borderRadius: Radius.sm,
+    width: 32,
+    height: 32,
+    borderRadius: Radius.md,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: Spacing.sm,
   },
   renameWrap: {
     width: "100%",
@@ -446,7 +446,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   phoneDrawerBrand: {
-    ...TypeScale.headingMd,
+    ...TypeScale.headingLg,
     fontWeight: FontWeight.black,
   },
   phoneDrawerCloseButton: {

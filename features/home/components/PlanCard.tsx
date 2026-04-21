@@ -48,14 +48,24 @@ export function PlanCard({
     latestPlan.plan.stayOptions.some((stay) => hasVisiblePrice(stay.pricePerNight));
 
   const labels = language === "en"
-    ? { transport: "Transport", stay: "Accommodation", days: "Verified trip structure", profileTip: "Verification", viewOffer: "View offer", buyTicket: "Buy ticket", bookStay: "Book stay", noTransport: "No reliable live transport offers were found for this search yet.", noStay: "No reliable live accommodation offers were found for this search yet.", transportPriceHint: "Exact fare for the selected search", stayPriceHint: "Exact total for the selected dates" }
+    ? { transport: "Transport", stay: "Accommodation", days: "Verified trip structure", profileTip: "Verification", viewOffer: "View offer", buyTicket: "Buy ticket", bookStay: "Book stay", noTransport: "No reliable live transport offers were found for this search yet.", noStay: "No reliable live accommodation offers were found for this search yet.", transportPriceHint: "Exact fare for the selected search", stayPriceHint: "Exact total for the selected dates", saving: "Saving...", saved: "Saved", saveTrip: "Save trip", payReserve: "Pay & reserve", bookNow: "Book now" }
     : language === "de"
-      ? { transport: "Transport", stay: "Unterkunft", days: "Verifizierte Reisestruktur", profileTip: "Verifizierung", viewOffer: "Angebot", buyTicket: "Ticket kaufen", bookStay: "Buchen", noTransport: "Fur diese Suche wurden noch keine verlasslichen Live-Transportangebote gefunden.", noStay: "Fur diese Suche wurden noch keine verlasslichen Live-Unterkunfte gefunden.", transportPriceHint: "Exakter Preis fur diese Suche", stayPriceHint: "Exakter Gesamtpreis fur die gewahlten Daten" }
+      ? { transport: "Transport", stay: "Unterkunft", days: "Verifizierte Reisestruktur", profileTip: "Verifizierung", viewOffer: "Angebot", buyTicket: "Ticket kaufen", bookStay: "Buchen", noTransport: "Fur diese Suche wurden noch keine verlasslichen Live-Transportangebote gefunden.", noStay: "Fur diese Suche wurden noch keine verlasslichen Live-Unterkunfte gefunden.", transportPriceHint: "Exakter Preis fur diese Suche", stayPriceHint: "Exakter Gesamtpreis fur die gewahlten Daten", saving: "Wird gespeichert...", saved: "Gespeichert", saveTrip: "Reise speichern", payReserve: "Bezahlen & reservieren", bookNow: "Jetzt buchen" }
       : language === "es"
-        ? { transport: "Transporte", stay: "Alojamiento", days: "Estructura verificada del viaje", profileTip: "Verificación", viewOffer: "Ver oferta", buyTicket: "Comprar billete", bookStay: "Reservar", noTransport: "Todavia no se encontraron ofertas fiables de transporte en vivo para esta busqueda.", noStay: "Todavia no se encontraron ofertas fiables de alojamiento en vivo para esta busqueda.", transportPriceHint: "Tarifa exacta para esta búsqueda", stayPriceHint: "Total exacto para las fechas elegidas" }
+        ? { transport: "Transporte", stay: "Alojamiento", days: "Estructura verificada del viaje", profileTip: "Verificación", viewOffer: "Ver oferta", buyTicket: "Comprar billete", bookStay: "Reservar", noTransport: "Todavia no se encontraron ofertas fiables de transporte en vivo para esta busqueda.", noStay: "Todavia no se encontraron ofertas fiables de alojamiento en vivo para esta busqueda.", transportPriceHint: "Tarifa exacta para esta búsqueda", stayPriceHint: "Total exacto para las fechas elegidas", saving: "Guardando...", saved: "Guardado", saveTrip: "Guardar viaje", payReserve: "Pagar y reservar", bookNow: "Reservar ahora" }
         : language === "fr"
-          ? { transport: "Transport", stay: "Hébergement", days: "Structure verifiée du voyage", profileTip: "Vérification", viewOffer: "Voir l'offre", buyTicket: "Acheter", bookStay: "Réserver", noTransport: "Aucune offre fiable de transport en direct n'a encore ete trouvee pour cette recherche.", noStay: "Aucune offre fiable d'hebergement en direct n'a encore ete trouvee pour cette recherche.", transportPriceHint: "Tarif exact pour cette recherche", stayPriceHint: "Total exact pour les dates choisies" }
-          : { transport: "Транспорт", stay: "Настаняване", days: "Проверена структура на пътуването", profileTip: "Проверка", viewOffer: "Офертата", buyTicket: "Купи билет", bookStay: "Резервирай", noTransport: "Все още няма достатъчно надеждни live транспортни оферти за това търсене.", noStay: "Все още няма достатъчно надеждни live оферти за настаняване за това търсене.", transportPriceHint: "Точна цена за това търсене", stayPriceHint: "Точна обща цена за избраните дати" };
+          ? { transport: "Transport", stay: "Hébergement", days: "Structure verifiée du voyage", profileTip: "Vérification", viewOffer: "Voir l'offre", buyTicket: "Acheter", bookStay: "Réserver", noTransport: "Aucune offre fiable de transport en direct n'a encore ete trouvee pour cette recherche.", noStay: "Aucune offre fiable d'hebergement en direct n'a encore ete trouvee pour cette recherche.", transportPriceHint: "Tarif exact pour cette recherche", stayPriceHint: "Total exact pour les dates choisies", saving: "Enregistrement...", saved: "Enregistré", saveTrip: "Enregistrer le voyage", payReserve: "Payer et réserver", bookNow: "Réserver" }
+          : { transport: "Транспорт", stay: "Настаняване", days: "Проверена структура на пътуването", profileTip: "Проверка", viewOffer: "Офертата", buyTicket: "Купи билет", bookStay: "Резервирай", noTransport: "Все още няма достатъчно надеждни live транспортни оферти за това търсене.", noStay: "Все още няма достатъчно надеждни live оферти за настаняване за това търсене.", transportPriceHint: "Точна цена за това търсене", stayPriceHint: "Точна обща цена за избраните дати", saving: "Запазване...", saved: "Запазено", saveTrip: "Запази пътуването", payReserve: "Плати и резервирай", bookNow: "Резервирай" };
+  const providerLabel =
+    language === "bg"
+      ? "Доставчик"
+      : language === "de"
+        ? "Anbieter"
+        : language === "es"
+          ? "Proveedor"
+          : language === "fr"
+            ? "Fournisseur"
+            : "Provider";
 
   return (
     <View
@@ -153,7 +163,7 @@ export function PlanCard({
             ) : null}
             {option.sourceLabel ? (
               <Text style={[styles.offerSourceText, { color: colors.accent }]}>
-                Source: {option.sourceLabel}
+                {providerLabel}: {option.sourceLabel}
               </Text>
             ) : null}
             <Text style={[styles.optionNote, { color: colors.textSecondary }]}>{option.note}</Text>
@@ -251,13 +261,13 @@ export function PlanCard({
             ) : null}
             {stay.sourceLabel ? (
               <Text style={[styles.offerSourceText, { color: colors.accent }]}>
-                Source: {stay.sourceLabel}
+                {providerLabel}: {stay.sourceLabel}
               </Text>
             ) : null}
             <Text style={[styles.optionNote, { color: colors.textSecondary }]}>{stay.note}</Text>
 
             <View style={styles.optionActionsRow}>
-              {stay.bookingUrl && hasVisiblePrice(stay.pricePerNight) ? (
+              {stay.bookingUrl ? (
                 <TouchableOpacity
                   style={[
                     styles.optionLinkButton,
@@ -369,12 +379,18 @@ export function PlanCard({
           styles.savePlanButton,
           { backgroundColor: colors.accent },
           (saving || saved) && styles.disabledButton,
-          saved && { backgroundColor: colors.border, borderWidth: 1, borderColor: colors.border },
+          saved && { backgroundColor: colors.cardAlt, borderWidth: 1, borderColor: colors.border },
         ]}
         onPress={onSavePlan}
         disabled={saving || saved}
         activeOpacity={0.9}
       >
+        <MaterialIcons
+          name={saved ? "check-circle" : "bookmark-border"}
+          size={18}
+          color={saved ? colors.accent : colors.buttonTextOnAction}
+          style={styles.savePlanButtonIcon}
+        />
         <Text
           style={[
             styles.savePlanButtonText,
@@ -382,7 +398,7 @@ export function PlanCard({
             saved && { color: colors.accent },
           ]}
         >
-          {saving ? "Saving..." : saved ? "Saved in tab" : "Save to Saved"}
+          {saving ? labels.saving : saved ? labels.saved : labels.saveTrip}
         </Text>
       </TouchableOpacity>
 
@@ -394,7 +410,7 @@ export function PlanCard({
         >
           <MaterialIcons name="credit-card" size={18} color={colors.buttonTextOnAction} />
           <Text style={[styles.bookNowButtonText, { color: colors.buttonTextOnAction }]}>
-            Pay & reserve in app
+            {labels.payReserve}
           </Text>
         </TouchableOpacity>
       ) : null}
@@ -407,7 +423,8 @@ const styles = StyleSheet.create({
     borderRadius: Radius["2xl"],
     borderWidth: 1,
     padding: Spacing.lg,
-    marginTop: Spacing.xs,
+    marginTop: Spacing.md,
+    marginBottom: Spacing.sm,
   },
   planCardPhone: {
     borderRadius: Radius.xl,
@@ -543,13 +560,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   optionLinkButton: {
-    borderRadius: Radius.md,
-    paddingVertical: Spacing.sm,
+    borderRadius: Radius.lg,
+    paddingVertical: Spacing.sm + 2,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
     marginRight: Spacing.sm,
     borderWidth: 1,
+    minHeight: 40,
   },
   optionLinkButtonText: {
     ...TypeScale.bodySm,
@@ -557,11 +575,12 @@ const styles = StyleSheet.create({
     marginLeft: Spacing.sm,
   },
   optionActionButton: {
-    borderRadius: Radius.md,
-    paddingVertical: Spacing.sm,
+    borderRadius: Radius.lg,
+    paddingVertical: Spacing.sm + 2,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
+    minHeight: 40,
   },
   optionActionButtonText: {
     ...TypeScale.bodySm,
@@ -624,26 +643,35 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   savePlanButton: {
-    borderRadius: Radius.md,
-    paddingVertical: Spacing.md,
-    alignItems: "center",
-  },
-  savePlanButtonText: {
-    fontWeight: FontWeight.extrabold,
-  },
-  bookNowButton: {
-    marginTop: Spacing.sm,
-    borderRadius: Radius.md,
+    borderRadius: Radius.lg,
     paddingVertical: Spacing.md,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
+    minHeight: 48,
+  },
+  savePlanButtonIcon: {
+    marginRight: Spacing.sm,
+  },
+  savePlanButtonText: {
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.extrabold,
+  },
+  bookNowButton: {
+    marginTop: Spacing.sm,
+    borderRadius: Radius.lg,
+    paddingVertical: Spacing.md,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    minHeight: 48,
   },
   bookNowButtonText: {
+    ...TypeScale.bodyMd,
     fontWeight: FontWeight.extrabold,
     marginLeft: Spacing.sm,
   },
   disabledButton: {
-    opacity: 0.55,
+    opacity: 0.6,
   },
 });

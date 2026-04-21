@@ -380,6 +380,7 @@ export function normalizeLatestPlan(plan: StoredHomePlan): StoredHomePlan {
 
   return {
     ...plan,
+    createdAtMs: plan.createdAtMs || Date.now(),
     formattedPlanText,
     sourceKey:
       plan.sourceKey ||

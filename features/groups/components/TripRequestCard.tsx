@@ -193,9 +193,9 @@ const styles = StyleSheet.create({
     borderRadius: Radius["3xl"],
     borderWidth: 1,
     marginRight: Spacing.md,
-    minHeight: 252,
-    padding: Spacing.lg,
-    ...shadow("lg"),
+    minHeight: 260,
+    padding: Spacing.xl,
+    ...shadow("md"),
     width: 300,
   },
   requestCardTopRow: {
@@ -246,8 +246,8 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full,
     borderWidth: 1,
     flexDirection: "row",
-    gap: 6,
-    paddingHorizontal: Spacing.sm,
+    gap: 5,
+    paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
   },
   requestChipText: {

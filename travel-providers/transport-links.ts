@@ -48,6 +48,58 @@ function normalizeLocation(value: string, fallback: string) {
   return value.trim() || fallback;
 }
 
+function buildGoogleMapsTransitUrl(params: {
+  destinationQuery: string;
+  originQuery: string;
+}) {
+  const url = new URL("https://www.google.com/maps/dir/");
+  url.searchParams.set("api", "1");
+  url.searchParams.set("origin", params.originQuery);
+  url.searchParams.set("destination", params.destinationQuery);
+  url.searchParams.set("travelmode", "transit");
+  return url.toString();
+}
+
+function buildGoogleFlightsUrl(params: {
+  departureDate: string;
+  destinationQuery: string;
+  originQuery: string;
+}) {
+  const url = new URL("https://www.google.com/travel/flights");
+  url.searchParams.set(
+    "q",
+    `Flights from ${params.originQuery} to ${params.destinationQuery} on ${params.departureDate}`
+  );
+  return url.toString();
+}
+
+function buildOmioSearchUrl(params: {
+  departureDate: string;
+  destinationQuery: string;
+  originQuery: string;
+}) {
+  const url = new URL("https://www.omio.com/search");
+  url.searchParams.set("departure_fk", params.originQuery);
+  url.searchParams.set("arrival_fk", params.destinationQuery);
+  url.searchParams.set("departure_date", params.departureDate);
+  url.searchParams.set("adults", "1");
+  return url.toString();
+}
+
+function shouldIncludeFlights(transportPreference: string) {
+  const normalized = transportPreference.trim().toLowerCase();
+
+  return (
+    !normalized ||
+    normalized.includes("any") ||
+    normalized.includes("all") ||
+    normalized.includes("flight") ||
+    normalized.includes("plane") ||
+    normalized.includes("самолет") ||
+    normalized.includes("полет")
+  );
+}
+
 export function buildTransportSearchLinkOffers(params: {
   currency: string;
   departureDate: string;
@@ -59,8 +111,7 @@ export function buildTransportSearchLinkOffers(params: {
   const destinationLabel = normalizeLocation(params.destinationQuery, "your destination");
   const routeLabel = `${originLabel} → ${destinationLabel}`;
   const modeLabel = normalizeTransportModeLabel(params.transportPreference);
-
-  return [
+  const offers: TransportSearchLinkOffer[] = [
     {
       bookingUrl: buildRome2RioRouteUrl({
         destinationQuery: destinationLabel,
@@ -75,5 +126,54 @@ export function buildTransportSearchLinkOffers(params: {
       route: routeLabel,
       sourceLabel: "Rome2Rio",
     },
-  ] satisfies TransportSearchLinkOffer[];
+    {
+      bookingUrl: buildGoogleMapsTransitUrl({
+        destinationQuery: destinationLabel,
+        originQuery: originLabel,
+      }),
+      durationMinutes: null,
+      mode: "Transit",
+      note: `Open live public transport and driving directions for ${params.departureDate}.`,
+      priceAmount: null,
+      priceCurrency: params.currency,
+      provider: "Google Maps",
+      route: routeLabel,
+      sourceLabel: "Google Maps",
+    },
+    {
+      bookingUrl: buildOmioSearchUrl({
+        departureDate: params.departureDate,
+        destinationQuery: destinationLabel,
+        originQuery: originLabel,
+      }),
+      durationMinutes: null,
+      mode: modeLabel === "Flight" ? "Transit" : modeLabel,
+      note: `Check train, bus, and mixed route availability for ${params.departureDate}.`,
+      priceAmount: null,
+      priceCurrency: params.currency,
+      provider: "Omio",
+      route: routeLabel,
+      sourceLabel: "Omio",
+    },
+  ];
+
+  if (shouldIncludeFlights(params.transportPreference)) {
+    offers.push({
+      bookingUrl: buildGoogleFlightsUrl({
+        departureDate: params.departureDate,
+        destinationQuery: destinationLabel,
+        originQuery: originLabel,
+      }),
+      durationMinutes: null,
+      mode: "Flight",
+      note: `Compare flight availability for ${params.departureDate}.`,
+      priceAmount: null,
+      priceCurrency: params.currency,
+      provider: "Google Flights",
+      route: routeLabel,
+      sourceLabel: "Google Flights",
+    });
+  }
+
+  return offers.slice(0, 4) satisfies TransportSearchLinkOffer[];
 }

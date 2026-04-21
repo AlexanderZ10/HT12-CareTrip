@@ -244,6 +244,23 @@ service cloud.firestore {
         && data.updatedAtMs is number;
     }
 
+    function validSocialPostCommentShape(postId, data) {
+      return data.authorId is string
+        && data.authorId.size() >= 1
+        && data.authorId.size() <= 128
+        && data.authorLabel is string
+        && data.authorLabel.size() >= 1
+        && data.authorLabel.size() <= 80
+        && data.authorUsername is string
+        && data.authorUsername.size() <= 40
+        && data.postId == postId
+        && data.text is string
+        && data.text.size() >= 1
+        && data.text.size() <= 240
+        && data.createdAtMs is number
+        && data.updatedAtMs is number;
+    }
+
     function validExpenseRepaymentShape(data) {
       return data.amountLabel is string
         && data.amountLabel.size() >= 1
@@ -668,7 +685,9 @@ service cloud.firestore {
     }
 
     match /friendships/{friendshipId} {
-      allow read: if isFriendshipParticipant();
+      // Allow reading non-existent docs so transactions can check-then-create.
+      // Existing docs are restricted to participants only.
+      allow read: if signedIn() && (resource == null || isFriendshipParticipant());
       allow create: if validFriendshipCreate();
       allow update: if validFriendshipAccept();
       allow delete: if isFriendshipParticipant();
@@ -681,6 +700,19 @@ service cloud.firestore {
         && validSocialPostShape(request.resource.data);
       allow update: if false;
       allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+
+      match /comments/{commentId} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && request.resource.data.authorId == request.auth.uid
+          && validSocialPostCommentShape(postId, request.resource.data);
+        allow update: if false;
+        allow delete: if signedIn()
+          && (
+            resource.data.authorId == request.auth.uid
+            || get(/databases/$(database)/documents/socialPosts/$(postId)).data.authorId == request.auth.uid
+          );
+      }
     }
 
     match /publicProfiles/{userId} {
