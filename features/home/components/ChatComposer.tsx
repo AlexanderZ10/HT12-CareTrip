@@ -2,8 +2,11 @@ import { MaterialIcons } from "@expo/vector-icons";
 import React from "react";
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   type LayoutChangeEvent,
   Platform,
+  Pressable,
   StyleSheet,
   TextInput,
   TouchableOpacity,
@@ -37,11 +40,21 @@ type ChatComposerProps = {
   onChangeText: (text: string) => void;
   onFocus: () => void;
   onLayout: (event: LayoutChangeEvent) => void;
-  onReset: () => void;
   onSend: () => void;
+  onStartVoiceInput: () => void;
+  onStopVoiceInput: () => void;
+  onToggleVoiceInput: () => void;
   planning: boolean;
   step: HomePlannerStep;
+  voiceAvailable: boolean;
+  voiceListening: boolean;
 };
+
+const WEB_INPUT_OUTLINE_RESET = {
+  outlineStyle: "none",
+  outlineWidth: 0,
+  borderWidth: 0,
+} as unknown as import("react-native").TextStyle;
 
 function getPlaceholder(step: HomePlannerStep, language: "bg" | "en" | "de" | "es" | "fr") {
   if (language === "en") {
@@ -81,12 +94,49 @@ export function ChatComposer({
   onChangeText,
   onFocus,
   onLayout,
-  onReset,
   onSend,
+  onStartVoiceInput,
+  onStopVoiceInput,
+  onToggleVoiceInput,
   planning,
   step,
+  voiceAvailable,
+  voiceListening,
 }: ChatComposerProps) {
   const { language, t } = useAppLanguage();
+  const voiceButtonDisabled = planning;
+  const holdToTalkActiveRef = React.useRef(false);
+  const pulse = React.useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    if (!voiceListening) {
+      pulse.stopAnimation();
+      pulse.setValue(0);
+      return;
+    }
+
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 600,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 600,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [voiceListening, pulse]);
+
+  const dotOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 1] });
+  const dotScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.15] });
 
   return (
     <View
@@ -97,40 +147,47 @@ export function ChatComposer({
         { paddingBottom: Math.max(insetBottom, 8) },
       ]}
     >
-      <TouchableOpacity
-        accessibilityLabel="Start new plan"
-        style={[
-          styles.resetButton,
-          { backgroundColor: colors.cardAlt, borderColor: colors.border },
-          planning && styles.actionDisabled,
-        ]}
-        onPress={onReset}
-        disabled={planning}
-        activeOpacity={0.9}
-      >
-        <MaterialIcons name="refresh" size={18} color={colors.textMuted} />
-      </TouchableOpacity>
       <View
         style={[
           styles.composerInputRow,
-          { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder },
+          {
+            backgroundColor: colors.inputBackground,
+            borderColor: voiceListening ? colors.accent : colors.inputBorder,
+          },
         ]}
       >
+        {voiceListening ? (
+          <Animated.View
+            style={[
+              styles.voiceDot,
+              {
+                backgroundColor: colors.accent,
+                opacity: dotOpacity,
+                transform: [{ scale: dotScale }],
+              },
+            ]}
+          />
+        ) : null}
         <TextInput
           accessibilityLabel="Message input"
-          style={[styles.input, { color: colors.textPrimary }]}
+          style={[
+            styles.input,
+            { color: colors.textPrimary },
+            Platform.OS === "web" && WEB_INPUT_OUTLINE_RESET,
+          ]}
           placeholder={
-            planning
-              ? step === "done"
-                ? t("home.searchingPrices")
-                : t("home.aiThinking")
-              : getPlaceholder(step, language)
+            voiceListening
+              ? t("home.voiceListening")
+              : planning
+                ? step === "done"
+                  ? t("home.searchingPrices")
+                  : t("home.aiThinking")
+                : getPlaceholder(step, language)
           }
           placeholderTextColor={colors.inputPlaceholder}
           value={chatInput}
           onChangeText={onChangeText}
           onFocus={onFocus}
-          onContentSizeChange={() => onFocus()}
           editable={!planning}
           multiline
           blurOnSubmit={false}
@@ -141,11 +198,54 @@ export function ChatComposer({
             }
           }}
         />
+      </View>
+      <View style={styles.composerActions}>
+        <Pressable
+          accessibilityLabel={
+            voiceListening ? t("home.stopVoiceInput") : t("home.startVoiceInput")
+          }
+          style={[
+            styles.actionButton,
+            {
+              backgroundColor: voiceListening
+                ? colors.accent
+                : voiceAvailable
+                  ? colors.cardAlt
+                  : colors.disabledBackground,
+              borderColor: voiceListening ? colors.accent : colors.border,
+            },
+            (!voiceAvailable || voiceButtonDisabled) && styles.actionDisabled,
+          ]}
+          onLongPress={() => {
+            holdToTalkActiveRef.current = true;
+            onStartVoiceInput();
+          }}
+          onPress={() => {
+            if (!holdToTalkActiveRef.current) {
+              onToggleVoiceInput();
+            }
+          }}
+          onPressOut={() => {
+            if (holdToTalkActiveRef.current) {
+              holdToTalkActiveRef.current = false;
+              onStopVoiceInput();
+              return;
+            }
+          }}
+          delayLongPress={400}
+          disabled={voiceButtonDisabled}
+        >
+          <MaterialIcons
+            name={voiceListening ? "fiber-manual-record" : "keyboard-voice"}
+            size={20}
+            color={voiceListening ? colors.buttonTextOnAction : colors.textPrimary}
+          />
+        </Pressable>
         <TouchableOpacity
           accessibilityLabel="Send message"
           style={[
-            styles.sendButton,
-            { backgroundColor: canSend ? colors.accent : colors.disabledBackground },
+            styles.actionButton,
+            { backgroundColor: canSend ? colors.accent : colors.disabledBackground, borderColor: canSend ? colors.accent : colors.disabledBackground },
           ]}
           onPress={onSend}
           disabled={!canSend}
@@ -168,7 +268,7 @@ export function ChatComposer({
 
 const styles = StyleSheet.create({
   composer: {
-    alignItems: "flex-end",
+    alignItems: "center",
     borderTopWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
     gap: Spacing.sm,
@@ -176,13 +276,13 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.sm,
   },
   composerInputRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
+    alignItems: "center",
     borderRadius: Radius.xl,
     borderWidth: 1,
     flex: 1,
+    flexDirection: "row",
     paddingLeft: Spacing.lg,
-    paddingRight: Spacing.xs,
+    paddingRight: Spacing.md,
     paddingVertical: Spacing.xs,
   },
   input: {
@@ -194,23 +294,24 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === "ios" ? 11 : 9,
     paddingBottom: Platform.OS === "ios" ? 11 : 9,
   },
-  sendButton: {
-    width: 38,
-    height: 38,
+  voiceDot: {
     borderRadius: Radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    marginLeft: Spacing.sm,
-    marginBottom: 1,
+    height: 10,
+    marginRight: Spacing.sm,
+    width: 10,
   },
-  resetButton: {
+  composerActions: {
     alignItems: "center",
-    borderRadius: Radius.lg,
+    flexDirection: "row",
+    gap: Spacing.sm,
+  },
+  actionButton: {
+    alignItems: "center",
+    borderRadius: Radius.full,
     borderWidth: 1,
-    height: 44,
+    height: 46,
     justifyContent: "center",
-    marginBottom: 1,
-    width: 44,
+    width: 46,
   },
   actionDisabled: {
     opacity: 0.52,

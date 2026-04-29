@@ -1,4 +1,4 @@
-import { MaterialIcons } from "@expo/vector-icons";
+﻿import { MaterialIcons } from "@expo/vector-icons";
 import * as Linking from "expo-linking";
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
@@ -7,6 +7,7 @@ import { useAppLanguage } from "../../../components/app-language-provider";
 import { useAppTheme } from "../../../components/app-theme-provider";
 import { FontWeight, Radius, Spacing, TypeScale } from "../../../constants/design-system";
 import type { StoredHomePlan } from "../../../utils/home-chat-storage";
+import { formatPlannerDaysLabel, formatPlannerTravelersLabel } from "../display-format";
 import { getTransportIconName } from "../helpers";
 
 type PlanCardProps = {
@@ -42,20 +43,41 @@ export function PlanCard({
 }: PlanCardProps) {
   const { colors } = useAppTheme();
   const { language } = useAppLanguage();
+  const displayDays = formatPlannerDaysLabel(latestPlan.days, language);
+  const displayTravelers = formatPlannerTravelersLabel(latestPlan.travelers, language);
   const hasVisiblePrice = (value?: string) => !!value?.match(/\d/);
   const hasBookableOptions =
     latestPlan.plan.transportOptions.some((option) => hasVisiblePrice(option.price)) ||
     latestPlan.plan.stayOptions.some((stay) => hasVisiblePrice(stay.pricePerNight));
 
-  const labels = language === "en"
-    ? { transport: "Transport", stay: "Accommodation", days: "Verified trip structure", profileTip: "Verification", viewOffer: "View offer", buyTicket: "Buy ticket", bookStay: "Book stay", noTransport: "No reliable live transport offers were found for this search yet.", noStay: "No reliable live accommodation offers were found for this search yet.", transportPriceHint: "Exact fare for the selected search", stayPriceHint: "Exact total for the selected dates", saving: "Saving...", saved: "Saved", saveTrip: "Save trip", payReserve: "Pay & reserve", bookNow: "Book now" }
-    : language === "de"
+  const labels = language === "bg"
+    ? {
+        transport: "Транспорт",
+        stay: "Настаняване",
+        days: "Проверена структура на пътуването",
+        profileTip: "Проверка",
+        viewOffer: "Офертата",
+        buyTicket: "Купи билет",
+        bookStay: "Резервирай",
+        noTransport: "Все още няма достатъчно надеждни live транспортни оферти за това търсене.",
+        noStay: "Все още няма достатъчно надеждни live оферти за настаняване за това търсене.",
+        transportPriceHint: "Точна цена за това търсене",
+        stayPriceHint: "Обща цена за избраните дати; потвърди финалната сума при доставчика.",
+        saving: "Запазване...",
+        saved: "Запазено",
+        saveTrip: "Запази пътуването",
+        payReserve: "Плати и резервирай",
+        bookNow: "Резервирай",
+      }
+    : language === "en"
+      ? { transport: "Transport", stay: "Accommodation", days: "Verified trip structure", profileTip: "Verification", viewOffer: "View offer", buyTicket: "Buy ticket", bookStay: "Book stay", noTransport: "No reliable live transport offers were found for this search yet.", noStay: "No reliable live accommodation offers were found for this search yet.", transportPriceHint: "Exact fare for the selected search", stayPriceHint: "Exact total for the selected dates", saving: "Saving...", saved: "Saved", saveTrip: "Save trip", payReserve: "Pay & reserve", bookNow: "Book now" }
+      : language === "de"
       ? { transport: "Transport", stay: "Unterkunft", days: "Verifizierte Reisestruktur", profileTip: "Verifizierung", viewOffer: "Angebot", buyTicket: "Ticket kaufen", bookStay: "Buchen", noTransport: "Fur diese Suche wurden noch keine verlasslichen Live-Transportangebote gefunden.", noStay: "Fur diese Suche wurden noch keine verlasslichen Live-Unterkunfte gefunden.", transportPriceHint: "Exakter Preis fur diese Suche", stayPriceHint: "Exakter Gesamtpreis fur die gewahlten Daten", saving: "Wird gespeichert...", saved: "Gespeichert", saveTrip: "Reise speichern", payReserve: "Bezahlen & reservieren", bookNow: "Jetzt buchen" }
       : language === "es"
-        ? { transport: "Transporte", stay: "Alojamiento", days: "Estructura verificada del viaje", profileTip: "Verificación", viewOffer: "Ver oferta", buyTicket: "Comprar billete", bookStay: "Reservar", noTransport: "Todavia no se encontraron ofertas fiables de transporte en vivo para esta busqueda.", noStay: "Todavia no se encontraron ofertas fiables de alojamiento en vivo para esta busqueda.", transportPriceHint: "Tarifa exacta para esta búsqueda", stayPriceHint: "Total exacto para las fechas elegidas", saving: "Guardando...", saved: "Guardado", saveTrip: "Guardar viaje", payReserve: "Pagar y reservar", bookNow: "Reservar ahora" }
+        ? { transport: "Transporte", stay: "Alojamiento", days: "Estructura verificada del viaje", profileTip: "VerificaciГіn", viewOffer: "Ver oferta", buyTicket: "Comprar billete", bookStay: "Reservar", noTransport: "Todavia no se encontraron ofertas fiables de transporte en vivo para esta busqueda.", noStay: "Todavia no se encontraron ofertas fiables de alojamiento en vivo para esta busqueda.", transportPriceHint: "Tarifa exacta para esta bГєsqueda", stayPriceHint: "Total exacto para las fechas elegidas", saving: "Guardando...", saved: "Guardado", saveTrip: "Guardar viaje", payReserve: "Pagar y reservar", bookNow: "Reservar ahora" }
         : language === "fr"
-          ? { transport: "Transport", stay: "Hébergement", days: "Structure verifiée du voyage", profileTip: "Vérification", viewOffer: "Voir l'offre", buyTicket: "Acheter", bookStay: "Réserver", noTransport: "Aucune offre fiable de transport en direct n'a encore ete trouvee pour cette recherche.", noStay: "Aucune offre fiable d'hebergement en direct n'a encore ete trouvee pour cette recherche.", transportPriceHint: "Tarif exact pour cette recherche", stayPriceHint: "Total exact pour les dates choisies", saving: "Enregistrement...", saved: "Enregistré", saveTrip: "Enregistrer le voyage", payReserve: "Payer et réserver", bookNow: "Réserver" }
-          : { transport: "Транспорт", stay: "Настаняване", days: "Проверена структура на пътуването", profileTip: "Проверка", viewOffer: "Офертата", buyTicket: "Купи билет", bookStay: "Резервирай", noTransport: "Все още няма достатъчно надеждни live транспортни оферти за това търсене.", noStay: "Все още няма достатъчно надеждни live оферти за настаняване за това търсене.", transportPriceHint: "Точна цена за това търсене", stayPriceHint: "Точна обща цена за избраните дати", saving: "Запазване...", saved: "Запазено", saveTrip: "Запази пътуването", payReserve: "Плати и резервирай", bookNow: "Резервирай" };
+          ? { transport: "Transport", stay: "HГ©bergement", days: "Structure verifiГ©e du voyage", profileTip: "VГ©rification", viewOffer: "Voir l'offre", buyTicket: "Acheter", bookStay: "RГ©server", noTransport: "Aucune offre fiable de transport en direct n'a encore ete trouvee pour cette recherche.", noStay: "Aucune offre fiable d'hebergement en direct n'a encore ete trouvee pour cette recherche.", transportPriceHint: "Tarif exact pour cette recherche", stayPriceHint: "Total exact pour les dates choisies", saving: "Enregistrement...", saved: "EnregistrГ©", saveTrip: "Enregistrer le voyage", payReserve: "Payer et rГ©server", bookNow: "RГ©server" }
+          : { transport: "Transport", stay: "Stay", days: "Verified trip structure", profileTip: "Verification", viewOffer: "View offer", buyTicket: "Buy ticket", bookStay: "Book stay", noTransport: "No reliable live transport offers were found for this search yet.", noStay: "No reliable live accommodation offers were found for this search yet.", transportPriceHint: "Exact fare for the selected search", stayPriceHint: "Exact total for the selected dates", saving: "Saving...", saved: "Saved", saveTrip: "Save trip", payReserve: "Pay & reserve", bookNow: "Book now" };
   const providerLabel =
     language === "bg"
       ? "Доставчик"
@@ -87,13 +109,13 @@ export function PlanCard({
             {latestPlan.plan.title}
           </Text>
           <Text style={[styles.planMeta, { color: colors.textSecondary }]}>
-            {latestPlan.destination} • {latestPlan.days} • {latestPlan.budget}
+            {[latestPlan.destination, displayDays, latestPlan.budget].filter(Boolean).join(" • ")}
           </Text>
-          {[latestPlan.travelers, latestPlan.transportPreference, latestPlan.timing]
+          {[displayTravelers, latestPlan.transportPreference, latestPlan.timing]
             .filter(Boolean)
             .length > 0 ? (
             <Text style={[styles.planMetaSecondary, { color: colors.textMuted }]}>
-              {[latestPlan.travelers, latestPlan.transportPreference, latestPlan.timing]
+              {[displayTravelers, latestPlan.transportPreference, latestPlan.timing]
                 .filter(Boolean)
                 .join(" • ")}
             </Text>
@@ -252,7 +274,7 @@ export function PlanCard({
               ) : null}
             </View>
             <Text style={[styles.optionRoute, { color: colors.textSecondary }]}>
-              {stay.type} • {stay.area}
+              {[stay.type, stay.area].filter(Boolean).join(" • ")}
             </Text>
             {hasVisiblePrice(stay.pricePerNight) ? (
               <Text style={[styles.optionMeta, { color: colors.textMuted }]}>
@@ -675,3 +697,4 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
 });
+

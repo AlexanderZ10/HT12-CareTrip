@@ -7,7 +7,7 @@ import { searchFreeHotels } from "../travel-providers/free-hotels";
 import { buildStaySearchLinkOffers } from "../travel-providers/stay-links";
 import { buildTransportSearchLinkOffers } from "../travel-providers/transport-links";
 import { callAI, getAIApiKey } from "./ai";
-import { normalizeBudgetToEuro } from "./currency";
+import { convertBudgetToEuroForSearch, normalizeBudgetToEuro } from "./currency";
 import { sanitizeString } from "./sanitize";
 import type { DiscoverProfile } from "./trip-recommendations";
 import type { AppLanguage } from "./translations";
@@ -60,6 +60,7 @@ export type SearchTravelOffersInput = {
   destination: string;
   language?: AppLanguage;
   notes?: string;
+  origin?: string;
   profile: DiscoverProfile;
   timing: string;
   transportPreference: string;
@@ -414,7 +415,9 @@ function normalizeOfferMode(value: string): TransportPreferenceKind {
 
 function resolveLocaleContext(input: SearchTravelOffersInput) {
   const language = normalizeLanguage(input.language);
-  const normalizedOrigin = normalizeLooseText(input.profile.personalProfile.homeBase || "");
+  const normalizedOrigin = normalizeLooseText(
+    sanitizeString(input.origin || input.profile.personalProfile.homeBase || "")
+  );
   const matchedMarket =
     MARKET_HINTS.find((entry) =>
       entry.terms.some((term) => normalizedOrigin.includes(normalizeLooseText(term)))
@@ -1097,12 +1100,39 @@ function toTravelDateParts(isoDate: string) {
   };
 }
 
+function getTripOrigin(input: SearchTravelOffersInput) {
+  return sanitizeString(input.origin || input.profile.personalProfile.homeBase, "Sofia, Bulgaria");
+}
+
+function getTripBio(input: SearchTravelOffersInput) {
+  return sanitizeString(input.profile.personalProfile.aboutMe, "Not provided");
+}
+
+function getStayStyleFallback(input: SearchTravelOffersInput) {
+  return sanitizeString(input.profile.personalProfile.stayStyle, "Mixed");
+}
+
+function getOriginAirportBridgeInstruction(input: SearchTravelOffersInput) {
+  const transportPreference = normalizeTransportPreference(input.transportPreference);
+
+  if (transportPreference !== "flight" && transportPreference !== "any") {
+    return "No special airport bridge requested.";
+  }
+
+  return [
+    `Use ${getTripOrigin(input)} as the start city for ticket search.`,
+    "If that city has no airport or weak flight availability, find the nearest practical airport or major transport hub.",
+    "Include the ground transfer from the start city to that airport/hub before the flight, instead of pretending the city has direct flights.",
+  ].join(" ");
+}
+
 function buildDeterministicSearchLinks(
   input: SearchTravelOffersInput,
   searchWindow: ReturnType<typeof resolveSearchWindow>
 ) {
   const adults = Math.max(extractCount(input.travelers, 1), 1);
   const currency = "EUR";
+  const originQuery = getTripOrigin(input);
 
   return {
     stayOptions: buildStaySearchLinkOffers({
@@ -1111,14 +1141,14 @@ function buildDeterministicSearchLinks(
       checkOutDate: toTravelDateParts(searchWindow.returnDate),
       currency,
       destinationQuery: input.destination,
-      originQuery: input.profile.personalProfile.homeBase || "Sofia, Bulgaria",
+      originQuery,
       transportPreference: input.transportPreference,
     }),
     transportOptions: buildTransportSearchLinkOffers({
       currency,
       departureDate: searchWindow.departureDate,
       destinationQuery: input.destination,
-      originQuery: input.profile.personalProfile.homeBase || "Sofia, Bulgaria",
+      originQuery,
       transportPreference: input.transportPreference,
     }),
   };
@@ -1423,6 +1453,7 @@ function buildGroundedExactOfferPrompt(params: {
     `- Budget: ${params.budget}`,
     `- Preferred transport: ${params.transportPreference}`,
     `- Stay style: ${params.stayStyle}`,
+    "- If the origin city has no airport and transport is flight-based, include a realistic ground transfer to the nearest practical airport or hub before the flight.",
     "",
     "Find up to 4 transport offers and up to 4 stay offers.",
     "",
@@ -1760,7 +1791,7 @@ async function searchAIQuotedStayOffers(
           sourceLabel: offer.sourceLabel,
           type: offer.type,
         })),
-        stayStyle: input.profile.personalProfile.stayStyle || "Mixed",
+        stayStyle: getStayStyleFallback(input),
         travelers: input.travelers,
       }),
       systemPrompt: buildStayQuoteSystemPrompt(language),
@@ -1808,9 +1839,9 @@ async function searchGroundedExactPricedOffers(
         budget: input.budget,
         departureDate: searchWindow.departureDate,
         destination: input.destination,
-        origin: input.profile.personalProfile.homeBase || "Sofia, Bulgaria",
+        origin: getTripOrigin(input),
         returnDate: searchWindow.returnDate,
-        stayStyle: input.profile.personalProfile.stayStyle || "Mixed",
+        stayStyle: getStayStyleFallback(input),
         transportPreference: input.transportPreference,
         travelers: input.travelers,
       }),
@@ -2310,6 +2341,9 @@ function buildFallbackGroundingPrompt(
     "Need realistic transport and stay options with concrete companies, exact routes, and valid HTTPS booking URLs when available.",
     "All prices must be in EUR.",
     "For stays, prefer named hotels or apartments with provider lookup URLs for the exact selected dates.",
+    "Use the user's origin city as the start point for tickets.",
+    "If the user wants to fly but the origin city has no airport or poor flight coverage, find a realistic transfer to the nearest practical airport or major hub, then the flight onward.",
+    "Use the bio to personalize useful on-trip suggestions, but do not invent ticket prices from it.",
     "If a price is uncertain, use null. Never use 0 as a placeholder price.",
     "If a detail is uncertain, keep the note conservative and practical.",
     "Keep notes short and practical.",
@@ -2319,7 +2353,7 @@ function buildFallbackGroundingPrompt(
     "TRANSPORT",
     "STAY",
     "",
-    `Origin: ${input.profile.personalProfile.homeBase || "Sofia, Bulgaria"}`,
+    `Origin: ${getTripOrigin(input)}`,
     `Destination: ${input.destination}`,
     `Budget: ${input.budget}`,
     `Days: ${input.days}`,
@@ -2328,11 +2362,12 @@ function buildFallbackGroundingPrompt(
     `Timing: ${input.timing}`,
     `Date window: ${searchWindow.windowLabel}`,
     `Trip style: ${input.tripStyle || "Not provided"}`,
-    `Stay style: ${input.profile.personalProfile.stayStyle || "Смесено"}`,
+    `Origin logistics rule: ${getOriginAirportBridgeInstruction(input)}`,
+    `Stay style: ${getStayStyleFallback(input)}`,
     `Must have notes: ${input.notes || "Not provided"}`,
     `Interests: ${interests}`,
     `Accessibility: ${assistance}`,
-    `About me: ${input.profile.personalProfile.aboutMe || "Not provided"}`,
+    `Bio: ${getTripBio(input)}`,
   ].join("\n");
 }
 
@@ -2655,19 +2690,21 @@ async function searchTravelOffersFallback(
 }
 
 export async function searchTravelOffers(input: SearchTravelOffersInput) {
+  const convertedBudget = await convertBudgetToEuroForSearch(input.budget, input.language);
+  const searchInput = { ...input, budget: convertedBudget };
   const searchWindow = resolveSearchWindow(input.timing, input.days);
 
   if (!shouldUseFunctionsBackend()) {
     // Fallback mode: generate offers directly via Gemini
     try {
-      const fallbackResult = await searchTravelOffersFallback(input, searchWindow);
-      return await ensureDeterministicSearchLinks(input, searchWindow, {
+      const fallbackResult = await searchTravelOffersFallback(searchInput, searchWindow);
+      return await ensureDeterministicSearchLinks(searchInput, searchWindow, {
         ...fallbackResult,
-        stayOptions: sortStayOffers(fallbackResult.stayOptions, input, searchWindow),
-        transportOptions: sortTransportOffers(fallbackResult.transportOptions, input),
+        stayOptions: sortStayOffers(fallbackResult.stayOptions, searchInput, searchWindow),
+        transportOptions: sortTransportOffers(fallbackResult.transportOptions, searchInput),
       });
     } catch {
-      return await ensureDeterministicSearchLinks(input, searchWindow, {
+      return await ensureDeterministicSearchLinks(searchInput, searchWindow, {
         notes: ["Using direct provider search links."],
         searchContext: searchWindow,
         stayOptions: [],
@@ -2677,7 +2714,7 @@ export async function searchTravelOffers(input: SearchTravelOffersInput) {
   }
 
   try {
-    const localeContext = resolveLocaleContext(input);
+    const localeContext = resolveLocaleContext(searchInput);
     const callable = httpsCallable<
       {
         adults: number;
@@ -2693,15 +2730,15 @@ export async function searchTravelOffers(input: SearchTravelOffersInput) {
       LiveTravelOffersResponse
     >(functions, "searchOffers");
     const response = await callable({
-      adults: extractCount(input.travelers, 1),
+      adults: extractCount(searchInput.travelers, 1),
       departureDate: searchWindow.departureDate,
-      destinationQuery: input.destination,
+      destinationQuery: searchInput.destination,
       locale: localeContext.locale,
       market: localeContext.market,
-      originQuery: input.profile.personalProfile.homeBase || "Sofia, Bulgaria",
+      originQuery: getTripOrigin(searchInput),
       returnDate: searchWindow.returnDate,
-      stayStyle: input.profile.personalProfile.stayStyle || "Смесено",
-      transportPreference: input.transportPreference,
+      stayStyle: getStayStyleFallback(searchInput),
+      transportPreference: searchInput.transportPreference,
     });
     const data = response.data as unknown as Record<string, unknown>;
 
@@ -2719,18 +2756,18 @@ export async function searchTravelOffers(input: SearchTravelOffersInput) {
     // If Cloud Functions returned empty results, use Gemini fallback
     if (transportOptions.length === 0 && stayOptions.length === 0) {
       try {
-        const fallbackResult = await searchTravelOffersFallback(input, searchWindow);
-        return await ensureDeterministicSearchLinks(input, searchWindow, {
+        const fallbackResult = await searchTravelOffersFallback(searchInput, searchWindow);
+        return await ensureDeterministicSearchLinks(searchInput, searchWindow, {
           ...fallbackResult,
-          stayOptions: sortStayOffers(fallbackResult.stayOptions, input, searchWindow),
-          transportOptions: sortTransportOffers(fallbackResult.transportOptions, input),
+          stayOptions: sortStayOffers(fallbackResult.stayOptions, searchInput, searchWindow),
+          transportOptions: sortTransportOffers(fallbackResult.transportOptions, searchInput),
         });
       } catch {
         // Fall through to return whatever we have (empty)
       }
     }
 
-    return await ensureDeterministicSearchLinks(input, searchWindow, {
+    return await ensureDeterministicSearchLinks(searchInput, searchWindow, {
       notes: Array.isArray(data.notes)
         ? data.notes.filter((item): item is string => typeof item === "string")
         : [],
@@ -2752,21 +2789,21 @@ export async function searchTravelOffers(input: SearchTravelOffersInput) {
           searchWindow.windowLabel
         ),
       },
-      stayOptions: sortStayOffers(stayOptions, input, searchWindow),
-      transportOptions: sortTransportOffers(transportOptions, input),
+      stayOptions: sortStayOffers(stayOptions, searchInput, searchWindow),
+      transportOptions: sortTransportOffers(transportOptions, searchInput),
     });
   } catch {
     // Cloud Functions failed — fall back to Gemini for offers + price lookup
     try {
-      const fallbackResult = await searchTravelOffersFallback(input, searchWindow);
+      const fallbackResult = await searchTravelOffersFallback(searchInput, searchWindow);
 
-      return await ensureDeterministicSearchLinks(input, searchWindow, {
+      return await ensureDeterministicSearchLinks(searchInput, searchWindow, {
         ...fallbackResult,
-        stayOptions: sortStayOffers(fallbackResult.stayOptions, input, searchWindow),
-        transportOptions: sortTransportOffers(fallbackResult.transportOptions, input),
+        stayOptions: sortStayOffers(fallbackResult.stayOptions, searchInput, searchWindow),
+        transportOptions: sortTransportOffers(fallbackResult.transportOptions, searchInput),
       });
     } catch {
-      return await ensureDeterministicSearchLinks(input, searchWindow, {
+      return await ensureDeterministicSearchLinks(searchInput, searchWindow, {
         notes: ["Provider search links added as fallback."],
         searchContext: searchWindow,
         stayOptions: [],

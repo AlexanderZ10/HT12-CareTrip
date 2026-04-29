@@ -4,6 +4,7 @@ import { MaterialIcons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import {
   ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,7 +14,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -54,6 +55,7 @@ const TIMING_FAST = { duration: 220, easing: Easing.out(Easing.quad) };
 export default function Register() {
   const router = useRouter();
   const { colors } = useAppTheme();
+  const insets = useSafeAreaInsets();
 
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -66,6 +68,7 @@ export default function Register() {
   const [captchaAnswer, setCaptchaAnswer] = useState("");
   const [errors, setErrors] = useState<AuthErrors>({});
   const [loading, setLoading] = useState(false);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -81,6 +84,23 @@ export default function Register() {
     cardTranslateY.value = withDelay(160, withTiming(0, TIMING_FAST));
     cardOpacity.value = withDelay(160, withTiming(1, { duration: 320 }));
   }, [cardOpacity, cardTranslateY, logoOpacity, logoScale]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const showSubscription = Keyboard.addListener(showEvent, () => {
+      setIsKeyboardVisible(true);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setIsKeyboardVisible(false);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   const logoAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: logoScale.value }],
@@ -278,12 +298,23 @@ export default function Register() {
 
       <KeyboardAvoidingView
         style={styles.keyboardView}
-        behavior="padding"
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={0}
       >
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            Platform.OS === "android" && isKeyboardVisible
+              ? styles.scrollContentKeyboardOpen
+              : null,
+            {
+              paddingBottom: isKeyboardVisible
+                ? Spacing.lg
+                : insets.bottom + Spacing["3xl"],
+            },
+          ]}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           showsVerticalScrollIndicator={false}
         >
           {/* Logo */}
@@ -502,7 +533,11 @@ function createStyles(colors: ReturnType<typeof useAppTheme>["colors"]) {
       justifyContent: "center",
       alignItems: "center",
       paddingHorizontal: Spacing.lg,
-      paddingVertical: Spacing["3xl"],
+      paddingTop: Spacing["3xl"],
+    },
+    scrollContentKeyboardOpen: {
+      justifyContent: "flex-start",
+      paddingTop: Spacing.xl,
     },
     logoWrap: {
       alignItems: "center",

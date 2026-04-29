@@ -322,10 +322,9 @@ export default function OnboardingScreen() {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
-        <View style={[styles.hero, { backgroundColor: colors.heroAlt }]}>
-          <Text style={[styles.kicker, { color: colors.textMuted }]}>{t("onboarding.kicker")}</Text>
-          <Text style={[styles.title, { color: colors.heroText }]}>{t("onboarding.title")}</Text>
-          <Text style={[styles.subtitle, { color: colors.heroText }]}>{t("onboarding.subtitle")}</Text>
+        <View style={[styles.hero, { backgroundColor: colors.accent }]}>
+          <Text style={[styles.kicker, { color: colors.buttonTextOnAction }]}>{t("onboarding.kicker")}</Text>
+          <Text style={[styles.title, { color: colors.buttonTextOnAction }]}>{t("onboarding.title")}</Text>
         </View>
 
       <View style={[styles.card, { backgroundColor: colors.card }]}>
@@ -477,10 +476,6 @@ const styles = StyleSheet.create({
   },
   title: {
     ...TypeScale.displayMd,
-    marginBottom: Spacing.sm,
-  },
-  subtitle: {
-    ...TypeScale.titleSm,
   },
   card: {
     borderRadius: Radius.xl,

@@ -2,16 +2,18 @@ import { MaterialIcons } from "@expo/vector-icons";
 import { useIsFocused } from "@react-navigation/native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -35,6 +37,8 @@ import {
   shadow,
 } from "../../constants/design-system";
 import { auth, db } from "../../firebase";
+import { cityMatchesSearch, getCitiesForCountry } from "../../utils/cities";
+import { getCountriesSorted, getCountryName, type Country } from "../../utils/countries";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
 import {
   buildSavedTripFromDiscover,
@@ -45,18 +49,23 @@ import {
 import {
   DEFAULT_SETTLEMENT_MAP_ZOOM,
   enrichDiscoverTrips,
+  filterDiscoverTripsByFilters,
   GEMINI_MODEL,
   extractDiscoverProfile,
   generateTripsWithGemini,
+  getDiscoverProfileSignature,
+  getDiscoverSearchFiltersSignature,
   getLocalDateKey,
   isTripGenerationError,
   getTripGenerationErrorMessage,
   parseStoredDiscoverData,
+  resolveDiscoverOriginCoordinates,
+  type DiscoverSearchFilters,
   type DiscoverProfile,
+  type DiscoverSettlementType,
   type StoredDiscoverData,
   type TripRecommendation,
 } from "../../utils/trip-recommendations";
-import { getLanguageLocale } from "../../utils/translations";
 
 type ExpandedPreviewState =
   | {
@@ -70,23 +79,6 @@ type ExpandedPreviewState =
     }
   | null;
 
-function formatGeneratedDate(
-  value: number | null,
-  locale: string,
-  fallbackText: string
-) {
-  if (!value) {
-    return fallbackText;
-  }
-
-  return new Intl.DateTimeFormat(locale, {
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    month: "short",
-  }).format(new Date(value));
-}
-
 function getTripImageUrls(trip: TripRecommendation) {
   if (trip.imageUrls?.length) {
     return trip.imageUrls;
@@ -95,8 +87,108 @@ function getTripImageUrls(trip: TripRecommendation) {
   return trip.imageUrl ? [trip.imageUrl] : [];
 }
 
+function parseDistanceInput(value: string) {
+  const normalizedValue = value.trim().replace(",", ".");
+
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const parsedValue = Number(normalizedValue);
+  if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+    return null;
+  }
+
+  return parsedValue;
+}
+
+function parseCountriesInput(value: string) {
+  return value
+    .split(/[,;\n]/)
+    .map((country) => country.trim())
+    .filter((country, index, array) => country && array.indexOf(country) === index);
+}
+
+function formatCountriesInput(countries: string[]) {
+  return countries.join(", ");
+}
+
+function getDefaultDiscoverFilters(profile: DiscoverProfile | null): DiscoverSearchFilters {
+  return {
+    countries: [],
+    maxDistanceKm: null,
+    minDistanceKm: null,
+    originLabel: profile?.personalProfile.homeBase || "",
+    originLatitude: null,
+    originLongitude: null,
+    settlementTypes: ["city", "village"],
+  };
+}
+
+function getDiscoverUiCopy(language: string) {
+  if (language === "bg") {
+    return {
+      activeFiltersLabel: "Активно търсене",
+      countriesHint: "Пример: България, Гърция, Румъния",
+      countriesLabel: "Държави",
+      currentOriginButton: "Настояща от профила",
+      emptyState:
+        "Няма намерени места по тези условия. Пробвай с по-широк диапазон или повече държави.",
+      maxDistanceLabel: "До км",
+      minDistanceLabel: "От км",
+      originHint: "Например: Пловдив, България",
+      originLabel: "Начална точка",
+      settlementTypesLabel: "Тип на дестинацията",
+      settlementTypeCity: "Градове",
+      settlementTypeVillage: "Села",
+      originPickerEmpty: "Избери държава",
+      originPickerSelectCountry: "Избери държава",
+      originPickerSelectCity: "Избери град",
+      originPickerSearchCountry: "Търси държава...",
+      originPickerSearchCity: "Търси град...",
+      profileOriginLabel: "Текуща точка от профила",
+      refreshButton: "Обнови",
+      searchButton: "Търси",
+      searchCardTitle: "Търсене по разстояние и държави",
+      searchErrorInvalidRange: "Минималното разстояние трябва да е по-малко или равно на максималното.",
+      searchErrorMissingOrigin: "Добави начална точка, за да търсим правилно по разстояние.",
+      searchErrorOriginNotFound: "Не успях да намеря координати за тази начална точка. Опитай с по-точен град или село.",
+    } as const;
+  }
+
+  return {
+    activeFiltersLabel: "Active search",
+    countriesHint: "Example: Bulgaria, Greece, Romania",
+    countriesLabel: "Countries",
+    currentOriginButton: "Current from profile",
+    emptyState:
+      "No places matched these filters. Try a wider distance range or more countries.",
+    maxDistanceLabel: "Max km",
+    minDistanceLabel: "Min km",
+    originHint: "Example: Plovdiv, Bulgaria",
+    originLabel: "Starting point",
+    settlementTypesLabel: "Destination type",
+    settlementTypeCity: "Cities",
+    settlementTypeVillage: "Villages",
+    originPickerEmpty: "Select country",
+    originPickerSelectCountry: "Select country",
+    originPickerSelectCity: "Select city",
+    originPickerSearchCountry: "Search country...",
+    originPickerSearchCity: "Search city...",
+    profileOriginLabel: "Current location from profile",
+    refreshButton: "Refresh",
+    searchButton: "Search",
+    searchCardTitle: "Search by distance and countries",
+    searchErrorInvalidRange: "Minimum distance must be less than or equal to maximum distance.",
+    searchErrorMissingOrigin: "Add a starting point so distance-based search can work.",
+    searchErrorOriginNotFound:
+      "We couldn't find coordinates for this starting point. Try a more specific city or village.",
+  } as const;
+}
+
 const MIN_MAP_LEVEL = 1;
 const MAX_MAP_LEVEL = 17;
+const MAX_DAILY_REFRESHES = 100;   
 const PREVIEW_MAP_ZOOM = DEFAULT_SETTLEMENT_MAP_ZOOM + 1;
 
 function clampValue(value: number, min: number, max: number) {
@@ -268,12 +360,21 @@ export default function DiscoverTabScreen() {
   const { colors } = useAppTheme();
   const { language, languageForPrompt, t } = useAppLanguage();
   const isFocused = useIsFocused();
+  const discoverCopy = getDiscoverUiCopy(language);
 
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<DiscoverProfile | null>(null);
   const [discoverData, setDiscoverData] = useState<StoredDiscoverData | null>(null);
+  const [originInput, setOriginInput] = useState("");
+  const [minDistanceInput, setMinDistanceInput] = useState("");
+  const [maxDistanceInput, setMaxDistanceInput] = useState("");
+  const [countriesInput, setCountriesInput] = useState("");
+  const [settlementTypesInput, setSettlementTypesInput] = useState<DiscoverSettlementType[]>([
+    "city",
+    "village",
+  ]);
   const [error, setError] = useState("");
   const [saveError, setSaveError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState("");
@@ -281,14 +382,106 @@ export default function DiscoverTabScreen() {
   const [savingTripKey, setSavingTripKey] = useState<string | null>(null);
   const [expandedPreview, setExpandedPreview] = useState<ExpandedPreviewState>(null);
   const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set());
+  const [originPickerVisible, setOriginPickerVisible] = useState(false);
+  const [originPickerStep, setOriginPickerStep] = useState<"country" | "city">("country");
+  const [originCountrySearch, setOriginCountrySearch] = useState("");
+  const [originCitySearch, setOriginCitySearch] = useState("");
+  const [selectedOriginCountryCode, setSelectedOriginCountryCode] = useState("");
+  const [selectedOriginCountryName, setSelectedOriginCountryName] = useState("");
   const previewImageUrls =
     expandedPreview?.kind === "image" ? getTripImageUrls(expandedPreview.trip) : [];
   const hasRequestedInitialTripsRef = useRef(false);
   const metadataRepairKeyRef = useRef<string | null>(null);
+  const hydratedFiltersSignatureRef = useRef<string | null>(null);
+  const incomingOriginAppliedRef = useRef<string | null>(null);
+
+  const incomingOriginParam = useLocalSearchParams<{ origin?: string | string[] }>().origin;
+  const incomingOrigin = Array.isArray(incomingOriginParam)
+    ? incomingOriginParam[0] ?? ""
+    : incomingOriginParam ?? "";
+
+  const sortedCountries = useMemo(() => getCountriesSorted(language), [language]);
+  const filteredOriginCountries = useMemo(() => {
+    const q = originCountrySearch.trim().toLowerCase();
+    if (!q) return sortedCountries;
+    return sortedCountries.filter((c) => getCountryName(c, language).toLowerCase().includes(q));
+  }, [originCountrySearch, language, sortedCountries]);
+  const originCitiesForSelected = useMemo(
+    () => getCitiesForCountry(selectedOriginCountryCode),
+    [selectedOriginCountryCode]
+  );
+  const filteredOriginCities = useMemo(() => {
+    const q = originCitySearch.trim();
+    if (!q) return originCitiesForSelected;
+    return originCitiesForSelected.filter((c) => cityMatchesSearch(c.name, q));
+  }, [originCitySearch, originCitiesForSelected]);
+
+  const originParts = originInput.split(", ");
+  const originCity = originParts.length >= 2 ? originParts[0] : "";
+  const originCountry = originParts.length >= 2 ? originParts.slice(1).join(", ") : originInput;
+
+  const handleSelectOriginCountry = (country: Country) => {
+    const countryName = getCountryName(country, language);
+    setSelectedOriginCountryCode(country.code);
+    setSelectedOriginCountryName(countryName);
+    setOriginCountrySearch("");
+    setOriginCitySearch("");
+    setOriginPickerStep("city");
+  };
+
+  const handleSelectOriginCity = (cityName: string) => {
+    const countryName = selectedOriginCountryName || originCountry;
+    if (countryName) {
+      setOriginInput(`${cityName}, ${countryName}`);
+    }
+    setOriginPickerVisible(false);
+    setOriginPickerStep("country");
+    setSelectedOriginCountryCode("");
+    setSelectedOriginCountryName("");
+    setOriginCountrySearch("");
+    setOriginCitySearch("");
+  };
+
+  const closeOriginPicker = () => {
+    setOriginPickerVisible(false);
+    setOriginPickerStep("country");
+    setSelectedOriginCountryCode("");
+    setSelectedOriginCountryName("");
+    setOriginCountrySearch("");
+    setOriginCitySearch("");
+  };
+
+  const openOriginPicker = () => {
+    setOriginPickerStep("country");
+    setOriginCountrySearch("");
+    setOriginCitySearch("");
+    setSelectedOriginCountryCode("");
+    setSelectedOriginCountryName("");
+    setOriginPickerVisible(true);
+  };
 
   const todayKey = getLocalDateKey();
-  const refreshUsedToday = discoverData?.lastRefreshDateKey === todayKey;
-  const locale = getLanguageLocale(language);
+  const currentProfileOrigin = profile?.personalProfile.homeBase.trim() ?? "";
+  const refreshCountToday =
+    discoverData?.lastRefreshDateKey === todayKey
+      ? discoverData.refreshCountForDate
+      : 0;
+  const refreshLimitReached = refreshCountToday >= MAX_DAILY_REFRESHES;
+
+  useEffect(() => {
+    const trimmed = incomingOrigin.trim();
+    if (!trimmed) {
+      return;
+    }
+    if (incomingOriginAppliedRef.current === trimmed) {
+      return;
+    }
+    if (!profile && !discoverData) {
+      return;
+    }
+    incomingOriginAppliedRef.current = trimmed;
+    setOriginInput(trimmed);
+  }, [discoverData, incomingOrigin, profile]);
 
   const toggleDetails = (tripId: string) => {
     setExpandedDetails((prev) => {
@@ -308,7 +501,8 @@ export default function DiscoverTabScreen() {
       nextUser: User,
       isManualRefresh: boolean,
       previousTrips: TripRecommendation[],
-      currentDiscoverData: StoredDiscoverData | null
+      currentDiscoverData: StoredDiscoverData | null,
+      filters: DiscoverSearchFilters
     ) => {
       try {
         setGenerating(true);
@@ -317,20 +511,33 @@ export default function DiscoverTabScreen() {
         const generatedTrips = await generateTripsWithGemini(
           profileData,
           previousTrips,
+          filters,
           languageForPrompt
         );
         const enrichedTrips = await enrichDiscoverTrips(generatedTrips.trips);
+        const matchingTrips = filterDiscoverTripsByFilters(enrichedTrips.trips, filters);
         const generatedAtMs = Date.now();
+        const currentRefreshCountForDate =
+          currentDiscoverData?.lastRefreshDateKey === todayKey
+            ? currentDiscoverData.refreshCountForDate
+            : 0;
+        const nextLastRefreshDateKey = isManualRefresh
+          ? todayKey
+          : currentDiscoverData?.lastRefreshDateKey ?? null;
+        const nextRefreshCountForDate = isManualRefresh
+          ? currentRefreshCountForDate + 1
+          : currentDiscoverData?.refreshCountForDate ?? 0;
 
         const nextDiscoverData: StoredDiscoverData = {
+          filters,
           generatedAtMs,
-          lastRefreshDateKey: isManualRefresh
-            ? todayKey
-            : currentDiscoverData?.lastRefreshDateKey ?? null,
+          lastRefreshDateKey: nextLastRefreshDateKey,
           language: languageForPrompt,
+          profileSignature: getDiscoverProfileSignature(profileData, filters),
+          refreshCountForDate: nextRefreshCountForDate,
           sourceModel: GEMINI_MODEL,
-          summary: generatedTrips.summary,
-          trips: enrichedTrips.trips,
+          summary: matchingTrips.length > 0 ? generatedTrips.summary : "",
+          trips: matchingTrips,
         };
 
         await setDoc(
@@ -354,7 +561,7 @@ export default function DiscoverTabScreen() {
         setGenerating(false);
       }
     },
-    [language, languageForPrompt, todayKey]
+    [discoverCopy.emptyState, language, languageForPrompt, todayKey]
   );
 
   const generateAndStoreTripsRef = useRef(generateAndStoreTrips);
@@ -408,6 +615,28 @@ export default function DiscoverTabScreen() {
 
           const storedDiscoverData = parseStoredDiscoverData(profileData);
           setDiscoverData(storedDiscoverData);
+          const storedFilters = storedDiscoverData?.filters ?? getDefaultDiscoverFilters(discoverProfile);
+          const storedFiltersSignature = getDiscoverSearchFiltersSignature(storedFilters);
+          if (hydratedFiltersSignatureRef.current !== storedFiltersSignature) {
+            hydratedFiltersSignatureRef.current = storedFiltersSignature;
+            setOriginInput(storedFilters.originLabel);
+            setMinDistanceInput(
+              storedFilters.minDistanceKm !== null ? String(storedFilters.minDistanceKm) : ""
+            );
+            setMaxDistanceInput(
+              storedFilters.maxDistanceKm !== null ? String(storedFilters.maxDistanceKm) : ""
+            );
+            setCountriesInput(formatCountriesInput(storedFilters.countries));
+            setSettlementTypesInput(
+              storedFilters.settlementTypes.length === 0
+                ? ["city", "village"]
+                : storedFilters.settlementTypes
+            );
+          }
+          const currentProfileSignature = getDiscoverProfileSignature(
+            discoverProfile,
+            storedFilters
+          );
 
           const tripsMissingMetadata =
             storedDiscoverData?.trips.filter(
@@ -473,12 +702,14 @@ export default function DiscoverTabScreen() {
               nextUser,
               false,
               [],
-              storedDiscoverData
+              storedDiscoverData,
+              storedFilters
             );
           } else if (
             isFocused &&
             storedDiscoverData?.trips.length &&
-            storedDiscoverData.language !== languageForPromptRef.current &&
+            (storedDiscoverData.language !== languageForPromptRef.current ||
+              storedDiscoverData.profileSignature !== currentProfileSignature) &&
             !hasRequestedInitialTripsRef.current
           ) {
             hasRequestedInitialTripsRef.current = true;
@@ -487,7 +718,8 @@ export default function DiscoverTabScreen() {
               nextUser,
               false,
               storedDiscoverData.trips,
-              storedDiscoverData
+              storedDiscoverData,
+              storedFilters
             );
           }
 
@@ -518,22 +750,76 @@ export default function DiscoverTabScreen() {
       user,
       false,
       discoverData.trips,
-      discoverData
+      discoverData,
+      discoverData.filters ?? getDefaultDiscoverFilters(profile)
     );
   }, [discoverData, generating, isFocused, languageForPrompt, profile, user]);
 
-  const handleRefresh = async () => {
-    if (!user || !profile || generating || refreshUsedToday) {
+  const handleSearch = async () => {
+    if (!user || !profile || generating || refreshLimitReached) {
       return;
     }
 
-    await generateAndStoreTrips(
-      profile,
-      user,
-      true,
-      discoverData?.trips ?? [],
-      discoverData
-    );
+    const nextMinDistanceKm = parseDistanceInput(minDistanceInput);
+    const nextMaxDistanceKm = parseDistanceInput(maxDistanceInput);
+    const nextOriginLabel = originInput.trim() || profile.personalProfile.homeBase || "";
+    const nextCountries = parseCountriesInput(countriesInput);
+
+    if (
+      nextMinDistanceKm !== null &&
+      nextMaxDistanceKm !== null &&
+      nextMinDistanceKm > nextMaxDistanceKm
+    ) {
+      setError(discoverCopy.searchErrorInvalidRange);
+      return;
+    }
+
+    if (
+      (nextMinDistanceKm !== null || nextMaxDistanceKm !== null || nextCountries.length > 0) &&
+      !nextOriginLabel
+    ) {
+      setError(discoverCopy.searchErrorMissingOrigin);
+      return;
+    }
+
+    const resolvedOriginCoordinates =
+      nextOriginLabel &&
+      (nextMinDistanceKm !== null || nextMaxDistanceKm !== null || nextCountries.length > 0)
+        ? await resolveDiscoverOriginCoordinates(nextOriginLabel)
+        : { latitude: null, longitude: null };
+
+    if (
+      nextOriginLabel &&
+      (nextMinDistanceKm !== null || nextMaxDistanceKm !== null) &&
+      (resolvedOriginCoordinates.latitude === null || resolvedOriginCoordinates.longitude === null)
+    ) {
+      setError(discoverCopy.searchErrorOriginNotFound);
+      return;
+    }
+
+    const nextSettlementTypes: DiscoverSettlementType[] =
+      settlementTypesInput.length === 0 ? ["city", "village"] : settlementTypesInput;
+
+    const nextFilters: DiscoverSearchFilters = {
+      countries: nextCountries,
+      maxDistanceKm: nextMaxDistanceKm,
+      minDistanceKm: nextMinDistanceKm,
+      originLabel: nextOriginLabel,
+      originLatitude: resolvedOriginCoordinates.latitude,
+      originLongitude: resolvedOriginCoordinates.longitude,
+      settlementTypes: nextSettlementTypes,
+    };
+
+    hydratedFiltersSignatureRef.current = getDiscoverSearchFiltersSignature(nextFilters);
+    await generateAndStoreTrips(profile, user, true, [], discoverData, nextFilters);
+  };
+
+  const handleUseProfileOrigin = () => {
+    if (!currentProfileOrigin) {
+      return;
+    }
+
+    setOriginInput(currentProfileOrigin);
   };
 
   const handleSaveTrip = async (trip: TripRecommendation) => {
@@ -598,34 +884,7 @@ export default function DiscoverTabScreen() {
             <Text style={[styles.brandTitle, { color: colors.textPrimary }]} numberOfLines={1}>
               {t("tab.discover")}
             </Text>
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={handleRefresh}
-              disabled={generating || refreshUsedToday}
-              style={[
-                styles.topBarIconButton,
-                (generating || refreshUsedToday) && styles.topBarIconButtonDisabled,
-              ]}
-            >
-              {generating ? (
-                <ActivityIndicator size="small" color={colors.textPrimary} />
-              ) : (
-                <MaterialIcons name="refresh" size={26} color={colors.textPrimary} />
-              )}
-            </TouchableOpacity>
           </Animated.View>
-
-          {/* Optional update timestamp under the title */}
-          <Text style={[styles.topBarSubtitle, { color: colors.textMuted }]}>
-            {discoverData?.generatedAtMs
-              ? `${t("discover.updated")} ${formatGeneratedDate(
-                  discoverData.generatedAtMs,
-                  locale,
-                  t("discover.notGeneratedYet")
-                )}`
-              : t("discover.aiCurated")}
-            {refreshUsedToday ? `  ·  ${t("discover.refreshTomorrow")}` : ""}
-          </Text>
 
           {/* Status messages */}
           {error ? (
@@ -664,21 +923,214 @@ export default function DiscoverTabScreen() {
             </View>
           ) : null}
 
-          {/* Summary callout */}
-          {discoverData?.summary ? (
-            <Animated.View
-              entering={FadeInDown.delay(100).duration(400).springify()}
+          <Animated.View
+            entering={FadeInDown.delay(80).duration(350).springify()}
+            style={[
+              styles.searchCard,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.searchCardTitle, { color: colors.textPrimary }]}>
+              {discoverCopy.searchCardTitle}
+            </Text>
+
+            <Text style={[styles.searchFieldLabel, { color: colors.textSecondary }]}>
+              {discoverCopy.originLabel}
+            </Text>
+            <Pressable
+              onPress={openOriginPicker}
               style={[
-                styles.summaryCard,
-                { backgroundColor: colors.cardAlt, borderColor: colors.border },
+                styles.searchInput,
+                styles.originSelector,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.border,
+                },
               ]}
             >
-              <MaterialIcons name="auto-awesome" size={16} color={colors.accent} />
-              <Text style={[styles.summaryText, { color: colors.textSecondary }]}>
-                {discoverData.summary}
+              <Text
+                style={[
+                  styles.originSelectorText,
+                  { color: originInput ? colors.textPrimary : colors.textMuted },
+                ]}
+                numberOfLines={1}
+              >
+                {originInput || discoverCopy.originPickerEmpty}
               </Text>
-            </Animated.View>
-          ) : null}
+              <MaterialIcons name="expand-more" size={20} color={colors.textMuted} />
+            </Pressable>
+            {currentProfileOrigin ? (
+              <View style={styles.profileOriginRow}>
+                <Text style={[styles.profileOriginText, { color: colors.textMuted }]}>
+                  {`${discoverCopy.profileOriginLabel}: ${currentProfileOrigin}`}
+                </Text>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={handleUseProfileOrigin}
+                  style={[
+                    styles.profileOriginButton,
+                    { backgroundColor: colors.cardAlt, borderColor: colors.border },
+                  ]}
+                >
+                  <MaterialIcons name="my-location" size={14} color={colors.accent} />
+                  <Text style={[styles.profileOriginButtonText, { color: colors.textPrimary }]}>
+                    {discoverCopy.currentOriginButton}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
+            <Text style={[styles.searchFieldLabel, { color: colors.textSecondary }]}>
+              {discoverCopy.settlementTypesLabel}
+            </Text>
+            <View style={styles.settlementTypesRow}>
+              {(["city", "village"] as DiscoverSettlementType[]).map((typeKey) => {
+                const checked = settlementTypesInput.includes(typeKey);
+                const label =
+                  typeKey === "city"
+                    ? discoverCopy.settlementTypeCity
+                    : discoverCopy.settlementTypeVillage;
+                return (
+                  <Pressable
+                    key={typeKey}
+                    onPress={() => {
+                      setSettlementTypesInput((prev) => {
+                        const has = prev.includes(typeKey);
+                        if (has) {
+                          const next = prev.filter((item) => item !== typeKey);
+                          return next.length === 0 ? prev : next;
+                        }
+                        return [...prev, typeKey];
+                      });
+                    }}
+                    style={[
+                      styles.settlementTypeOption,
+                      {
+                        backgroundColor: checked ? colors.accentMuted : colors.inputBackground,
+                        borderColor: checked ? colors.accent : colors.border,
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.settlementTypeCheckbox,
+                        {
+                          backgroundColor: checked ? colors.accent : "transparent",
+                          borderColor: checked ? colors.accent : colors.border,
+                        },
+                      ]}
+                    >
+                      {checked ? (
+                        <MaterialIcons
+                          name="check"
+                          size={14}
+                          color={colors.buttonTextOnAction}
+                        />
+                      ) : null}
+                    </View>
+                    <Text
+                      style={[
+                        styles.settlementTypeLabel,
+                        { color: colors.textPrimary },
+                      ]}
+                    >
+                      {label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <View style={styles.distanceRow}>
+              <View style={styles.distanceField}>
+                <Text style={[styles.searchFieldLabel, { color: colors.textSecondary }]}>
+                  {discoverCopy.minDistanceLabel}
+                </Text>
+                <TextInput
+                  value={minDistanceInput}
+                  onChangeText={setMinDistanceInput}
+                  placeholder="0"
+                  placeholderTextColor={colors.textMuted}
+                  keyboardType="numeric"
+                  style={[
+                    styles.searchInput,
+                    {
+                      backgroundColor: colors.inputBackground,
+                      borderColor: colors.border,
+                      color: colors.textPrimary,
+                    },
+                  ]}
+                />
+              </View>
+
+              <View style={styles.distanceField}>
+                <Text style={[styles.searchFieldLabel, { color: colors.textSecondary }]}>
+                  {discoverCopy.maxDistanceLabel}
+                </Text>
+                <TextInput
+                  value={maxDistanceInput}
+                  onChangeText={setMaxDistanceInput}
+                  placeholder="500"
+                  placeholderTextColor={colors.textMuted}
+                  keyboardType="numeric"
+                  style={[
+                    styles.searchInput,
+                    {
+                      backgroundColor: colors.inputBackground,
+                      borderColor: colors.border,
+                      color: colors.textPrimary,
+                    },
+                  ]}
+                />
+              </View>
+            </View>
+
+            <Text style={[styles.searchFieldLabel, { color: colors.textSecondary }]}>
+              {discoverCopy.countriesLabel}
+            </Text>
+            <TextInput
+              value={countriesInput}
+              onChangeText={setCountriesInput}
+              placeholder={discoverCopy.countriesHint}
+              placeholderTextColor={colors.textMuted}
+              multiline
+              style={[
+                styles.searchInput,
+                styles.countriesInput,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.border,
+                  color: colors.textPrimary,
+                },
+              ]}
+            />
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={handleSearch}
+              disabled={generating || refreshLimitReached}
+              style={[
+                styles.searchActionButton,
+                { backgroundColor: colors.accent },
+                (generating || refreshLimitReached) && styles.topBarIconButtonDisabled,
+              ]}
+            >
+              {generating ? (
+                <ActivityIndicator size="small" color={colors.buttonTextOnAction} />
+              ) : (
+                <>
+                  <MaterialIcons
+                    name="travel-explore"
+                    size={18}
+                    color={colors.buttonTextOnAction}
+                  />
+                  <Text style={[styles.searchActionText, { color: colors.buttonTextOnAction }]}>
+                    {discoverCopy.searchButton}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </Animated.View>
 
           {/* Loading state */}
           {generating && !discoverData?.trips.length ? (
@@ -696,6 +1148,24 @@ export default function DiscoverTabScreen() {
           ) : null}
 
           {/* Trip cards — image-first design */}
+          {!generating && discoverData && discoverData.trips.length === 0 ? (
+            <View
+              style={[
+                styles.loadingCard,
+                {
+                  backgroundColor: colors.cardAlt,
+                  borderColor: colors.border,
+                  borderWidth: 1,
+                },
+              ]}
+            >
+              <MaterialIcons name="search-off" size={28} color={colors.accent} />
+              <Text style={[styles.loadingTitle, { color: colors.textPrimary }]}>
+                {discoverCopy.emptyState}
+              </Text>
+            </View>
+          ) : null}
+
           {discoverData?.trips.map((trip, index) => {
             const sourceKey = getDiscoverSavedSourceKey(trip);
             const isSaved = savedSourceKeys.includes(sourceKey);
@@ -959,6 +1429,163 @@ export default function DiscoverTabScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Origin picker (country -> city) */}
+      <Modal
+        animationType="none"
+        transparent
+        visible={originPickerVisible}
+        onRequestClose={closeOriginPicker}
+      >
+        <Pressable
+          style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}
+          onPress={closeOriginPicker}
+        >
+          <Pressable
+            style={[
+              styles.originPickerSheet,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.originPickerHeader}>
+              {originPickerStep === "city" ? (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    setOriginPickerStep("country");
+                    setOriginCitySearch("");
+                  }}
+                  style={[
+                    styles.originPickerIconButton,
+                    { backgroundColor: colors.inputBackground, borderColor: colors.border },
+                  ]}
+                >
+                  <MaterialIcons name="arrow-back" size={18} color={colors.textPrimary} />
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.originPickerHeaderSpacer} />
+              )}
+              <Text style={[styles.originPickerTitle, { color: colors.textPrimary }]}>
+                {originPickerStep === "country"
+                  ? discoverCopy.originPickerSelectCountry
+                  : discoverCopy.originPickerSelectCity}
+              </Text>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={closeOriginPicker}
+                style={[
+                  styles.originPickerIconButton,
+                  { backgroundColor: colors.inputBackground, borderColor: colors.border },
+                ]}
+              >
+                <MaterialIcons name="close" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {originPickerStep === "country" ? (
+              <>
+                <TextInput
+                  style={[
+                    styles.originPickerSearchInput,
+                    {
+                      backgroundColor: colors.inputBackground,
+                      borderColor: colors.border,
+                      color: colors.textPrimary,
+                    },
+                  ]}
+                  placeholder={discoverCopy.originPickerSearchCountry}
+                  placeholderTextColor={colors.textMuted}
+                  value={originCountrySearch}
+                  onChangeText={setOriginCountrySearch}
+                  autoFocus
+                />
+                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                  {filteredOriginCountries.map((country) => {
+                    const name = getCountryName(country, language);
+                    const isSelected = (selectedOriginCountryName || originCountry) === name;
+                    return (
+                      <Pressable
+                        key={country.code}
+                        style={[
+                          styles.originPickerItem,
+                          isSelected && { backgroundColor: colors.cardAlt },
+                        ]}
+                        onPress={() => handleSelectOriginCountry(country)}
+                      >
+                        <Text
+                          style={[
+                            styles.originPickerItemText,
+                            { color: isSelected ? colors.accent : colors.textPrimary },
+                            isSelected && { fontWeight: FontWeight.semibold },
+                          ]}
+                        >
+                          {name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </>
+            ) : (
+              <>
+                <View
+                  style={[styles.originPickerCountryPill, { backgroundColor: colors.cardAlt }]}
+                >
+                  <MaterialIcons name="place" size={16} color={colors.accent} />
+                  <Text
+                    style={[styles.originPickerCountryPillText, { color: colors.accent }]}
+                    numberOfLines={1}
+                  >
+                    {selectedOriginCountryName || originCountry}
+                  </Text>
+                </View>
+                <TextInput
+                  style={[
+                    styles.originPickerSearchInput,
+                    {
+                      backgroundColor: colors.inputBackground,
+                      borderColor: colors.border,
+                      color: colors.textPrimary,
+                    },
+                  ]}
+                  placeholder={discoverCopy.originPickerSearchCity}
+                  placeholderTextColor={colors.textMuted}
+                  value={originCitySearch}
+                  onChangeText={setOriginCitySearch}
+                  autoFocus
+                />
+                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                  {filteredOriginCities.map((city, index) => {
+                    const name = city.name;
+                    const isSelected = originCity === name;
+                    return (
+                      <Pressable
+                        key={`${name}-${city.stateCode}-${index}`}
+                        style={[
+                          styles.originPickerItem,
+                          isSelected && { backgroundColor: colors.cardAlt },
+                        ]}
+                        onPress={() => handleSelectOriginCity(name)}
+                      >
+                        <Text
+                          style={[
+                            styles.originPickerItemText,
+                            { color: isSelected ? colors.accent : colors.textPrimary },
+                            isSelected && { fontWeight: FontWeight.semibold },
+                          ]}
+                        >
+                          {name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </>
   );
 }
@@ -985,7 +1612,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    minHeight: 48,
+    minHeight: 52,
     paddingTop: Spacing.sm,
   },
   brandTitle: {
@@ -994,7 +1621,17 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   topBarIconButton: {
-    padding: 4,
+    alignItems: "center",
+    borderRadius: Radius.full,
+    flexDirection: "row",
+    gap: Spacing.xs,
+    minHeight: 40,
+    paddingHorizontal: Spacing.md,
+    justifyContent: "center",
+  },
+  topBarActionText: {
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.bold,
   },
   topBarIconButtonDisabled: {
     opacity: 0.35,
@@ -1024,6 +1661,180 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
+  // Search filters
+  searchCard: {
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+    marginBottom: Spacing.lg,
+    padding: Spacing.lg,
+  },
+  searchCardTitle: {
+    ...TypeScale.titleSm,
+    fontWeight: FontWeight.bold,
+    marginBottom: Spacing.md,
+  },
+  searchFieldLabel: {
+    ...TypeScale.labelMd,
+    marginBottom: Spacing.xs,
+    marginTop: Spacing.sm,
+  },
+  searchInput: {
+    ...TypeScale.bodyMd,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    minHeight: 48,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  originSelector: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  originSelectorText: {
+    flex: 1,
+    ...TypeScale.bodyMd,
+  },
+  originPickerSheet: {
+    borderRadius: Radius.xl,
+    padding: Spacing.lg,
+    maxHeight: "80%",
+    width: "92%",
+    alignSelf: "center",
+    borderWidth: 1,
+    ...shadow("lg"),
+  },
+  originPickerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: Spacing.md,
+  },
+  originPickerTitle: {
+    ...TypeScale.titleMd,
+    flex: 1,
+    fontWeight: FontWeight.bold,
+    textAlign: "center",
+  },
+  originPickerIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  originPickerHeaderSpacer: {
+    width: 36,
+    height: 36,
+  },
+  originPickerSearchInput: {
+    borderWidth: 1,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginBottom: Spacing.md,
+    ...TypeScale.bodyMd,
+  },
+  originPickerCountryPill: {
+    alignItems: "center",
+    borderRadius: Radius.full,
+    flexDirection: "row",
+    gap: Spacing.xs,
+    marginBottom: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  originPickerCountryPillText: {
+    ...TypeScale.labelLg,
+    flex: 1,
+    fontWeight: FontWeight.semibold,
+  },
+  originPickerItem: {
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: Radius.sm,
+    marginBottom: 2,
+  },
+  originPickerItemText: {
+    ...TypeScale.bodyMd,
+  },
+  countriesInput: {
+    minHeight: 78,
+    textAlignVertical: "top",
+  },
+  settlementTypesRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Spacing.sm,
+    marginBottom: Spacing.xs,
+  },
+  settlementTypeOption: {
+    alignItems: "center",
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: Spacing.sm,
+    minHeight: 40,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+  },
+  settlementTypeCheckbox: {
+    alignItems: "center",
+    borderRadius: 4,
+    borderWidth: 1.5,
+    height: 18,
+    justifyContent: "center",
+    width: 18,
+  },
+  settlementTypeLabel: {
+    ...TypeScale.bodyMd,
+    fontWeight: FontWeight.medium,
+  },
+  profileOriginRow: {
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+  },
+  profileOriginText: {
+    ...TypeScale.labelSm,
+  },
+  profileOriginButton: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: Spacing.xs,
+    minHeight: 36,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+  },
+  profileOriginButtonText: {
+    ...TypeScale.labelSm,
+    fontWeight: FontWeight.semibold,
+  },
+  distanceRow: {
+    flexDirection: "row",
+    gap: Spacing.md,
+  },
+  distanceField: {
+    flex: 1,
+  },
+  searchActionButton: {
+    alignItems: "center",
+    borderRadius: Radius.full,
+    flexDirection: "row",
+    gap: Spacing.xs,
+    justifyContent: "center",
+    marginTop: Spacing.lg,
+    minHeight: 48,
+    paddingHorizontal: Spacing.lg,
+  },
+  searchActionText: {
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.bold,
+  },
+
   // Summary
   summaryCard: {
     flexDirection: "row",
@@ -1035,6 +1846,20 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   summaryText: {
+    ...TypeScale.bodySm,
+    flex: 1,
+    lineHeight: 20,
+  },
+  filterSummaryCard: {
+    alignItems: "flex-start",
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: Spacing.sm,
+    marginBottom: Spacing.lg,
+    padding: Spacing.md,
+  },
+  filterSummaryText: {
     ...TypeScale.bodySm,
     flex: 1,
     lineHeight: 20,

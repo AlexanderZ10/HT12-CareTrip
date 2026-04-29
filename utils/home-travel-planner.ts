@@ -1,5 +1,5 @@
 import { callAI, getAIApiKey } from "./ai";
-import { normalizeBudgetToEuro } from "./currency";
+import { convertBudgetToEuroForSearch, normalizeBudgetToEuro } from "./currency";
 import type { AppLanguage } from "./translations";
 import { type DiscoverProfile } from "./trip-recommendations";
 import { searchTravelOffers, type LiveTravelOffersResponse } from "./travel-offers";
@@ -154,10 +154,54 @@ function normalizeLooseText(value: string) {
 }
 
 function normalizeCurrencyCode(value: string) {
+  const safeNormalizedValue = sanitizeString(value, "EUR").trim().toUpperCase();
+
+  if (!safeNormalizedValue) {
+    return "EUR";
+  }
+
+  if (safeNormalizedValue === "\u20AC" || safeNormalizedValue === "EURO") {
+    return "EUR";
+  }
+
+  if (safeNormalizedValue === "$" || safeNormalizedValue === "US$") {
+    return "USD";
+  }
+
+  if (safeNormalizedValue === "\u00A3") {
+    return "GBP";
+  }
+
+  if (
+    safeNormalizedValue === "\u041B\u0412" ||
+    safeNormalizedValue === "\u041B\u0412." ||
+    safeNormalizedValue === "BGN"
+  ) {
+    return "BGN";
+  }
+
+  const safeCompactCode = safeNormalizedValue.replace(/[^A-Z]/g, "");
+
+  if (safeCompactCode.length >= 3) {
+    return safeCompactCode.slice(0, 3);
+  }
+
   const normalizedValue = sanitizeString(value, "EUR").trim().toUpperCase();
 
   if (!normalizedValue) {
     return "EUR";
+  }
+
+  if (normalizedValue === "€" || normalizedValue === "EURO") {
+    return "EUR";
+  }
+
+  if (normalizedValue === "£") {
+    return "GBP";
+  }
+
+  if (normalizedValue === "ЛВ" || normalizedValue === "ЛВ." || normalizedValue === "BGN") {
+    return "BGN";
   }
 
   if (normalizedValue === "€" || normalizedValue === "EURO") {
@@ -213,7 +257,19 @@ function formatPlannerDate(value: string, language: AppLanguage) {
 }
 
 function formatPlannerWindowLabel(value: string, language: AppLanguage) {
-  const normalizedValue = sanitizeString(value);
+  const normalizedWindowValue = sanitizeString(value)
+    .replace(/РІвЂ вЂ™/g, "->")
+    .replace(/\u2192/g, "->");
+
+  if (!normalizedWindowValue.includes("->")) {
+    return formatPlannerDate(normalizedWindowValue, language);
+  }
+
+  const [safeDepartureDate, safeReturnDate] = normalizedWindowValue
+    .split("->")
+    .map((item) => item.trim());
+  return `${formatPlannerDate(safeDepartureDate, language)} -> ${formatPlannerDate(safeReturnDate, language)}`;
+  const normalizedValue = sanitizeString(value).replace(/в†’/g, "→");
 
   if (!normalizedValue.includes("→")) {
     return formatPlannerDate(normalizedValue, language);
@@ -224,6 +280,14 @@ function formatPlannerWindowLabel(value: string, language: AppLanguage) {
 }
 
 const GENERIC_ROUTE_LABELS = new Set([
+  "българия",
+  "румъния",
+  "германия",
+  "франция",
+  "испания",
+  "италия",
+  "гърция",
+  "турция",
   "bulgaria",
   "българия",
   "romania",
@@ -243,13 +307,54 @@ const GENERIC_ROUTE_LABELS = new Set([
 ]);
 
 function cleanTransportRouteLabel(route: string, destination: string, language: AppLanguage) {
-  const trimmedRoute = sanitizeString(route);
+  const safeTrimmedRoute = sanitizeString(route)
+    .replace(/РІвЂ вЂ™/g, "->")
+    .replace(/\u2192/g, "->");
+
+  if (!safeTrimmedRoute) {
+    return "";
+  }
+
+  const safeNormalizedRoute = normalizeLooseText(safeTrimmedRoute);
+
+  if (
+    safeNormalizedRoute === "маршрутът се уточнява" ||
+    safeNormalizedRoute === "route tbd" ||
+    safeNormalizedRoute === "route to be confirmed"
+  ) {
+    return "";
+  }
+
+  const safeRouteParts = safeTrimmedRoute.split("->").map((item) => item.trim()).filter(Boolean);
+
+  if (safeRouteParts.length === 2) {
+    const [originLabel, destinationLabel] = safeRouteParts;
+    const normalizedOrigin = normalizeLooseText(originLabel);
+    const normalizedDestination = normalizeLooseText(destinationLabel);
+    const normalizedRequestedDestination = normalizeLooseText(destination);
+
+    if (
+      normalizedDestination === normalizedRequestedDestination &&
+      !GENERIC_ROUTE_LABELS.has(normalizedOrigin)
+    ) {
+      return `${originLabel} -> ${destinationLabel}`;
+    }
+  }
+
+  if (!GENERIC_ROUTE_LABELS.has(safeNormalizedRoute)) {
+    return safeTrimmedRoute;
+  }
+  const trimmedRoute = sanitizeString(route).replace(/в†’/g, "→");
 
   if (!trimmedRoute) {
     return "";
   }
 
   const normalizedRoute = normalizeLooseText(trimmedRoute);
+
+  if (normalizedRoute === "маршрутът се уточнява") {
+    return "";
+  }
 
   if (
     normalizedRoute === "маршрутът се уточнява" ||
@@ -534,6 +639,118 @@ function getPlannerCopy(language: AppLanguage) {
     };
   }
 
+  if (language === "bg") {
+    return {
+      arrivalTitle: "\u041F\u0440\u0438\u0441\u0442\u0438\u0433\u0430\u043D\u0435 \u0438 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430",
+      verificationHeading: "\u041F\u0440\u043E\u0432\u0435\u0440\u0435\u043D\u0438 \u0434\u0430\u043D\u043D\u0438",
+      budgetFallback: (budget: string) =>
+        `\u0411\u044E\u0434\u0436\u0435\u0442\u044A\u0442 \u0435 \u0437\u0430\u0434\u0430\u0434\u0435\u043D \u043A\u0430\u0442\u043E ${budget}; \u0447\u0430\u0441\u0442 \u043E\u0442 live \u043E\u0444\u0435\u0440\u0442\u0438\u0442\u0435 \u0438\u0437\u0438\u0441\u043A\u0432\u0430\u0442 \u0434\u0438\u0440\u0435\u043A\u0442\u043D\u0430 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u0432 \u0441\u0430\u0439\u0442\u0430 \u043D\u0430 \u0434\u043E\u0441\u0442\u0430\u0432\u0447\u0438\u043A\u0430.`,
+      budgetFit: (estimatedTotal: number, days: string, budget: string) =>
+        `\u041F\u0440\u0438 ${budget} \u043D\u0430\u0439-\u0434\u043E\u0431\u0440\u0438\u044F\u0442 \u0432\u0438\u0434\u0438\u043C \u0442\u043E\u0447\u0435\u043D \u043E\u0431\u0449 \u0440\u0430\u0437\u0445\u043E\u0434 \u0432 \u043C\u043E\u043C\u0435\u043D\u0442\u0430 \u0437\u0430\u043F\u043E\u0447\u0432\u0430 \u043E\u0442 \u043E\u043A\u043E\u043B\u043E ${Math.round(estimatedTotal)} EUR \u0437\u0430 \u0438\u0437\u0431\u0440\u0430\u043D\u0438\u0442\u0435 \u0434\u0430\u0442\u0438.`,
+      budgetHeading: "\u0411\u044E\u0434\u0436\u0435\u0442",
+      dayLabel: (dayNumber: number) => `\u0414\u0435\u043D ${dayNumber}`,
+      daysHeading: "\u0421\u0442\u0440\u0443\u043A\u0442\u0443\u0440\u0430 \u043D\u0430 \u043F\u044A\u0442\u0443\u0432\u0430\u043D\u0435\u0442\u043E",
+      exactStay: (name: string, area: string, price: string) =>
+        `\u041F\u0440\u043E\u0432\u0435\u0440\u0435\u043D \u0432\u0430\u0440\u0438\u0430\u043D\u0442 \u0437\u0430 \u043D\u0430\u0441\u0442\u0430\u043D\u044F\u0432\u0430\u043D\u0435: ${name}${area ? `, ${area}` : ""}${price ? `, ${price}` : ""}`,
+      exactTransport: (provider: string, route: string, price: string) =>
+        `\u041F\u0440\u043E\u0432\u0435\u0440\u0435\u043D \u0442\u0440\u0430\u043D\u0441\u043F\u043E\u0440\u0442\u0435\u043D \u0432\u0430\u0440\u0438\u0430\u043D\u0442: ${provider}${route ? `, ${route}` : ""}${price ? `, ${price}` : ""}`,
+      noVerifiedActivities: "\u0412\u0441\u0435 \u043E\u0449\u0435 \u043D\u044F\u043C\u0430 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u0430 \u043F\u0440\u043E\u0432\u0435\u0440\u0435\u043D\u0430 \u043F\u0440\u043E\u0433\u0440\u0430\u043C\u0430 \u0441 \u0430\u043A\u0442\u0438\u0432\u043D\u043E\u0441\u0442\u0438.",
+      openDayArea: (area: string) => `\u0411\u0430\u0437\u0430 \u0437\u0430 \u0434\u0435\u043D\u044F: ${area}`,
+      openDayTitle: (destination: string) => `\u0421\u0432\u043E\u0431\u043E\u0434\u0435\u043D \u0434\u0435\u043D \u0432 ${destination}`,
+      plannedDepartureDate: (date: string) => `\u041F\u043B\u0430\u043D\u0438\u0440\u0430\u043D\u0430 \u0434\u0430\u0442\u0430 \u043D\u0430 \u0442\u0440\u044A\u0433\u0432\u0430\u043D\u0435: ${date}`,
+      plannedReturnDate: (date: string) => `\u041F\u043B\u0430\u043D\u0438\u0440\u0430\u043D\u0430 \u0434\u0430\u0442\u0430 \u043D\u0430 \u0432\u0440\u044A\u0449\u0430\u043D\u0435: ${date}`,
+      plannerNote: (notes: string) => `\u0411\u0435\u043B\u0435\u0436\u043A\u0430 \u043E\u0442 \u043F\u044A\u0442\u0443\u0432\u0430\u0449\u0438\u044F: ${notes}`,
+      departureTitle: "\u041E\u0442\u043F\u044A\u0442\u0443\u0432\u0430\u043D\u0435",
+      durationTbd: "\u0412\u0440\u0435\u043C\u0435\u0442\u043E \u0441\u0435 \u0443\u0442\u043E\u0447\u043D\u044F\u0432\u0430",
+      errorGeneric: "\u041D\u0435 \u0443\u0441\u043F\u044F\u0445\u043C\u0435 \u0434\u0430 \u0437\u0430\u0440\u0435\u0434\u0438\u043C live \u0442\u0440\u0430\u043D\u0441\u043F\u043E\u0440\u0442 \u0438 \u043D\u0430\u0441\u0442\u0430\u043D\u044F\u0432\u0430\u043D\u0435. \u041E\u043F\u0438\u0442\u0430\u0439 \u043F\u0430\u043A.",
+      errorInternal: "Backend-\u044A\u0442 \u0432\u044A\u0440\u043D\u0430 \u0432\u044A\u0442\u0440\u0435\u0448\u043D\u0430 \u0433\u0440\u0435\u0448\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u0440\u0435\u0436\u0434\u0430\u043D\u0435 \u043D\u0430 live \u043E\u0444\u0435\u0440\u0442\u0438.",
+      errorInvalidFallback: "\u041B\u043E\u043A\u0430\u043B\u043D\u0438\u044F\u0442 fallback \u0432\u044A\u0440\u043D\u0430 \u043D\u0435\u0432\u0430\u043B\u0438\u0434\u043D\u0438 \u0434\u0430\u043D\u043D\u0438 \u0437\u0430 \u043F\u044A\u0442\u0443\u0432\u0430\u043D\u0435\u0442\u043E. \u041E\u043F\u0438\u0442\u0430\u0439 \u043F\u0430\u043A.",
+      errorMissingFallbackKey:
+        "\u041B\u043E\u043A\u0430\u043B\u043D\u0438\u044F\u0442 fallback \u043D\u044F\u043C\u0430 AI \u043A\u043B\u044E\u0447. \u0414\u043E\u0431\u0430\u0432\u0438 EXPO_PUBLIC_GEMINI_API_KEY \u0438\u043B\u0438 \u043F\u043E\u043B\u0437\u0432\u0430\u0439 Functions backend.",
+      errorMissingFunction:
+        "\u041B\u0438\u043F\u0441\u0432\u0430 Firebase \u0444\u0443\u043D\u043A\u0446\u0438\u044F\u0442\u0430 searchOffers. Deploy-\u043D\u0438 backend-\u0430 \u0438 \u043E\u043F\u0438\u0442\u0430\u0439 \u043F\u0430\u043A.",
+      errorMissingProviderKeys:
+        "Backend-\u044A\u0442 \u043D\u044F\u043C\u0430 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D\u0438 provider \u043A\u043B\u044E\u0447\u043E\u0432\u0435. \u041F\u0440\u043E\u0432\u0435\u0440\u0438 Firebase Functions env \u043F\u0440\u043E\u043C\u0435\u043D\u043B\u0438\u0432\u0438\u0442\u0435.",
+      errorUnavailable: "Live travel backend-\u044A\u0442 \u0435 \u043D\u0435\u0434\u043E\u0441\u0442\u044A\u043F\u0435\u043D \u0432 \u043C\u043E\u043C\u0435\u043D\u0442\u0430. \u041E\u043F\u0438\u0442\u0430\u0439 \u043F\u0430\u043A \u0441\u043B\u0435\u0434 \u043C\u0430\u043B\u043A\u043E.",
+      hourShort: "\u0447",
+      minuteShort: "\u043C\u0438\u043D",
+      priceOnRequest: "\u0426\u0435\u043D\u0430 \u043F\u0440\u0438 \u0437\u0430\u043F\u0438\u0442\u0432\u0430\u043D\u0435",
+      verificationNoLiveResults:
+        "\u0417\u0430 \u0442\u043E\u0432\u0430 \u0442\u044A\u0440\u0441\u0435\u043D\u0435 \u0432\u0441\u0435 \u043E\u0449\u0435 \u043D\u044F\u043C\u0430 \u043F\u0440\u043E\u0432\u0435\u0440\u0435\u043D\u0438 live booking \u0440\u0435\u0437\u0443\u043B\u0442\u0430\u0442\u0438 \u0441 provider \u043B\u0438\u043D\u043A.",
+      verificationSomeMissing:
+        "\u041F\u043E\u043A\u0430\u0437\u0432\u0430\u043C \u0441\u0430\u043C\u043E live \u0440\u0435\u0437\u0443\u043B\u0442\u0430\u0442\u0438 \u0441 provider \u043B\u0438\u043D\u043A. \u041B\u0438\u043F\u0441\u0432\u0430\u0449\u0438\u0442\u0435 \u0441\u0435\u043A\u0446\u0438\u0438 \u043E\u0441\u0442\u0430\u0432\u0430\u0442 \u043F\u0440\u0430\u0437\u043D\u0438, \u0432\u043C\u0435\u0441\u0442\u043E \u0434\u0430 \u0441\u0435 \u0437\u0430\u043F\u044A\u043B\u0432\u0430\u0442 \u0441 \u043F\u0440\u0435\u0434\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u044F.",
+      verificationReady:
+        "\u041F\u043E-\u0434\u043E\u043B\u0443 \u043F\u043E\u043A\u0430\u0437\u0432\u0430\u043C \u0441\u0430\u043C\u043E live \u0442\u0440\u0430\u043D\u0441\u043F\u043E\u0440\u0442 \u0438 \u043D\u0430\u0441\u0442\u0430\u043D\u044F\u0432\u0430\u043D\u0435 \u0441 provider \u043B\u0438\u043D\u043A. \u0410\u043A\u0442\u0438\u0432\u043D\u043E\u0441\u0442\u0438\u0442\u0435 \u043E\u0441\u0442\u0430\u0432\u0430\u0442 \u043E\u0442\u0432\u043E\u0440\u0435\u043D\u0438, \u0434\u043E\u043A\u0430\u0442\u043E \u043D\u0435 \u0434\u043E\u0431\u0430\u0432\u0438\u0448 \u043F\u0440\u043E\u0432\u0435\u0440\u0435\u043D\u0438 \u0434\u0435\u0442\u0430\u0439\u043B\u0438.",
+      stayHeading: "\u041D\u0430\u0441\u0442\u0430\u043D\u044F\u0432\u0430\u043D\u0435",
+      summary: (params: {
+        destination: string;
+        stayCount: number;
+        transportCount: number;
+        travelers: string;
+        windowLabel: string;
+      }) =>
+        `\u041F\u0440\u043E\u0432\u0435\u0440\u0435\u043D\u043E \u0442\u044A\u0440\u0441\u0435\u043D\u0435 \u0437\u0430 ${params.destination} \u0432 \u043F\u0440\u043E\u0437\u043E\u0440\u0435\u0446\u0430 ${params.windowLabel} \u0437\u0430 ${params.travelers}: ${params.transportCount} \u0442\u0440\u0430\u043D\u0441\u043F\u043E\u0440\u0442\u043D\u0438 \u0440\u0435\u0437\u0443\u043B\u0442\u0430\u0442\u0430 \u0438 ${params.stayCount} \u0432\u0430\u0440\u0438\u0430\u043D\u0442\u0430 \u0437\u0430 \u043D\u0430\u0441\u0442\u0430\u043D\u044F\u0432\u0430\u043D\u0435.`,
+      titleFallback: (destination: string) => `${destination}: \u043F\u0440\u043E\u0432\u0435\u0440\u0435\u043D \u043F\u043B\u0430\u043D \u0437\u0430 \u043F\u044A\u0442\u0443\u0432\u0430\u043D\u0435`,
+      transportHeading: "\u0422\u0440\u0430\u043D\u0441\u043F\u043E\u0440\u0442",
+    };
+  }
+
+  if (language === "bg") {
+    return {
+      arrivalTitle: "Пристигане и настройка",
+      verificationHeading: "Проверени данни",
+      budgetFallback: (budget: string) =>
+        `Бюджетът е зададен като ${budget}; част от live офертите изискват директна проверка в сайта на доставчика.`,
+      budgetFit: (estimatedTotal: number, days: string, budget: string) =>
+        `При ${budget} най-добрият видим точен общ разход в момента започва от около ${Math.round(estimatedTotal)} EUR за избраните дати.`,
+      budgetHeading: "Бюджет",
+      dayLabel: (dayNumber: number) => `Ден ${dayNumber}`,
+      daysHeading: "Структура на пътуването",
+      exactStay: (name: string, area: string, price: string) =>
+        `Проверен вариант за настаняване: ${name}${area ? `, ${area}` : ""}${price ? `, ${price}` : ""}`,
+      exactTransport: (provider: string, route: string, price: string) =>
+        `Проверен транспортен вариант: ${provider}${route ? `, ${route}` : ""}${price ? `, ${price}` : ""}`,
+      noVerifiedActivities: "Все още няма включена проверена програма с активности.",
+      openDayArea: (area: string) => `База за деня: ${area}`,
+      openDayTitle: (destination: string) => `Свободен ден в ${destination}`,
+      plannedDepartureDate: (date: string) => `Планирана дата на тръгване: ${date}`,
+      plannedReturnDate: (date: string) => `Планирана дата на връщане: ${date}`,
+      plannerNote: (notes: string) => `Бележка от пътуващия: ${notes}`,
+      departureTitle: "Отпътуване",
+      durationTbd: "Времето се уточнява",
+      errorGeneric: "Не успяхме да заредим live транспорт и настаняване. Опитай пак.",
+      errorInternal: "Backend-ът върна вътрешна грешка при зареждане на live оферти.",
+      errorInvalidFallback: "Локалният fallback върна невалидни данни за пътуването. Опитай пак.",
+      errorMissingFallbackKey:
+        "Локалният fallback няма AI ключ. Добави EXPO_PUBLIC_GEMINI_API_KEY или ползвай Functions backend.",
+      errorMissingFunction:
+        "Липсва Firebase функцията searchOffers. Deploy-ни backend-а и опитай пак.",
+      errorMissingProviderKeys:
+        "Backend-ът няма настроени provider ключове. Провери Firebase Functions env променливите.",
+      errorUnavailable: "Live travel backend-ът е недостъпен в момента. Опитай пак след малко.",
+      hourShort: "ч",
+      minuteShort: "мин",
+      priceOnRequest: "Цена при запитване",
+      verificationNoLiveResults:
+        "За това търсене все още няма проверени live booking резултати с provider линк.",
+      verificationSomeMissing:
+        "Показвам само live резултати с provider линк. Липсващите секции остават празни, вместо да се запълват с предположения.",
+      verificationReady:
+        "По-долу показвам само live транспорт и настаняване с provider линк. Активностите остават отворени, докато не добавиш проверени детайли.",
+      stayHeading: "Настаняване",
+      summary: (params: {
+        destination: string;
+        stayCount: number;
+        transportCount: number;
+        travelers: string;
+        windowLabel: string;
+      }) =>
+        `Проверено търсене за ${params.destination} в прозореца ${params.windowLabel} за ${params.travelers}: ${params.transportCount} транспортни резултата и ${params.stayCount} варианта за настаняване.`,
+      titleFallback: (destination: string) => `${destination}: проверен план за пътуване`,
+      transportHeading: "Транспорт",
+    };
+  }
+
   return {
     arrivalTitle: "Пристигане и настройка",
     verificationHeading: "Проверени данни",
@@ -795,24 +1012,37 @@ function buildDayPlans(params: {
 }
 
 function summarizeProfile(profile: DiscoverProfile) {
-  const interests = profile.interests.selectedOptions.filter(Boolean).slice(0, 4).join(", ");
+  const interests = [
+    ...profile.interests.selectedOptions,
+    profile.interests.note,
+  ]
+    .map((item) => sanitizeString(item))
+    .filter(Boolean)
+    .slice(0, 6)
+    .join(", ");
   const accessibility = [
     ...profile.assistance.selectedOptions,
     profile.assistance.note,
   ]
     .map((item) => sanitizeString(item))
     .filter(Boolean)
-    .slice(0, 3)
+    .slice(0, 6)
+    .join(", ");
+  const skills = [
+    ...profile.skills.selectedOptions,
+    profile.skills.note,
+  ]
+    .map((item) => sanitizeString(item))
+    .filter(Boolean)
+    .slice(0, 6)
     .join(", ");
 
   return [
-    `Home base: ${sanitizeString(profile.personalProfile.homeBase, "Not provided")}`,
-    `Dream destinations: ${sanitizeString(profile.personalProfile.dreamDestinations, "Not provided")}`,
-    `Travel pace: ${sanitizeString(profile.personalProfile.travelPace, "Not provided")}`,
-    `Stay style: ${sanitizeString(profile.personalProfile.stayStyle, "Not provided")}`,
-    `About traveler: ${sanitizeString(profile.personalProfile.aboutMe, "Not provided")}`,
-    `Interests: ${interests || "Not provided"}`,
-    `Accessibility or support: ${accessibility || "Not provided"}`,
+    `City and country: ${sanitizeString(profile.personalProfile.homeBase, "Not provided")}`,
+    `Bio: ${sanitizeString(profile.personalProfile.aboutMe, "Not provided")}`,
+    `Travel interests: ${interests || "Not provided"}`,
+    `Accessibility or support needs: ${accessibility || "Not provided"}`,
+    `Skills / ways to help while traveling: ${skills || "Not provided"}`,
   ].join("\n");
 }
 
@@ -860,6 +1090,7 @@ function buildGroundedResearchPrompt(params: {
   destination: string;
   notes?: string;
   offers: LiveTravelOffersResponse;
+  origin: string;
   profile: DiscoverProfile;
   stayOptions: PlannerStayOption[];
   timing: string;
@@ -872,6 +1103,7 @@ function buildGroundedResearchPrompt(params: {
   return [
     "Traveler request:",
     `- Destination: ${params.destination}`,
+    `- Origin: ${params.origin}`,
     `- Timing: ${params.timing}`,
     `- Search window: ${params.offers.searchContext.windowLabel}`,
     `- Departure date: ${params.offers.searchContext.departureDate}`,
@@ -881,11 +1113,16 @@ function buildGroundedResearchPrompt(params: {
     `- Trip style: ${sanitizeString(params.tripStyle, "Not specified")}`,
     `- Extra notes: ${sanitizeString(params.notes, "None")}`,
     "",
-    "Traveler profile:",
+    "Travel preferences from the user's profile:",
     summarizeProfile(params.profile),
     "",
     "Verified transport anchors:",
     buildTransportContext(params.transportOptions),
+    "",
+    "Origin and personalization rules:",
+    `- Use ${params.origin} as the starting point for ticket/logistics advice.`,
+    "- If the preferred transport is flight and the starting city has no practical airport, explain the transfer to the nearest useful airport or major hub before the flight.",
+    "- Use the Bio field to suggest activities, pacing, or useful local tips during the trip.",
     "",
     "Verified stay anchors:",
     buildStayContext(params.stayOptions),
@@ -1100,6 +1337,7 @@ export async function generateGroundedTravelPlan(params: {
   destination: string;
   language?: AppLanguage;
   notes?: string;
+  origin: string;
   timing: string;
   transportPreference: string;
   travelers: string;
@@ -1107,7 +1345,13 @@ export async function generateGroundedTravelPlan(params: {
   tripStyle?: string;
 }) {
   const language = normalizePlannerLanguage(params.language);
-  const offers = await searchTravelOffers(params);
+  const convertedBudget = await convertBudgetToEuroForSearch(params.budget, language);
+  const planBudget = convertedBudget || params.budget;
+  const searchParams = {
+    ...params,
+    budget: convertedBudget,
+  };
+  const offers = await searchTravelOffers(searchParams);
   const presentedStayOffers = offers.stayOptions.filter(hasExactProviderStayOffer);
   const presentedTransportOffers = offers.transportOptions.filter(hasExactProviderTransportOffer);
   const presentedOffers = {
@@ -1145,7 +1389,7 @@ export async function generateGroundedTravelPlan(params: {
   })) satisfies PlannerStayOption[];
 
   const deterministicPlan = buildDeterministicPlan({
-    budget: params.budget,
+    budget: planBudget,
     days: params.days,
     destination: params.destination,
     language,
@@ -1167,10 +1411,11 @@ export async function generateGroundedTravelPlan(params: {
       apiKey,
       googleSearchGrounding: true,
       prompt: buildGroundedResearchPrompt({
-        budget: params.budget,
+        budget: planBudget,
         destination: params.destination,
         notes: params.notes,
         offers: presentedOffers,
+        origin: params.origin,
         profile: params.profile,
         stayOptions,
         timing: params.timing,

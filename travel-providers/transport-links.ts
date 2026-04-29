@@ -100,6 +100,24 @@ function shouldIncludeFlights(transportPreference: string) {
   );
 }
 
+function buildOriginLogisticsNote(
+  transportPreference: string,
+  departureDate: string
+) {
+  const normalized = transportPreference.trim().toLowerCase();
+  const wantsFlight =
+    normalized.includes("flight") ||
+    normalized.includes("plane") ||
+    normalized.includes("самолет") ||
+    normalized.includes("полет");
+
+  if (wantsFlight) {
+    return `Compare route options for ${departureDate}, including ground transfer to a practical nearby airport if the origin city has no airport.`;
+  }
+
+  return `Compare current route options and operators for ${departureDate}.`;
+}
+
 export function buildTransportSearchLinkOffers(params: {
   currency: string;
   departureDate: string;
@@ -119,7 +137,7 @@ export function buildTransportSearchLinkOffers(params: {
       }),
       durationMinutes: null,
       mode: modeLabel,
-      note: `Compare current route options and operators for ${params.departureDate}.`,
+      note: buildOriginLogisticsNote(params.transportPreference, params.departureDate),
       priceAmount: null,
       priceCurrency: params.currency,
       provider: "Rome2Rio",
@@ -166,7 +184,7 @@ export function buildTransportSearchLinkOffers(params: {
       }),
       durationMinutes: null,
       mode: "Flight",
-      note: `Compare flight availability for ${params.departureDate}.`,
+      note: `Compare flight availability for ${params.departureDate}; if there is no airport in ${originLabel}, first check the nearest practical departure airport and transfer time.`,
       priceAmount: null,
       priceCurrency: params.currency,
       provider: "Google Flights",

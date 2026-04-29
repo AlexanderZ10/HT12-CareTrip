@@ -1,4 +1,5 @@
 import { getAIApiKey, callAI } from "./ai";
+import { hasExplicitCurrency, normalizeBudgetToEuro } from "./currency";
 import type { HomeChatMessage } from "./home-chat-storage";
 import type { DiscoverProfile } from "./trip-recommendations";
 import type { AppLanguage } from "./translations";
@@ -8,6 +9,7 @@ export type PlannerIntakeSnapshot = {
   days: string;
   destination: string;
   notes: string;
+  origin: string;
   questionCount: number;
   timing: string;
   transportPreference: string;
@@ -20,6 +22,7 @@ type PlannerIntakeField =
   | "days"
   | "destination"
   | "notes"
+  | "origin"
   | "timing"
   | "transportPreference"
   | "travelers"
@@ -32,6 +35,7 @@ type PlannerIntakeResult = {
   missingFields?: string[];
   nextQuestion?: string;
   notes?: string;
+  origin?: string;
   questionCount?: number;
   readyToGenerate?: boolean;
   timing?: string;
@@ -48,6 +52,7 @@ export type PlannerIntakeTurn = {
 };
 
 const REQUIRED_FIELDS: PlannerIntakeField[] = [
+  "origin",
   "destination",
   "timing",
   "days",
@@ -127,23 +132,34 @@ function parseQuestionCount(value: unknown, fallback: number) {
 }
 
 function summarizeProfile(profile: DiscoverProfile) {
-  const interests = profile.interests.selectedOptions.filter(Boolean).slice(0, 5);
+  const interests = [
+    ...profile.interests.selectedOptions,
+    profile.interests.note,
+  ]
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 6);
   const assistance = [
     ...profile.assistance.selectedOptions,
     profile.assistance.note,
   ]
     .map((item) => item.trim())
     .filter(Boolean)
-    .slice(0, 4);
+    .slice(0, 6);
+  const skills = [
+    ...profile.skills.selectedOptions,
+    profile.skills.note,
+  ]
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 6);
 
   return [
-    `Home base: ${profile.personalProfile.homeBase || "Not provided"}`,
-    `Dream destinations: ${profile.personalProfile.dreamDestinations || "Not provided"}`,
-    `Travel pace: ${profile.personalProfile.travelPace || "Not provided"}`,
-    `Stay style: ${profile.personalProfile.stayStyle || "Not provided"}`,
-    `About me: ${profile.personalProfile.aboutMe || "Not provided"}`,
-    `Interests: ${interests.join(", ") || "Not provided"}`,
-    `Accessibility: ${assistance.join(", ") || "Not provided"}`,
+    `City and country: ${profile.personalProfile.homeBase || "Not provided"}`,
+    `Bio: ${profile.personalProfile.aboutMe || "Not provided"}`,
+    `Travel interests: ${interests.join(", ") || "Not provided"}`,
+    `Accessibility / assistance needs: ${assistance.join(", ") || "Not provided"}`,
+    `Skills / ways to help while traveling: ${skills.join(", ") || "Not provided"}`,
   ].join("\n");
 }
 
@@ -154,7 +170,88 @@ function buildConversationHistory(messages: HomeChatMessage[]) {
   })) satisfies { content: string; role: "assistant" | "user" }[];
 }
 
-function fallbackQuestion(language: AppLanguage, missingFields: PlannerIntakeField[]) {
+function hasNumber(value: string) {
+  return /\d/.test(value);
+}
+
+function hasIncompleteNumericBudget(value: string) {
+  return hasNumber(value) && !hasExplicitCurrency(value);
+}
+
+function resolveProfileOrigin(profile: DiscoverProfile) {
+  return sanitizeString(profile.personalProfile.homeBase);
+}
+
+function isCurrentOriginLabel(value: string) {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  return (
+    normalized === "current" ||
+    normalized === "current location" ||
+    normalized === "current city" ||
+    normalized === "present location" ||
+    normalized === "profile location" ||
+    normalized === "use current" ||
+    normalized === "настояща" ||
+    normalized === "настоящото" ||
+    normalized === "текуща" ||
+    normalized === "текущото" ||
+    normalized === "сегашната" ||
+    normalized === "сегашното" ||
+    normalized === "от профила" ||
+    normalized === "настоящата от профила" ||
+    normalized === "текущата от профила"
+  );
+}
+
+function budgetCurrencyQuestion(language: AppLanguage) {
+  if (language === "en") {
+    return "Which currency is that budget in: EUR, BGN, USD, or another one?";
+  }
+
+  if (language === "de") {
+    return "In welcher Währung ist dieses Budget: EUR, BGN, USD oder eine andere?";
+  }
+
+  if (language === "es") {
+    return "¿En qué moneda está ese presupuesto: EUR, BGN, USD u otra?";
+  }
+
+  if (language === "fr") {
+    return "Dans quelle devise est ce budget : EUR, BGN, USD ou une autre ?";
+  }
+
+  return "В каква валута е този бюджет: EUR, BGN, USD или друга?";
+}
+
+function fallbackQuestion(
+  language: AppLanguage,
+  missingFields: PlannerIntakeField[],
+  snapshot?: PlannerIntakeSnapshot,
+  profile?: DiscoverProfile
+) {
+  if (missingFields[0] === "budget" && snapshot && hasIncompleteNumericBudget(snapshot.budget)) {
+    return budgetCurrencyQuestion(language);
+  }
+
+  if (missingFields[0] === "origin") {
+    const profileOrigin = profile ? resolveProfileOrigin(profile) : "";
+
+    if (language === "en") {
+      return profileOrigin
+        ? `Where are you starting from? If you want, I can use your current profile location: ${profileOrigin}.`
+        : "Where are you starting from?";
+    }
+
+    return profileOrigin
+      ? `От къде тръгваш? Ако искаш, мога да ползвам настоящата точка от профила ти: ${profileOrigin}.`
+      : "От къде тръгваш?";
+  }
+
   const fallbackCopy = {
     bg: {
       budget: "Какъв е общият ти бюджет за пътуването?",
@@ -171,6 +268,7 @@ function fallbackQuestion(language: AppLanguage, missingFields: PlannerIntakeFie
       days: "How many days should the trip be?",
       destination: "What is the exact destination?",
       notes: "Is there anything important I should definitely include?",
+      origin: "Where are you starting from?",
       timing: "When do you want to travel?",
       transportPreference: "What transport do you prefer?",
       travelers: "How many people are traveling?",
@@ -181,6 +279,7 @@ function fallbackQuestion(language: AppLanguage, missingFields: PlannerIntakeFie
       days: "Wie viele Tage soll die Reise dauern?",
       destination: "Was ist das genaue Reiseziel?",
       notes: "Gibt es etwas Wichtiges, das ich unbedingt einplanen soll?",
+      origin: "Wo startest du?",
       timing: "Wann mochtest du reisen?",
       transportPreference: "Welchen Transport bevorzugst du?",
       travelers: "Wie viele Personen reisen?",
@@ -191,6 +290,7 @@ function fallbackQuestion(language: AppLanguage, missingFields: PlannerIntakeFie
       days: "Cuantos dias debe durar el viaje?",
       destination: "Cual es el destino exacto?",
       notes: "Hay algo importante que deba incluir si o si?",
+      origin: "Desde dónde sales?",
       timing: "Cuando quieres viajar?",
       transportPreference: "Que transporte prefieres?",
       travelers: "Cuantas personas viajaran?",
@@ -201,6 +301,7 @@ function fallbackQuestion(language: AppLanguage, missingFields: PlannerIntakeFie
       days: "Combien de jours doit durer le voyage ?",
       destination: "Quelle est la destination exacte ?",
       notes: "Y a-t-il quelque chose d'important que je dois absolument inclure ?",
+      origin: "D'où pars-tu ?",
       timing: "Quand veux-tu voyager ?",
       transportPreference: "Quel transport preferes-tu ?",
       travelers: "Combien de personnes voyagent ?",
@@ -208,8 +309,8 @@ function fallbackQuestion(language: AppLanguage, missingFields: PlannerIntakeFie
     },
   } as const;
 
-  const copy = fallbackCopy[language];
-  return copy[missingFields[0] ?? "destination"];
+  const copy = fallbackCopy[language] as Record<string, string>;
+  return copy[missingFields[0] ?? "destination"] ?? copy.destination;
 }
 
 function parseMissingFields(value: unknown): PlannerIntakeField[] {
@@ -225,6 +326,7 @@ function parseMissingFields(value: unknown): PlannerIntakeField[] {
         item === "days" ||
         item === "destination" ||
         item === "notes" ||
+        item === "origin" ||
         item === "timing" ||
         item === "transportPreference" ||
         item === "travelers" ||
@@ -234,13 +336,27 @@ function parseMissingFields(value: unknown): PlannerIntakeField[] {
 
 function mergeSnapshot(
   currentSnapshot: PlannerIntakeSnapshot,
-  result: PlannerIntakeResult
+  result: PlannerIntakeResult,
+  language: AppLanguage,
+  profile: DiscoverProfile
 ) {
+  const nextBudget = sanitizeString(result.budget) || currentSnapshot.budget;
+  const combinedBudget =
+    hasIncompleteNumericBudget(currentSnapshot.budget) &&
+    hasExplicitCurrency(nextBudget) &&
+    !hasNumber(nextBudget)
+      ? `${currentSnapshot.budget} ${nextBudget}`
+      : nextBudget;
+  const rawOrigin = sanitizeString(result.origin) || currentSnapshot.origin;
+  const nextOrigin =
+    rawOrigin && isCurrentOriginLabel(rawOrigin) ? resolveProfileOrigin(profile) : rawOrigin;
+
   return {
-    budget: sanitizeString(result.budget) || currentSnapshot.budget,
+    budget: normalizeBudgetToEuro(combinedBudget, language),
     days: sanitizeString(result.days) || currentSnapshot.days,
     destination: sanitizeString(result.destination) || currentSnapshot.destination,
     notes: sanitizeString(result.notes) || currentSnapshot.notes,
+    origin: nextOrigin,
     questionCount: parseQuestionCount(result.questionCount, currentSnapshot.questionCount),
     timing: sanitizeString(result.timing) || currentSnapshot.timing,
     transportPreference:
@@ -251,7 +367,13 @@ function mergeSnapshot(
 }
 
 function getMissingRequiredFields(snapshot: PlannerIntakeSnapshot) {
-  return REQUIRED_FIELDS.filter((field) => !snapshot[field].trim());
+  return REQUIRED_FIELDS.filter((field) => {
+    if (!snapshot[field].trim()) {
+      return true;
+    }
+
+    return field === "budget" && hasIncompleteNumericBudget(snapshot.budget);
+  });
 }
 
 function buildSystemPrompt(language: AppLanguage) {
@@ -264,7 +386,20 @@ function buildSystemPrompt(language: AppLanguage) {
     "Extract any details the user already gave, even if they answered several fields in one message.",
     "Keep questions short, natural, and practical.",
     "Do not ask for information that is already present in the profile unless it is directly needed for the trip.",
-    "Required fields: destination, timing, days, travelers, transportPreference, budget.",
+    "The user can correct any earlier answer at any time, even if you are currently asking about another field.",
+    "When the latest message changes an older answer, always overwrite the old snapshot value with the new one.",
+    "Use the profile City and country as the default trip origin for ticket search. If it is missing, ask where the user starts from.",
+    "Always capture the trip origin as its own field named origin.",
+    "Only set origin to the profile City and country when the user makes an explicit STATEMENT of intent like 'use my current location', 'use the profile location', 'настоящата', 'текущата', 'сегашната' on its own, or 'use it'. A bare standalone keyword from this list counts as a statement.",
+    "If the user asks a QUESTION about their profile location (for example: 'what is my current location?', 'where am I from?', 'коя ми е сегашната точка', 'каква е настоящата ми точка', 'where is my profile location'), DO NOT set the origin. Leave origin empty, keep readyToGenerate false, and in nextQuestion answer their question by stating the profile City and country, then ask whether they want to use it as the trip origin.",
+    "Treat any user message that ends with a question mark, or starts with question words like what/where/which/коя/какво/къде/каква, as a question — never treat it as a statement that sets a field.",
+    "Use the profile bio as extra personalization for useful on-trip suggestions, not as a required booking field.",
+    "If the user wants flights from a city without an airport, plan for a transfer to the nearest practical airport or transport hub before the flight.",
+    "A numeric budget without an explicit currency is incomplete. If the user writes only a number like 1000, store budget as that number, keep budget missing, and ask which currency it is in.",
+    "If the user writes a number plus currency like 1000 EUR, 1000 BGN, 1000 USD, $1000, or 1000 лв, budget is complete.",
+    "Required fields: origin, destination, timing, days, travelers, transportPreference, budget.",
+    "Always ask about the required fields in this exact priority order, asking only for the first one still missing: origin, then destination, then timing, then days, then travelers, then transportPreference, then budget.",
+    "Your very first question must be about origin if it is missing. Your second question must be about destination if it is missing. Do not jump ahead to later fields while origin or destination are still missing.",
     "Optional fields: tripStyle, notes.",
     "If all required fields are clear, set readyToGenerate to true and leave nextQuestion empty.",
     "Return JSON only.",
@@ -281,7 +416,7 @@ function buildPrompt(params: {
     "Current structured trip snapshot:",
     JSON.stringify(params.snapshot, null, 2),
     "",
-    "Traveler profile:",
+    "Travel preferences from the user's profile:",
     summarizeProfile(params.profile),
     "",
     "Latest user input:",
@@ -293,6 +428,7 @@ function buildPrompt(params: {
   "days": "string",
   "destination": "string",
   "timing": "string",
+  "origin": "string",
   "travelers": "string",
   "transportPreference": "string",
   "tripStyle": "string",
@@ -307,10 +443,21 @@ function buildPrompt(params: {
     "- Keep field values concise and user-friendly.",
     "- Preserve already known values unless the latest message clearly corrects them.",
     "- If the user gives a correction, replace the older field value.",
+    "- A correction can target any earlier field, not only the field from your last question.",
+    "- Treat phrases like 'actually', 'instead', 'change it to', 'no, make it', 'всъщност', 'нека е', 'смени го на', and 'не, а' as strong correction signals.",
+    "- For budget, preserve the currency if the user gives one. Do not assume EUR for a bare number.",
+    "- If the current budget is a number without currency and the latest user input is only a currency, combine them into one budget value.",
+    "- Store the trip starting point in origin.",
+    "- If the user says to use the current/profile location, set origin to the profile City and country.",
     "- questionCount should represent how many assistant intake questions have been asked after this turn.",
     "- Do not exceed 7.",
     "- If enough information is available, set readyToGenerate to true.",
     "- If readyToGenerate is true, nextQuestion must be an empty string.",
+    "",
+    "Correction examples:",
+    '- Snapshot days is "3". User says "Всъщност 5 дни" -> set days to "5".',
+    '- Snapshot destination is "Rome". User says "Change it to Madrid" -> set destination to "Madrid".',
+    '- Snapshot budget is "1000 EUR". User says "No, make it 1200 USD" -> set budget to "1200 USD".',
   ].join("\n");
 }
 
@@ -328,7 +475,7 @@ export async function runPlannerIntakeTurn(params: {
     const missingFields = getMissingRequiredFields(params.snapshot);
 
     return {
-      nextQuestion: fallbackQuestion(language, missingFields),
+      nextQuestion: fallbackQuestion(language, missingFields, params.snapshot, params.profile),
       questionCount: Math.min(params.snapshot.questionCount + 1, 7),
       readyToGenerate: missingFields.length === 0,
       snapshot: params.snapshot,
@@ -354,14 +501,14 @@ export async function runPlannerIntakeTurn(params: {
     const missingFields = getMissingRequiredFields(params.snapshot);
 
     return {
-      nextQuestion: fallbackQuestion(language, missingFields),
+      nextQuestion: fallbackQuestion(language, missingFields, params.snapshot, params.profile),
       questionCount: Math.min(params.snapshot.questionCount + 1, 7),
       readyToGenerate: missingFields.length === 0,
       snapshot: params.snapshot,
     };
   }
 
-  const mergedSnapshot = mergeSnapshot(params.snapshot, parsedResult);
+  const mergedSnapshot = mergeSnapshot(params.snapshot, parsedResult, language, params.profile);
   const missingRequiredFields = getMissingRequiredFields(mergedSnapshot);
   const aiMissingFields = parseMissingFields(parsedResult.missingFields);
   const nextQuestionCount = Math.min(
@@ -372,7 +519,9 @@ export async function runPlannerIntakeTurn(params: {
     parsedResult.readyToGenerate === true && missingRequiredFields.length === 0;
   const fallbackNextQuestion = fallbackQuestion(
     language,
-    missingRequiredFields.length > 0 ? missingRequiredFields : aiMissingFields
+    missingRequiredFields.length > 0 ? missingRequiredFields : aiMissingFields,
+    mergedSnapshot,
+    params.profile
   );
   const nextQuestion =
     !readyToGenerate && nextQuestionCount >= 7 && missingRequiredFields.length > 0

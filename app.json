@@ -14,7 +14,11 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "Allow CareTrip to convert your speech into text for the AI Planner.",
+        "NSMicrophoneUsageDescription": "Allow CareTrip to use your microphone for voice input in the AI Planner."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -25,7 +29,11 @@
       },
       "edgeToEdgeEnabled": true,
       "softwareKeyboardLayoutMode": "resize",
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.anonymous.CareTrip"
     },
     "web": {
       "output": "static",
@@ -56,11 +64,31 @@
           "icon": "./assets/images/CareTrip-non.png",
           "color": "#E6F4FE"
         }
-      ]
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow CareTrip to use your microphone for voice input in the AI Planner.",
+          "speechRecognitionPermission": "Allow CareTrip to convert your speech into text for the AI Planner.",
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox",
+            "com.google.android.as",
+            "com.google.android.tts",
+            "com.samsung.android.bixby.agent"
+          ]
+        }
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "e901caaf-55b5-4458-b450-db0f3a438ddc"
+      }
     }
   }
 }

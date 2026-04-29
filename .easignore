@@ -10,17 +10,15 @@ dist/
 .expo-export-test/
 .expo-web-test/
 
-# Expo prebuild / native generated projects
-android/
-ios/
-
 # Firebase
 .firebase/
 functions/lib/
 
 # Environment variables
-.env
+# Keep the root .env for EXPO_PUBLIC_* values in cloud builds,
+# but don't upload extra local env variants.
 .env.*
+!.env
 !.env.example
 
 # Build output
@@ -31,10 +29,17 @@ build/Release
 *.aab
 *.apks
 
+# Expo prebuild / native generated projects
+android/
+ios/
+
 # Android / Java signing files
 *.jks
 *.keystore
 *.p12
+
+# Large non-source docs
+*.pptx
 
 # OS files
 .DS_Store

@@ -31,13 +31,21 @@ export type StoredHomePlan = {
   sourceKey: string;
 } | null;
 
+export type ArchivedHomePlanBlock = {
+  plan: NonNullable<StoredHomePlan>;
+  trailingMessages: HomeChatMessage[];
+};
+
 export type StoredHomePlannerState = {
   aiQuestionCount: number;
+  archivedPlans: ArchivedHomePlanBlock[];
+  awaitingGenerationConfirmation: boolean;
   budget: string;
   days: string;
   destination: string;
   followUpMessages: HomeChatMessage[];
   notes: string;
+  origin: string;
   timing: string;
   transportPreference: string;
   travelers: string;
@@ -212,11 +220,14 @@ export function createHomeChatMessage(
 export function createEmptyPlannerState(initialAssistantMessage: string): StoredHomePlannerState {
   return {
     aiQuestionCount: 0,
+    archivedPlans: [],
+    awaitingGenerationConfirmation: false,
     budget: "",
     days: "",
     destination: "",
     followUpMessages: [],
     notes: "",
+    origin: "",
     timing: "",
     transportPreference: "",
     travelers: "",
@@ -251,10 +262,13 @@ export function isHomePlannerChatUntouched(chat: HomePlannerChatThread) {
     !chat.state.days &&
     !chat.state.destination &&
     !chat.state.notes &&
+    !chat.state.origin &&
     !chat.state.timing &&
     !chat.state.transportPreference &&
     !chat.state.travelers &&
     !chat.state.tripStyle &&
+    chat.state.archivedPlans.length === 0 &&
+    !chat.state.awaitingGenerationConfirmation &&
     !chat.state.latestPlan &&
     chat.state.followUpMessages.length === 0 &&
     chat.state.messages.length === 1 &&
@@ -275,6 +289,8 @@ export function createHomePlannerChatFromSharedTrip(
     pinned: false,
     state: {
       aiQuestionCount: 0,
+      archivedPlans: [],
+      awaitingGenerationConfirmation: false,
       budget: normalizedBudget,
       days: normalizedDays,
       destination: trip.destination.trim(),
@@ -309,6 +325,7 @@ export function createHomePlannerChatFromSharedTrip(
         ),
       ],
       notes: "",
+      origin: "",
       step: "done",
       timing: "",
       transportPreference: "",
@@ -346,18 +363,41 @@ function parsePlannerMessages(value: unknown): HomeChatMessage[] {
     .slice(-40);
 }
 
+function parseArchivedPlanBlocks(value: unknown): ArchivedHomePlanBlock[] {
+  const rawBlocks = Array.isArray(value) ? value : [];
+
+  return rawBlocks
+    .filter((block): block is Record<string, unknown> => !!block && typeof block === "object")
+    .map((block) => {
+      const plan = parseStoredHomePlan(block.plan);
+
+      if (!plan) {
+        return null;
+      }
+
+      return {
+        plan,
+        trailingMessages: parsePlannerMessages(block.trailingMessages),
+      } satisfies ArchivedHomePlanBlock;
+    })
+    .filter((block): block is ArchivedHomePlanBlock => !!block)
+    .slice(-8);
+}
+
 function parsePlannerStateFromRaw(
   rawState: Record<string, unknown>,
   initialAssistantMessage: string
 ): StoredHomePlannerState {
   const parsedStep = parsePlannerStep(rawState.step);
   const parsedLatestPlan = parseStoredHomePlan(rawState.latestPlan);
+  const archivedPlans = parseArchivedPlanBlocks(rawState.archivedPlans);
   const messages = parsePlannerMessages(rawState.chatMessages ?? rawState.messages);
   const followUpMessages = parsePlannerMessages(rawState.followUpMessages);
   const budget = normalizeBudgetToEuro(sanitizeString(rawState.budget));
   const days = sanitizeString(rawState.days);
   const destination = sanitizeString(rawState.destination);
   const notes = sanitizeString(rawState.notes);
+  const origin = sanitizeString(rawState.origin);
   const timing = sanitizeString(rawState.timing);
   const transportPreference = sanitizeString(rawState.transportPreference);
   const travelers = sanitizeString(rawState.travelers);
@@ -377,6 +417,7 @@ function parsePlannerStateFromRaw(
     !days &&
     !destination &&
     !notes &&
+    !origin &&
     !timing &&
     !transportPreference &&
     !travelers &&
@@ -391,11 +432,14 @@ function parsePlannerStateFromRaw(
       typeof rawState.aiQuestionCount === "number" && Number.isFinite(rawState.aiQuestionCount)
         ? Math.max(0, Math.round(rawState.aiQuestionCount))
         : 0,
+    archivedPlans,
+    awaitingGenerationConfirmation: rawState.awaitingGenerationConfirmation === true,
     budget,
     days,
     destination,
     followUpMessages,
     notes,
+    origin,
     timing,
     transportPreference,
     travelers,
@@ -512,6 +556,32 @@ export async function saveHomePlannerStoreForUser(
           updatedAtMs: chat.updatedAtMs,
           state: {
             aiQuestionCount: chat.state.aiQuestionCount,
+            archivedPlans: chat.state.archivedPlans
+              .slice(-8)
+              .map((block) => ({
+                plan: {
+                  budget: normalizeBudgetToEuro(block.plan.budget),
+                  createdAtMs: block.plan.createdAtMs || Date.now(),
+                  days: block.plan.days.trim(),
+                  destination: block.plan.destination.trim(),
+                  formattedPlanText: block.plan.formattedPlanText.trim(),
+                  timing: block.plan.timing.trim(),
+                  transportPreference: block.plan.transportPreference.trim(),
+                  travelers: block.plan.travelers.trim(),
+                  plan: block.plan.plan,
+                  sourceKey: block.plan.sourceKey.trim(),
+                },
+                trailingMessages: block.trailingMessages
+                  .filter((message) => message.text.trim().length > 0)
+                  .slice(-20)
+                  .map((message) => ({
+                    createdAtMs: message.createdAtMs,
+                    id: message.id,
+                    role: message.role,
+                    text: message.text.trim(),
+                  })),
+              })),
+            awaitingGenerationConfirmation: chat.state.awaitingGenerationConfirmation === true,
             budget: normalizeBudgetToEuro(chat.state.budget),
             days: chat.state.days.trim(),
             destination: chat.state.destination.trim(),
@@ -525,6 +595,7 @@ export async function saveHomePlannerStoreForUser(
                 text: message.text.trim(),
               })),
             notes: chat.state.notes.trim(),
+            origin: chat.state.origin.trim(),
             timing: chat.state.timing.trim(),
             transportPreference: chat.state.transportPreference.trim(),
             travelers: chat.state.travelers.trim(),

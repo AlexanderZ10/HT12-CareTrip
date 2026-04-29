@@ -7,6 +7,7 @@ import Animated, {
   useSharedValue,
   withSpring,
 } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAppLanguage } from "../../components/app-language-provider";
 import { useAppTheme } from "../../components/app-theme-provider";
@@ -56,6 +57,12 @@ function TabIcon({
 export default function TabsLayout() {
   const { colors } = useAppTheme();
   const { t } = useAppLanguage();
+  const insets = useSafeAreaInsets();
+  const tabBarBottomPadding = Math.max(
+    insets.bottom,
+    Platform.OS === "android" ? Spacing.sm + 2 : Spacing.sm
+  );
+  const tabBarHeight = TAB_BAR_HEIGHT + tabBarBottomPadding;
 
   return (
     <Tabs
@@ -73,11 +80,11 @@ export default function TabsLayout() {
           borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: colors.divider,
           elevation: 0,
-          height: TAB_BAR_HEIGHT,
-          paddingBottom: Platform.OS === "ios" ? Spacing.sm : Spacing.xs,
-          paddingTop: Spacing.sm,
+          height: tabBarHeight,
+          paddingBottom: tabBarBottomPadding,
+          paddingTop: Platform.OS === "android" ? Spacing.xs : Spacing.sm,
         },
-        tabBarHideOnKeyboard: true,
+        tabBarHideOnKeyboard: Platform.OS === "ios",
       }}
     >
       <Tabs.Screen
