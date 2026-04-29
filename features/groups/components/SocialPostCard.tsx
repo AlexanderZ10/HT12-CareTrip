@@ -140,7 +140,7 @@ export function SocialPostCard({
   const displayCaption =
     captionTooLong && !showFullCaption ? `${post.caption.slice(0, 120).trim()}…` : post.caption;
   const labels = getCommentLabels(language);
-  const visibleComments = commentsExpanded ? comments : comments.slice(-3);
+  const visibleComments = commentsExpanded ? comments : [];
   const hiddenCommentCount = Math.max(comments.length - visibleComments.length, 0);
   const canPostComment = commentDraft.trim().length > 0 && !commenting && !!onCommentSubmit;
   const submitComment = async () => {

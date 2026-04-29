@@ -14,9 +14,11 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
+      "bundleIdentifier": "com.martin5555.caretrip",
       "supportsTablet": true
     },
     "android": {
+      "package": "com.martin5555.caretrip",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/CareTrip-non.png",
@@ -25,7 +27,10 @@
       },
       "edgeToEdgeEnabled": true,
       "softwareKeyboardLayoutMode": "resize",
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "output": "static",
@@ -56,11 +61,28 @@
           "icon": "./assets/images/CareTrip-non.png",
           "color": "#E6F4FE"
         }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow CareTrip to use the microphone so you can dictate trip ideas to the AI planner.",
+          "speechRecognitionPermission": "Allow CareTrip to use speech recognition so the AI planner can understand your voice messages.",
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
+        }
       ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "630f6826-6a6c-4759-8d7b-c21ca0faae97"
+      }
+    },
+    "owner": "martin_5555"
   }
 }

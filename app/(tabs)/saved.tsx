@@ -1,4 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
+import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
@@ -37,6 +38,9 @@ import { getFirestoreUserMessage } from "../../utils/firestore-errors";
 import { parseSavedTrips, removeSavedTripForUser, type SavedTrip } from "../../utils/saved-trips";
 
 type SavedFilter = "all" | "paid" | "home" | "discover";
+type SavedThemeColors = ReturnType<typeof useAppTheme>["colors"];
+type SavedLanguage = ReturnType<typeof useAppLanguage>["language"];
+type SavedDisplayPlan = Pick<NonNullable<SavedTrip["plan"]>, "stayOptions" | "transportOptions" | "tripDays">;
 
 function formatSavedDate(value: number) {
   return new Intl.DateTimeFormat("bg-BG", {
@@ -45,6 +49,10 @@ function formatSavedDate(value: number) {
     minute: "2-digit",
     month: "long",
   }).format(new Date(value));
+}
+
+function cleanSavedDetailLine(value: string) {
+  return value.replace(/^[-•]\s*/, "").replace(/\s+/g, " ").trim();
 }
 
 function getSavedTripDetailLines(trip: SavedTrip) {
@@ -57,12 +65,17 @@ function getSavedTripDetailLines(trip: SavedTrip) {
 
   return trip.details
     .split("\n")
-    .map((line) => line.replace(/^[-•]\s*/, "").trim())
+    .map(cleanSavedDetailLine)
     .filter((line) => line && !line.endsWith(":"))
     .filter((line) => {
       const normalized = line.toLowerCase();
 
-      if (!normalized || excluded.has(normalized) || seen.has(normalized)) {
+      if (
+        !normalized ||
+        excluded.has(normalized) ||
+        seen.has(normalized) ||
+        normalized === `${trip.duration ?? ""} • ${trip.budget ?? ""}`.trim().toLowerCase()
+      ) {
         return false;
       }
 
@@ -72,13 +85,371 @@ function getSavedTripDetailLines(trip: SavedTrip) {
 }
 
 function buildTripPreviewPoints(trip: SavedTrip) {
-  return getSavedTripDetailLines(trip).slice(0, 3);
+  return getSavedTripDetailLines(trip)
+    .filter((line) => {
+      const normalized = line.toLowerCase();
+
+      return (
+        !normalized.startsWith("verified search for") &&
+        !normalized.startsWith("budget:") &&
+        !normalized.includes(" transport result(s)") &&
+        !normalized.includes(" stay result(s)")
+      );
+    })
+    .slice(0, 3);
+}
+
+function hasVisiblePrice(value?: string | null) {
+  return /\d/.test(value ?? "");
+}
+
+function parseLegacySavedPlan(trip: SavedTrip): SavedDisplayPlan | null {
+  let section: "days" | "other" | "stay" | "transport" = "other";
+  const transportOptions: SavedDisplayPlan["transportOptions"] = [];
+  const stayOptions: SavedDisplayPlan["stayOptions"] = [];
+  const tripDays: SavedDisplayPlan["tripDays"] = [];
+
+  trip.details.split("\n").forEach((rawLine) => {
+    const line = cleanSavedDetailLine(rawLine);
+    const normalized = line.toLowerCase();
+    const heading = normalized.replace(/:$/, "");
+
+    if (!line) {
+      return;
+    }
+
+    if (["transport", "транспорт", "transporte"].includes(heading)) {
+      section = "transport";
+      return;
+    }
+
+    if (
+      [
+        "accommodation",
+        "stay",
+        "настаняване",
+        "unterkunft",
+        "alojamiento",
+        "hébergement",
+        "hebergement",
+      ].includes(heading)
+    ) {
+      section = "stay";
+      return;
+    }
+
+    if (
+      normalized.includes("verified trip structure") ||
+      normalized.includes("проверена структура") ||
+      normalized.includes("trip days") ||
+      normalized.includes("план по дни") ||
+      ["days", "дни"].includes(heading)
+    ) {
+      section = "days";
+      return;
+    }
+
+    if (
+      normalized.includes("verification") ||
+      normalized.includes("проверка") ||
+      normalized.includes("budget:") ||
+      normalized === trip.title.toLowerCase() ||
+      normalized === trip.summary.toLowerCase()
+    ) {
+      section = "other";
+      return;
+    }
+
+    if (section === "transport") {
+      const modeSplit = line.split(":");
+      const mode = modeSplit.length > 1 ? modeSplit[0].trim() : "Transport";
+      const details = modeSplit.length > 1 ? modeSplit.slice(1).join(":").trim() : line;
+      const [provider, route, price, duration, sourceLabel] = details
+        .split("|")
+        .map((part) => part.trim());
+
+      if (provider || route) {
+        transportOptions.push({
+          bookingUrl: "",
+          duration: duration || "",
+          mode,
+          note: "",
+          price: price || "",
+          provider: provider || mode,
+          route: route || "",
+          sourceLabel: sourceLabel || "",
+        });
+      }
+
+      return;
+    }
+
+    if (section === "stay") {
+      const [nameWithType, area, pricePerNight, sourceLabel, directBookingUrl] = line
+        .split("|")
+        .map((part) => part.trim());
+      const typeMatch = nameWithType?.match(/\(([^)]+)\)/);
+      const name = nameWithType?.replace(/\s*\([^)]*\)\s*/g, "").trim();
+
+      if (name || area) {
+        stayOptions.push({
+          area: area || trip.destination,
+          bookingUrl: "",
+          directBookingUrl: directBookingUrl || "",
+          imageUrl: "",
+          name: name || area || trip.destination,
+          note: "",
+          pricePerNight: pricePerNight || "",
+          providerAccommodationId: "",
+          providerKey: "",
+          providerPaymentModes: [],
+          providerProductId: "",
+          ratingLabel: "",
+          reservationMode: "",
+          sourceLabel: sourceLabel || "",
+          type: typeMatch?.[1] || "Stay",
+        });
+      }
+
+      return;
+    }
+
+    if (section === "days") {
+      const [dayLabel, rest] = line.split(":").map((part) => part.trim());
+      const [title, itemsText] = (rest || line).split("|").map((part) => part.trim());
+      const items = (itemsText || "")
+        .split("•")
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+      if (title || items.length > 0) {
+        tripDays.push({
+          dayLabel: dayLabel || `Day ${tripDays.length + 1}`,
+          items,
+          title: title || dayLabel || `Day ${tripDays.length + 1}`,
+        });
+      }
+    }
+  });
+
+  if (transportOptions.length === 0 && stayOptions.length === 0 && tripDays.length === 0) {
+    return null;
+  }
+
+  return { stayOptions, transportOptions, tripDays };
+}
+
+function getSavedDisplayPlan(trip: SavedTrip): SavedDisplayPlan | null {
+  return trip.plan ?? parseLegacySavedPlan(trip);
+}
+
+function getSavedLabels(language: SavedLanguage) {
+  if (language === "bg") {
+    return {
+      days: "План по дни",
+      details: "Детайли",
+      hotelSite: "Хотел",
+      open: "Отвори",
+      source: "Provider",
+      stay: "Настаняване",
+      transport: "Транспорт",
+      verified: "точна цена",
+    };
+  }
+
+  return {
+    days: "Trip days",
+    details: "Details",
+    hotelSite: "Hotel",
+    open: "Open",
+    source: "Provider",
+    stay: "Accommodation",
+    transport: "Transport",
+    verified: "exact price",
+  };
+}
+
+function SavedOfferRow({
+  bookingUrl,
+  colors,
+  icon,
+  meta,
+  price,
+  sourceLabel,
+  title,
+  verifiedLabel,
+}: {
+  bookingUrl?: string;
+  colors: SavedThemeColors;
+  icon: keyof typeof MaterialIcons.glyphMap;
+  meta: string;
+  price?: string;
+  sourceLabel?: string;
+  title: string;
+  verifiedLabel: string;
+}) {
+  return (
+    <View style={[styles.savedOfferRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <View style={[styles.savedOfferIcon, { backgroundColor: colors.accentMuted }]}>
+        <MaterialIcons name={icon} size={18} color={colors.accent} />
+      </View>
+
+      <View style={styles.savedOfferBody}>
+        <Text style={[styles.savedOfferTitle, { color: colors.textPrimary }]} numberOfLines={2}>
+          {title}
+        </Text>
+        {meta ? (
+          <Text style={[styles.savedOfferMeta, { color: colors.textSecondary }]} numberOfLines={2}>
+            {meta}
+          </Text>
+        ) : null}
+        {sourceLabel ? (
+          <Text style={[styles.savedOfferSource, { color: colors.textMuted }]} numberOfLines={1}>
+            {sourceLabel}
+          </Text>
+        ) : null}
+      </View>
+
+      <View style={styles.savedOfferSide}>
+        {hasVisiblePrice(price) ? (
+          <View style={[styles.savedOfferPricePill, { backgroundColor: colors.successBackground, borderColor: colors.successBorder }]}>
+            <Text style={[styles.savedOfferPriceText, { color: colors.successText }]} numberOfLines={1}>
+              {price}
+            </Text>
+            <Text style={[styles.savedOfferVerifiedText, { color: colors.successText }]} numberOfLines={1}>
+              {verifiedLabel}
+            </Text>
+          </View>
+        ) : null}
+        {bookingUrl ? (
+          <TouchableOpacity
+            style={[styles.savedOfferOpenButton, { backgroundColor: colors.textPrimary }]}
+            onPress={() => {
+              void Linking.openURL(bookingUrl);
+            }}
+            activeOpacity={0.9}
+          >
+            <MaterialIcons name="open-in-new" size={15} color={colors.buttonTextOnAction} />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+function SavedTripHighlights({
+  colors,
+  compact = false,
+  language,
+  trip,
+}: {
+  colors: SavedThemeColors;
+  compact?: boolean;
+  language: SavedLanguage;
+  trip: SavedTrip;
+}) {
+  const labels = getSavedLabels(language);
+  const plan = getSavedDisplayPlan(trip);
+
+  if (!plan) {
+    const previewPoints = buildTripPreviewPoints(trip);
+
+    if (previewPoints.length === 0) {
+      return null;
+    }
+
+    return (
+      <View style={styles.previewPointsWrap}>
+        {previewPoints.map((point) => (
+          <Text key={`${trip.id}-${point}`} style={[styles.previewPointText, { color: colors.textSecondary }]} numberOfLines={compact ? 2 : undefined}>
+            • {point}
+          </Text>
+        ))}
+      </View>
+    );
+  }
+
+  const transportOptions = plan.transportOptions.slice(0, compact ? 1 : 3);
+  const stayOptions = plan.stayOptions.slice(0, compact ? 1 : 3);
+  const dayPlans = plan.tripDays.slice(0, compact ? 2 : 5);
+
+  return (
+    <View style={styles.structuredPreview}>
+      {transportOptions.length > 0 ? (
+        <View style={styles.structuredSection}>
+          <View style={styles.structuredSectionHeader}>
+            <MaterialIcons name="flight-takeoff" size={18} color={colors.accent} />
+            <Text style={[styles.structuredSectionTitle, { color: colors.textPrimary }]}>{labels.transport}</Text>
+          </View>
+          {transportOptions.map((option, index) => (
+            <SavedOfferRow
+              key={`${trip.id}-transport-${option.provider}-${index}`}
+              bookingUrl={option.bookingUrl}
+              colors={colors}
+              icon="flight"
+              meta={[option.route, option.duration].filter(Boolean).join(" • ")}
+              price={option.price}
+              sourceLabel={option.sourceLabel}
+              title={option.provider || option.mode}
+              verifiedLabel={labels.verified}
+            />
+          ))}
+        </View>
+      ) : null}
+
+      {stayOptions.length > 0 ? (
+        <View style={styles.structuredSection}>
+          <View style={styles.structuredSectionHeader}>
+            <MaterialIcons name="hotel" size={18} color={colors.accent} />
+            <Text style={[styles.structuredSectionTitle, { color: colors.textPrimary }]}>{labels.stay}</Text>
+          </View>
+          {stayOptions.map((stay, index) => (
+            <SavedOfferRow
+              key={`${trip.id}-stay-${stay.name}-${index}`}
+              bookingUrl={stay.directBookingUrl || stay.bookingUrl}
+              colors={colors}
+              icon="hotel"
+              meta={[stay.type, stay.area].filter(Boolean).join(" • ")}
+              price={stay.pricePerNight}
+              sourceLabel={stay.directBookingUrl ? labels.hotelSite : stay.sourceLabel}
+              title={stay.name}
+              verifiedLabel={labels.verified}
+            />
+          ))}
+        </View>
+      ) : null}
+
+      {dayPlans.length > 0 ? (
+        <View style={styles.structuredSection}>
+          <View style={styles.structuredSectionHeader}>
+            <MaterialIcons name="route" size={18} color={colors.accent} />
+            <Text style={[styles.structuredSectionTitle, { color: colors.textPrimary }]}>{labels.days}</Text>
+          </View>
+          <View style={styles.savedDayGrid}>
+            {dayPlans.map((day, index) => (
+              <View key={`${trip.id}-day-${day.dayLabel}-${index}`} style={[styles.savedDayCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Text style={[styles.savedDayLabel, { color: colors.accent }]}>{day.dayLabel}</Text>
+                <Text style={[styles.savedDayTitle, { color: colors.textPrimary }]} numberOfLines={2}>
+                  {day.title}
+                </Text>
+                {day.items.slice(0, compact ? 1 : 3).map((item, itemIndex) => (
+                  <Text key={`${day.dayLabel}-${itemIndex}`} style={[styles.savedDayItem, { color: colors.textSecondary }]} numberOfLines={2}>
+                    • {item}
+                  </Text>
+                ))}
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
 }
 
 export default function SavedTabScreen() {
   const router = useRouter();
   const { colors } = useAppTheme();
-  const { t } = useAppLanguage();
+  const { language, t } = useAppLanguage();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const isPhoneLayout = width < 768;
@@ -405,7 +776,6 @@ export default function SavedTabScreen() {
 
         {filteredTrips.map((trip) => {
           const isDeleting = deletingTripKey === trip.sourceKey;
-          const previewPoints = buildTripPreviewPoints(trip);
 
           return (
           <TouchableOpacity
@@ -488,19 +858,7 @@ export default function SavedTabScreen() {
             </Text>
           ) : null}
 
-          {previewPoints.length > 0 ? (
-            <View style={styles.previewPointsWrap}>
-              {previewPoints.map((point) => (
-                <Text key={`${trip.id}-${point}`} style={[styles.previewPointText, { color: colors.textSecondary }]}>
-                  • {point}
-                </Text>
-              ))}
-            </View>
-          ) : null}
-
-          <Text style={[styles.detailsText, { color: colors.textSecondary }]} numberOfLines={isPhoneLayout ? 6 : 5}>
-            {trip.details}
-          </Text>
+          <SavedTripHighlights colors={colors} compact language={language} trip={trip} />
           </TouchableOpacity>
         );
         })}
@@ -568,11 +926,15 @@ export default function SavedTabScreen() {
                   contentContainerStyle={styles.modalDetailsContent}
                   showsVerticalScrollIndicator={false}
                 >
-                  {getSavedTripDetailLines(selectedTrip).map((line) => (
-                    <Text key={`${selectedTrip.id}-${line}`} style={[styles.modalDetailLine, { color: colors.textSecondary }]}>
-                      • {line}
-                    </Text>
-                  ))}
+                  {getSavedDisplayPlan(selectedTrip) ? (
+                    <SavedTripHighlights colors={colors} language={language} trip={selectedTrip} />
+                  ) : (
+                    getSavedTripDetailLines(selectedTrip).map((line) => (
+                      <Text key={`${selectedTrip.id}-${line}`} style={[styles.modalDetailLine, { color: colors.textSecondary }]}>
+                        • {line}
+                      </Text>
+                    ))
+                  )}
                 </ScrollView>
               </>
             ) : null}
@@ -853,6 +1215,108 @@ const styles = StyleSheet.create({
   },
   detailsText: {
     ...TypeScale.bodyMd,
+  },
+  structuredPreview: {
+    gap: Spacing.md,
+    marginTop: Spacing.sm,
+  },
+  structuredSection: {
+    gap: Spacing.sm,
+  },
+  structuredSectionHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: Spacing.sm,
+  },
+  structuredSectionTitle: {
+    ...TypeScale.titleMd,
+    fontWeight: FontWeight.extrabold,
+  },
+  savedOfferRow: {
+    alignItems: "center",
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: Spacing.sm,
+    padding: Spacing.md,
+  },
+  savedOfferIcon: {
+    alignItems: "center",
+    borderRadius: Radius.md,
+    height: 38,
+    justifyContent: "center",
+    width: 38,
+  },
+  savedOfferBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  savedOfferTitle: {
+    ...TypeScale.titleSm,
+    fontWeight: FontWeight.extrabold,
+  },
+  savedOfferMeta: {
+    ...TypeScale.bodySm,
+    marginTop: 2,
+  },
+  savedOfferSource: {
+    ...TypeScale.labelMd,
+    fontWeight: FontWeight.bold,
+    marginTop: 2,
+  },
+  savedOfferSide: {
+    alignItems: "flex-end",
+    gap: Spacing.xs,
+  },
+  savedOfferPricePill: {
+    alignItems: "flex-end",
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    maxWidth: 116,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+  },
+  savedOfferPriceText: {
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.black,
+  },
+  savedOfferVerifiedText: {
+    ...TypeScale.labelSm,
+    fontWeight: FontWeight.bold,
+  },
+  savedOfferOpenButton: {
+    alignItems: "center",
+    borderRadius: Radius.md,
+    height: 34,
+    justifyContent: "center",
+    width: 34,
+  },
+  savedDayGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Spacing.sm,
+  },
+  savedDayCard: {
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    flexGrow: 1,
+    minWidth: 150,
+    padding: Spacing.md,
+  },
+  savedDayLabel: {
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.black,
+    marginBottom: 2,
+    textTransform: "uppercase",
+  },
+  savedDayTitle: {
+    ...TypeScale.titleSm,
+    fontWeight: FontWeight.extrabold,
+    marginBottom: Spacing.xs,
+  },
+  savedDayItem: {
+    ...TypeScale.bodySm,
+    marginBottom: 2,
   },
   modalOverlay: {
     flex: 1,

@@ -104,6 +104,7 @@ function parseStructuredPlan(value: unknown): GroundedTravelPlan | null {
           .map((item) => ({
             area: sanitizeString(item.area),
             bookingUrl: sanitizeString(item.bookingUrl),
+            directBookingUrl: sanitizeString(item.directBookingUrl),
             imageUrl: sanitizeString(item.imageUrl),
             name: sanitizeString(item.name),
             note: sanitizeString(item.note),

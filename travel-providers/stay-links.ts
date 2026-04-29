@@ -1,4 +1,3 @@
-import { buildRome2RioHotelsUrl } from "./rome2rio-links";
 import type { TravelDateParts } from "./skyscanner";
 
 export type StaySearchLinkOffer = {
@@ -10,7 +9,7 @@ export type StaySearchLinkOffer = {
   priceAmount: number | null;
   priceCurrency: string;
   providerAccommodationId: string;
-  providerKey: "airbnb" | "booking" | "google-hotels" | "rome2rio";
+  providerKey: "airbnb" | "booking" | "google-hotels";
   providerPaymentModes: string[];
   providerProductId: string;
   ratingLabel: string;
@@ -151,27 +150,6 @@ export function buildStaySearchLinkOffers(params: {
       reservationMode: "provider_redirect",
       sourceLabel: "Google Hotels",
       type: "Hotel comparison",
-    },
-    {
-      area: destinationLabel,
-      bookingUrl: buildRome2RioHotelsUrl({
-        destinationQuery: destinationLabel,
-        originQuery: params.originQuery,
-        transportPreference: params.transportPreference,
-      }),
-      imageUrl: "",
-      name: `Rome2Rio hotels in ${destinationLabel}`,
-      note: `Open a unified Rome2Rio hotels view for ${checkInDate} → ${checkOutDate}.`,
-      priceAmount: null,
-      priceCurrency: params.currency,
-      providerAccommodationId: "",
-      providerKey: "rome2rio",
-      providerPaymentModes: [],
-      providerProductId: "",
-      ratingLabel: "",
-      reservationMode: "provider_redirect",
-      sourceLabel: "Rome2Rio",
-      type: "Hotel search",
     },
   ] satisfies StaySearchLinkOffer[];
 }

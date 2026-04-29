@@ -566,21 +566,32 @@ export default function SocialProfileTabScreen() {
 
                   return (
                     <View key={profile.uid} style={styles.followRow}>
-                      <Avatar label={profile.label} photoUrl={profile.photoUrl} size={44} />
-                      <View style={styles.followRowText}>
-                        <Text
-                          numberOfLines={1}
-                          style={[styles.followName, { color: colors.textPrimary }]}
-                        >
-                          {profile.label}
-                        </Text>
-                        <Text
-                          numberOfLines={1}
-                          style={[styles.followMeta, { color: colors.textSecondary }]}
-                        >
-                          {profile.username ? `@${profile.username}` : profile.homeBase || "Traveler"}
-                        </Text>
-                      </View>
+                      <TouchableOpacity
+                        accessibilityLabel={`Open ${profile.label}'s profile`}
+                        accessibilityRole="button"
+                        activeOpacity={0.7}
+                        onPress={() => {
+                          setFollowListKind(null);
+                          vm.openComposer(profile.uid);
+                        }}
+                        style={styles.followRowTappable}
+                      >
+                        <Avatar label={profile.label} photoUrl={profile.photoUrl} size={44} />
+                        <View style={styles.followRowText}>
+                          <Text
+                            numberOfLines={1}
+                            style={[styles.followName, { color: colors.textPrimary }]}
+                          >
+                            {profile.label}
+                          </Text>
+                          <Text
+                            numberOfLines={1}
+                            style={[styles.followMeta, { color: colors.textSecondary }]}
+                          >
+                            {profile.username ? `@${profile.username}` : profile.homeBase || "Traveler"}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
                       <TouchableOpacity
                         activeOpacity={0.8}
                         disabled={actionDisabled || loading}
@@ -938,6 +949,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: Spacing.md,
     paddingVertical: Spacing.sm,
+  },
+  followRowTappable: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    gap: Spacing.md,
   },
   followRowText: {
     flex: 1,

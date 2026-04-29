@@ -272,7 +272,7 @@ export const searchOffers = onCall({ region: "us-central1" }, async (request) =>
       notes.push(`Booking.com stays not available: ${message}`);
     }
   } else {
-    notes.push("Booking.com Demand API is unavailable, so Rome2Rio hotel search fallback will be used.");
+    notes.push("Booking.com Demand API is unavailable, so provider hotel search fallbacks will be used.");
   }
 
   let buses: Awaited<ReturnType<typeof searchBusbudOffers>> = [];

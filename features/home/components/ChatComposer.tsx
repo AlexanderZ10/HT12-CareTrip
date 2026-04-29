@@ -1,7 +1,8 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import React from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   type LayoutChangeEvent,
   Platform,
   StyleSheet,
@@ -13,6 +14,16 @@ import {
 import { useAppLanguage } from "../../../components/app-language-provider";
 import { Radius, Spacing, TypeScale } from "../../../constants/design-system";
 import type { HomePlannerStep } from "../../../utils/home-chat-storage";
+import { getSpeechRecognitionModule } from "../../../utils/speech-recognition";
+import type { AppLanguage } from "../../../utils/translations";
+
+const RECOGNITION_LOCALES: Record<AppLanguage, string> = {
+  bg: "bg-BG",
+  en: "en-US",
+  de: "de-DE",
+  es: "es-ES",
+  fr: "fr-FR",
+};
 
 type ChatComposerProps = {
   canSend: boolean;
@@ -40,6 +51,7 @@ type ChatComposerProps = {
   onReset: () => void;
   onSend: () => void;
   planning: boolean;
+  planningLabel: string | null;
   step: HomePlannerStep;
 };
 
@@ -84,9 +96,99 @@ export function ChatComposer({
   onReset,
   onSend,
   planning,
+  planningLabel,
   step,
 }: ChatComposerProps) {
   const { language, t } = useAppLanguage();
+  const [isListening, setIsListening] = useState(false);
+  const baseTextRef = useRef<string>("");
+  const onChangeTextRef = useRef(onChangeText);
+  onChangeTextRef.current = onChangeText;
+
+  const speechModule = useMemo(() => getSpeechRecognitionModule(), []);
+  const speechSupported = speechModule !== null;
+
+  const stopListening = useCallback(() => {
+    if (!speechModule) {
+      return;
+    }
+    try {
+      speechModule.stop();
+    } catch {
+      // ignore — module may already be stopped
+    }
+  }, [speechModule]);
+
+  useEffect(() => {
+    if (!speechModule) {
+      return;
+    }
+
+    const subs = [
+      speechModule.addListener("start", () => setIsListening(true)),
+      speechModule.addListener("end", () => setIsListening(false)),
+      speechModule.addListener("error", (payload: unknown) => {
+        setIsListening(false);
+        const error = (payload as { error?: string } | null)?.error;
+        if (error && error !== "aborted" && error !== "no-speech") {
+          Alert.alert(t("home.dictationUnavailable"));
+        }
+      }),
+      speechModule.addListener("result", (payload: unknown) => {
+        const transcript =
+          (payload as {
+            results?: Array<{ transcript?: string }>;
+          } | null)?.results?.[0]?.transcript ?? "";
+        if (!transcript) {
+          return;
+        }
+        const base = baseTextRef.current;
+        const merged = base ? `${base.trimEnd()} ${transcript}` : transcript;
+        onChangeTextRef.current(merged);
+      }),
+    ];
+
+    return () => {
+      subs.forEach((sub) => sub.remove());
+      try {
+        speechModule.stop();
+      } catch {
+        // ignore
+      }
+    };
+  }, [speechModule, t]);
+
+  const handleToggleDictation = useCallback(async () => {
+    if (planning || !speechModule) {
+      return;
+    }
+    if (isListening) {
+      stopListening();
+      return;
+    }
+
+    try {
+      const result = await speechModule.requestPermissionsAsync();
+      if (!result.granted) {
+        Alert.alert(t("home.dictationPermissionDenied"));
+        return;
+      }
+    } catch {
+      Alert.alert(t("home.dictationUnavailable"));
+      return;
+    }
+
+    baseTextRef.current = chatInput;
+    try {
+      speechModule.start({
+        lang: RECOGNITION_LOCALES[language] ?? "en-US",
+        interimResults: true,
+        continuous: false,
+      });
+    } catch {
+      Alert.alert(t("home.dictationUnavailable"));
+    }
+  }, [chatInput, isListening, language, planning, speechModule, stopListening, t]);
 
   return (
     <View
@@ -121,9 +223,7 @@ export function ChatComposer({
           style={[styles.input, { color: colors.textPrimary }]}
           placeholder={
             planning
-              ? step === "done"
-                ? t("home.searchingPrices")
-                : t("home.aiThinking")
+              ? planningLabel ?? ""
               : getPlaceholder(step, language)
           }
           placeholderTextColor={colors.inputPlaceholder}
@@ -141,6 +241,34 @@ export function ChatComposer({
             }
           }}
         />
+        <TouchableOpacity
+          accessibilityLabel={
+            isListening ? t("home.stopDictation") : t("home.startDictation")
+          }
+          style={[
+            styles.micButton,
+            {
+              backgroundColor: isListening ? colors.accent : colors.cardAlt,
+              borderColor: colors.border,
+            },
+            planning && styles.actionDisabled,
+          ]}
+          onPress={() => {
+            if (!speechSupported) {
+              Alert.alert(t("home.dictationUnavailable"));
+              return;
+            }
+            void handleToggleDictation();
+          }}
+          disabled={planning}
+          activeOpacity={0.9}
+        >
+          <MaterialIcons
+            name={isListening ? "stop" : "mic"}
+            size={18}
+            color={isListening ? colors.buttonTextOnAction : colors.textMuted}
+          />
+        </TouchableOpacity>
         <TouchableOpacity
           accessibilityLabel="Send message"
           style={[
@@ -202,6 +330,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginLeft: Spacing.sm,
     marginBottom: 1,
+  },
+  micButton: {
+    alignItems: "center",
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    height: 38,
+    justifyContent: "center",
+    marginLeft: Spacing.xs,
+    marginBottom: 1,
+    width: 38,
   },
   resetButton: {
     alignItems: "center",

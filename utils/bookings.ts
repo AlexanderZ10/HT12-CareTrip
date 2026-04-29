@@ -78,6 +78,7 @@ function sanitizeStayOption(value: unknown): PlannerStayOption | null {
   return {
     area: sanitizeString(rawValue.area),
     bookingUrl: sanitizeString(rawValue.bookingUrl),
+    directBookingUrl: sanitizeString(rawValue.directBookingUrl),
     imageUrl: sanitizeString(rawValue.imageUrl),
     name: sanitizeString(rawValue.name),
     note: sanitizeString(rawValue.note),

@@ -1,4 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
+import * as Linking from "expo-linking";
 import React from "react";
 import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
@@ -23,6 +24,18 @@ type BookingForm = {
 };
 
 type ThemeColors = ReturnType<typeof useAppTheme>["colors"];
+
+function getHostLabel(value?: string) {
+  if (!value) {
+    return "";
+  }
+
+  try {
+    return new URL(value).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
 
 type BookingModalProps = {
   bookingError: string;
@@ -331,12 +344,17 @@ function FormView({
   subtotalLabel: string;
 }) {
   const hasVisiblePrice = (value?: string) => !!value?.match(/\d/);
+  const selectedProviderUrl = selectedStay?.bookingUrl || selectedTransport?.bookingUrl || "";
+  const selectedHotelDirectUrl = selectedStay?.directBookingUrl || "";
   const bookableTransportOptions = latestPlan.plan.transportOptions
     .map((option, index) => ({ index, option }))
     .filter(({ option }) => hasVisiblePrice(option.price));
   const bookableStayOptions = latestPlan.plan.stayOptions
     .map((stay, index) => ({ index, stay }))
     .filter(({ stay }) => hasVisiblePrice(stay.pricePerNight));
+  const payButtonLabel = selectedTransport
+    ? `Плати тестово и отвори ${selectedTransport.provider}`
+    : "Плати тестово и продължи";
 
   return (
     <>
@@ -386,6 +404,11 @@ function FormView({
                 <Text style={[styles.bookingOptionPrice, { color: colors.accent }]}>{option.price}</Text>
               </View>
               <Text style={[styles.bookingOptionMeta, { color: colors.textSecondary }]}>{option.provider}</Text>
+              {option.sourceLabel ? (
+                <Text style={[styles.bookingOptionMeta, { color: colors.textSecondary }]}>
+                  Сайт за резервация: {option.sourceLabel}
+                </Text>
+              ) : null}
               <Text style={[styles.bookingOptionMeta, { color: colors.textSecondary }]}>{option.route}</Text>
               <Text style={[styles.bookingOptionNote, { color: colors.textMuted }]}>
                 Точна цена за това търсене
@@ -442,6 +465,16 @@ function FormView({
                 <Text style={[styles.bookingOptionPrice, { color: colors.accent }]}>{stay.pricePerNight}</Text>
               </View>
               <Text style={[styles.bookingOptionMeta, { color: colors.textSecondary }]}>{stay.type} • {stay.area}</Text>
+              {stay.directBookingUrl ? (
+                <Text style={[styles.bookingOptionMeta, { color: colors.textSecondary }]}>
+                  Сайт на хотела: {getHostLabel(stay.directBookingUrl)}
+                </Text>
+              ) : null}
+              {stay.sourceLabel ? (
+                <Text style={[styles.bookingOptionMeta, { color: colors.textSecondary }]}>
+                  Сайт за резервация: {stay.sourceLabel}
+                </Text>
+              ) : null}
               <Text style={[styles.bookingOptionNote, { color: colors.textMuted }]}>
                 Точен total за избраните дати
               </Text>
@@ -537,6 +570,16 @@ function FormView({
         <Text style={[styles.bookingSummaryLine, { color: colors.warningText }]}>
           Provider: {providerLabel}
         </Text>
+        {selectedHotelDirectUrl ? (
+          <Text style={[styles.bookingSummaryLine, { color: colors.warningText }]}>
+            Сайт на хотела: {getHostLabel(selectedHotelDirectUrl)}
+          </Text>
+        ) : null}
+        {selectedProviderUrl ? (
+          <Text style={[styles.bookingSummaryLine, { color: colors.warningText }]}>
+            Сайт за резервация: {providerLabel}
+          </Text>
+        ) : null}
         <Text style={[styles.bookingSummaryTotal, { color: colors.warningText }]}>{bookingEstimateLabel}</Text>
         <Text style={[styles.bookingSummaryHint, { color: colors.warningText }]}>
           {reservationStatusLabel}
@@ -544,6 +587,39 @@ function FormView({
       </View>
 
       {bookingError ? <Text style={[styles.bookingErrorText, { color: colors.errorText }]}>{bookingError}</Text> : null}
+
+      {selectedHotelDirectUrl || selectedProviderUrl ? (
+        <View style={styles.providerLinksRow}>
+          {selectedHotelDirectUrl ? (
+            <TouchableOpacity
+              style={[styles.providerLinkButton, { backgroundColor: colors.cardAlt, borderColor: colors.border }]}
+              onPress={() => {
+                void Linking.openURL(selectedHotelDirectUrl);
+              }}
+              activeOpacity={0.9}
+            >
+              <MaterialIcons name="language" size={16} color={colors.textPrimary} />
+              <Text style={[styles.providerLinkButtonText, { color: colors.textPrimary }]}>
+                Сайт на хотела
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+          {selectedProviderUrl ? (
+            <TouchableOpacity
+              style={[styles.providerLinkButton, { backgroundColor: colors.cardAlt, borderColor: colors.border }]}
+              onPress={() => {
+                void Linking.openURL(selectedProviderUrl);
+              }}
+              activeOpacity={0.9}
+            >
+              <MaterialIcons name="open-in-new" size={16} color={colors.textPrimary} />
+              <Text style={[styles.providerLinkButtonText, { color: colors.textPrimary }]}>
+                Сайт за резервация
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      ) : null}
 
       <TouchableOpacity
         style={[styles.bookingPayButton, { backgroundColor: colors.hero }, bookingProcessing && styles.disabledButton]}
@@ -553,7 +629,7 @@ function FormView({
       >
         <MaterialIcons name="lock" size={18} color={colors.buttonTextOnAction} />
         <Text style={[styles.bookingPayButtonText, { color: colors.buttonTextOnAction }]}>
-          {bookingProcessing ? "Обработваме..." : "Плати тестово и продължи"}
+          {bookingProcessing ? "Обработваме..." : payButtonLabel}
         </Text>
       </TouchableOpacity>
     </>
@@ -719,6 +795,28 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
     marginBottom: Spacing.sm,
   },
+  providerLinksRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginBottom: Spacing.sm,
+  },
+  providerLinkButton: {
+    alignItems: "center",
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    flexDirection: "row",
+    justifyContent: "center",
+    marginBottom: Spacing.sm,
+    marginRight: Spacing.sm,
+    minHeight: 40,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  providerLinkButtonText: {
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.extrabold,
+    marginLeft: Spacing.sm,
+  },
   bookingPayButton: {
     borderRadius: Radius.lg,
     paddingVertical: Spacing.lg,
@@ -728,8 +826,10 @@ const styles = StyleSheet.create({
   },
   bookingPayButtonText: {
     ...TypeScale.titleSm,
+    flexShrink: 1,
     fontWeight: FontWeight.extrabold,
     marginLeft: Spacing.sm,
+    textAlign: "center",
   },
   disabledButton: {
     opacity: 0.55,

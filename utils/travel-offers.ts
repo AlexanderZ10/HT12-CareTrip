@@ -5,7 +5,10 @@ import { Platform } from "react-native";
 import { functions } from "../firebase";
 import { searchFreeHotels } from "../travel-providers/free-hotels";
 import { buildStaySearchLinkOffers } from "../travel-providers/stay-links";
-import { buildTransportSearchLinkOffers } from "../travel-providers/transport-links";
+import {
+  buildTransportSearchLinkOffers,
+  getRequestedTransportOperatorNames,
+} from "../travel-providers/transport-links";
 import { callAI, getAIApiKey } from "./ai";
 import { normalizeBudgetToEuro } from "./currency";
 import { sanitizeString } from "./sanitize";
@@ -27,6 +30,7 @@ export type LiveTravelOffer = {
 export type LiveStayOffer = {
   area: string;
   bookingUrl: string;
+  directBookingUrl?: string;
   imageUrl: string;
   name: string;
   note: string;
@@ -137,10 +141,12 @@ type GroundedPriceCheckPayload = {
     priceCurrency?: string;
   }>;
   transport?: Array<{
+    bookingUrl?: string;
     evidence?: string;
     id?: string;
     priceAmount?: number | string | null;
     priceCurrency?: string;
+    sourceLabel?: string;
   }>;
 };
 
@@ -180,6 +186,78 @@ function sanitizeBookingUrl(value: unknown) {
   }
 }
 
+const ROUTE_ESTIMATE_TRANSPORT_SOURCE_TERMS = [
+  "google maps",
+  "rome2rio",
+  "rome 2 rio",
+];
+
+const ROUTE_ESTIMATE_TRANSPORT_URL_HOSTS = [
+  "google.com/maps",
+  "rome2rio.com",
+];
+
+const THIRD_PARTY_FARE_SOURCE_TERMS = [
+  "booking.com",
+  "cheapflights",
+  "edreams",
+  "expedia",
+  "gotogate",
+  "kayak",
+  "kiwi",
+  "lastminute",
+  "momondo",
+  "mytrip",
+  "omio",
+  "opodo",
+  "skyscanner",
+  "trip.com",
+];
+
+const THIRD_PARTY_FARE_URL_HOSTS = [
+  "booking.com",
+  "cheapflights.com",
+  "edreams.com",
+  "expedia.com",
+  "gotogate.com",
+  "kayak.com",
+  "kiwi.com",
+  "lastminute.com",
+  "momondo.com",
+  "mytrip.com",
+  "omio.com",
+  "opodo.com",
+  "skyscanner.com",
+  "skyscanner.net",
+  "trip.com",
+];
+
+function getOfferUrlHostAndPath(value: string) {
+  try {
+    const url = new URL(value);
+    return `${url.hostname}${url.pathname}`.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function isBlockedTransportSource(offer: Pick<LiveTravelOffer, "bookingUrl" | "provider" | "sourceLabel">) {
+  const provider = normalizeLooseText(offer.provider);
+  const sourceLabel = normalizeLooseText(offer.sourceLabel);
+  const hostAndPath = getOfferUrlHostAndPath(offer.bookingUrl);
+
+  return (
+    ROUTE_ESTIMATE_TRANSPORT_SOURCE_TERMS.some(
+      (term) => provider === term || sourceLabel === term || provider.includes(term) || sourceLabel.includes(term)
+    ) ||
+    ROUTE_ESTIMATE_TRANSPORT_URL_HOSTS.some((host) => hostAndPath.includes(host)) ||
+    THIRD_PARTY_FARE_SOURCE_TERMS.some(
+      (term) => provider === term || provider.includes(term)
+    ) ||
+    THIRD_PARTY_FARE_URL_HOSTS.some((host) => provider.includes(host))
+  );
+}
+
 function normalizeCurrencyCode(value: unknown, fallback = "EUR") {
   const normalizedValue = sanitizeString(value, fallback).trim().toUpperCase();
 
@@ -216,7 +294,9 @@ function isExactPricedTransportOffer(offer: LiveTravelOffer) {
     hasPositivePriceAmount(offer.priceAmount) &&
     !!offer.bookingUrl.trim() &&
     !!offer.provider.trim() &&
-    !!offer.route.trim()
+    !!offer.sourceLabel.trim() &&
+    !!offer.route.trim() &&
+    !isBlockedTransportSource(offer)
   );
 }
 
@@ -695,6 +775,7 @@ function isLowQualityTransportOffer(offer: LiveTravelOffer) {
     route === "route to be confirmed" ||
     sourceLabel === "provider" ||
     mode === "transport" ||
+    isBlockedTransportSource(offer) ||
     !offer.bookingUrl
   );
 }
@@ -949,7 +1030,7 @@ const GEMINI_FALLBACK_SCHEMA = {
           "sourceLabel",
         ],
       },
-      minItems: 2,
+      minItems: 0,
       maxItems: 4,
     },
     stayOptions: {
@@ -959,6 +1040,7 @@ const GEMINI_FALLBACK_SCHEMA = {
         properties: {
           area: { type: "string" },
           bookingUrl: { type: "string" },
+          directBookingUrl: { type: "string" },
           imageUrl: { type: "string" },
           name: { type: "string" },
           note: { type: "string" },
@@ -1018,6 +1100,7 @@ function sanitizeStayOffer(value: unknown): LiveStayOffer | null {
   return {
     area: sanitizeString(rawValue.area),
     bookingUrl: sanitizeBookingUrl(rawValue.bookingUrl),
+    directBookingUrl: sanitizeBookingUrl(rawValue.directBookingUrl),
     imageUrl: sanitizeString(rawValue.imageUrl),
     name: sanitizeString(rawValue.name),
     note: sanitizeString(rawValue.note),
@@ -1111,14 +1194,15 @@ function buildDeterministicSearchLinks(
       checkOutDate: toTravelDateParts(searchWindow.returnDate),
       currency,
       destinationQuery: input.destination,
-      originQuery: input.profile.personalProfile.homeBase || "Sofia, Bulgaria",
+      originQuery: input.profile.personalProfile.homeBase,
       transportPreference: input.transportPreference,
     }),
     transportOptions: buildTransportSearchLinkOffers({
       currency,
       departureDate: searchWindow.departureDate,
       destinationQuery: input.destination,
-      originQuery: input.profile.personalProfile.homeBase || "Sofia, Bulgaria",
+      notes: input.notes,
+      originQuery: input.profile.personalProfile.homeBase,
       transportPreference: input.transportPreference,
     }),
   };
@@ -1141,20 +1225,24 @@ function sanitizeGroundedPriceCheckPayload(value: unknown) {
 
             const rawEntry = entry as Record<string, unknown>;
             return {
+              bookingUrl: sanitizeBookingUrl(rawEntry.bookingUrl),
               evidence: sanitizeString(rawEntry.evidence),
               id: sanitizeString(rawEntry.id),
               priceAmount: sanitizeNumber(rawEntry.priceAmount),
               priceCurrency: normalizeCurrencyCode(rawEntry.priceCurrency, "EUR"),
+              sourceLabel: sanitizeString(rawEntry.sourceLabel),
             };
           })
           .filter(
             (
               entry
             ): entry is {
+              bookingUrl: string;
               evidence: string;
               id: string;
               priceAmount: number | null;
               priceCurrency: string;
+              sourceLabel: string;
             } => !!entry && !!entry.id
           )
       : [];
@@ -1185,7 +1273,10 @@ function buildGroundedExactPriceSystemPrompt(language: AppLanguage) {
     "Only include a numeric priceAmount when the public web result clearly matches the exact hotel or route and the selected dates.",
     "If you only find generic pages, price ranges, undated prices, or uncertain prices, leave priceAmount as null.",
     "For stays, prefer total price for the selected stay dates, not per-night marketing copy.",
-    "For transport, prefer the visible fare for the selected search. Do not multiply or estimate totals yourself.",
+    "For transport, verify the visible fare from the actual carrier/operator first. If the direct carrier site does not expose a public price, use a reputable third-party booking or fare source only when it shows an exact fare for the same carrier, route, date, and traveler count.",
+    "When a user requested a carrier such as Qatar Airways, Emirates, Turkish Airlines, or Bulgaria Air, check that carrier first, then trusted third-party fare sources for that same carrier if direct pricing is unavailable.",
+    "If you verify an airline fare, keep provider as the operating airline/operator. Use sourceLabel for the site that displayed the fare, and return the direct airline URL or third-party checkout/deep link in bookingUrl.",
+    "Never fill transport prices from Rome2Rio, Google Maps, generic route estimates, undated price ranges, or from-price snippets.",
     "Keep evidence short and factual.",
   ].join("\n");
 }
@@ -1193,6 +1284,7 @@ function buildGroundedExactPriceSystemPrompt(language: AppLanguage) {
 function buildGroundedExactPricePrompt(params: {
   departureDate: string;
   destination: string;
+  requestedOperators: string[];
   returnDate: string;
   stayCandidates: Array<{
     area: string;
@@ -1217,6 +1309,9 @@ function buildGroundedExactPricePrompt(params: {
     `- Departure date: ${params.departureDate}`,
     `- Return date: ${params.returnDate}`,
     `- Travelers: ${params.travelers}`,
+    `- User-requested carriers/operators: ${
+      params.requestedOperators.length > 0 ? params.requestedOperators.join(", ") : "none"
+    }`,
     "",
     "Stay candidates that still need an exact price:",
     ...(params.stayCandidates.length > 0
@@ -1245,16 +1340,21 @@ function buildGroundedExactPricePrompt(params: {
     }
   ],
   "transport": [
-    {
-      "id": "transport-0",
-      "priceAmount": 0,
-      "priceCurrency": "EUR",
-      "evidence": "short proof"
-    }
+	    {
+	      "id": "transport-0",
+	      "bookingUrl": "https://official-carrier.example/booking",
+	      "priceAmount": 0,
+	      "priceCurrency": "EUR",
+	      "sourceLabel": "Official carrier site",
+	      "evidence": "short proof"
+	    }
   ]
 }`,
     "Rules:",
     "- If a candidate has no exact date-matched public price, set priceAmount to null for that candidate.",
+    "- For transport, first use actual carrier/operator pricing; if direct carrier pricing is not public, use a reputable third-party booking/fare source only when it shows an exact dated fare for the same carrier, route, and traveler count.",
+    "- If you verify a third-party fare, keep provider as the operating airline/operator, set sourceLabel to the third-party site, and put the third-party checkout/deep link in bookingUrl.",
+    "- Do not use Rome2Rio, Google Maps, generic route estimates, undated price ranges, or from-price snippets.",
     "- Do not invent providers or URLs.",
     "- Do not include candidates that were not provided.",
     "- Keep evidence under 12 words.",
@@ -1278,12 +1378,14 @@ function buildGroundedExactPriceTextSystemPrompt(language: AppLanguage) {
     `Always reason in ${languageLabel}, but output only the required line format.`,
     "Use Google Search grounding to verify public web prices for the exact selected dates and traveler count.",
     "Return one line per candidate using this exact format:",
-    "id|priceAmountOrNull|priceCurrency|short evidence",
+    "id|priceAmountOrNull|priceCurrency|sourceLabel|bookingUrl|short evidence",
     "Examples:",
-    "stay-0|184|EUR|Booking total shown for selected dates",
-    "transport-0|29|EUR|Train fare shown for selected route",
-    "stay-1|null|EUR|No exact dated public price found",
+    "stay-0|184|EUR|Booking.com||Booking total shown for selected dates",
+    "transport-0|29|EUR|Ryanair|https://www.ryanair.com/|Exact fare shown for selected route",
+    "transport-1|212|USD|Expedia|https://www.expedia.com/|Qatar fare shown for selected date",
+    "stay-1|null|EUR|||No exact dated public price found",
     "If a price is not exact and date-matched, output null.",
+    "For transport, use actual carrier/operator fares first; if unavailable, use reputable third-party booking/fare sources only for exact dated fares for the same carrier. Never use Rome2Rio, Google Maps, generic route estimates, ranges, or from-price snippets.",
     "Do not output any extra text.",
   ].join("\n");
 }
@@ -1291,6 +1393,7 @@ function buildGroundedExactPriceTextSystemPrompt(language: AppLanguage) {
 function buildGroundedExactPriceTextPrompt(params: {
   departureDate: string;
   destination: string;
+  requestedOperators: string[];
   returnDate: string;
   stayCandidates: Array<{
     area: string;
@@ -1315,6 +1418,9 @@ function buildGroundedExactPriceTextPrompt(params: {
     `- Departure date: ${params.departureDate}`,
     `- Return date: ${params.returnDate}`,
     `- Travelers: ${params.travelers}`,
+    `- User-requested carriers/operators: ${
+      params.requestedOperators.length > 0 ? params.requestedOperators.join(", ") : "none"
+    }`,
     "",
     "Stay candidates:",
     ...(params.stayCandidates.length > 0
@@ -1346,7 +1452,8 @@ function parseGroundedPriceCheckText(value: string) {
         return null;
       }
 
-      const [id, rawPriceAmount, rawCurrency, ...rawEvidence] = parts;
+      const [id, rawPriceAmount, rawCurrency, rawSourceOrEvidence, rawBookingUrlOrEvidence, ...rawEvidence] = parts;
+      const hasExtendedFormat = parts.length >= 6;
       const priceAmount =
         rawPriceAmount.toLowerCase() === "null" ? null : sanitizeNumber(rawPriceAmount);
 
@@ -1355,10 +1462,16 @@ function parseGroundedPriceCheckText(value: string) {
       }
 
       return {
-        evidence: rawEvidence.join(" | "),
+        bookingUrl: hasExtendedFormat ? sanitizeBookingUrl(rawBookingUrlOrEvidence) : "",
+        evidence: hasExtendedFormat
+          ? rawEvidence.join(" | ")
+          : [rawSourceOrEvidence, rawBookingUrlOrEvidence, ...rawEvidence]
+              .filter(Boolean)
+              .join(" | "),
         id,
         priceAmount,
         priceCurrency: normalizeCurrencyCode(rawCurrency, "EUR"),
+        sourceLabel: hasExtendedFormat ? sanitizeString(rawSourceOrEvidence) : "",
       };
     })
     .filter(
@@ -1366,9 +1479,11 @@ function parseGroundedPriceCheckText(value: string) {
         entry
       ): entry is {
         evidence: string;
+        bookingUrl: string;
         id: string;
         priceAmount: number | null;
         priceCurrency: string;
+        sourceLabel: string;
       } => !!entry
     );
 
@@ -1396,9 +1511,15 @@ function buildGroundedExactOfferSystemPrompt(language: AppLanguage) {
     "Use Google Search grounding to find public provider-priced travel offers for the exact selected dates.",
     "Return JSON only.",
     "Every returned offer must have a real provider, a valid HTTPS booking/search URL, and a numeric exact priceAmount.",
+    "For transport, provider must be the actual operating company/carrier (examples: Qatar Airways, Emirates, Turkish Airlines, Bulgaria Air, Wizz Air, Ryanair, Air Europa, Iberia, FlixBus, Deutsche Bahn), never a route aggregator.",
+    "For transport, search the official carrier/operator booking page first. If direct carrier pricing is unavailable, use reputable third-party fare/booking sources such as Skyscanner, Kayak, Expedia, Trip.com, Kiwi, Omio, eDreams, or Booking.com flights only when they display an exact dated fare for the same carrier, route, and traveler count.",
+    "For transport, bookingUrl should be the official carrier checkout when possible; otherwise it may be the third-party checkout/deep link that displayed the exact fare. Do not return Rome2Rio, Google Maps, generic route estimates, undated ranges, or from-price snippets as offers.",
+    "For transport, use sourceLabel for the site that displayed the price. If the source is third-party, sourceLabel must be that third-party site while provider remains the airline/operator.",
+    "For stays, name must be the exact hotel/property name. If you find the hotel's official website, put it in directBookingUrl; otherwise use an empty string and keep bookingUrl as the booking/search site.",
     "For stays, priceAmount must be the total stay price for the selected check-in/check-out dates, not an undated nightly estimate.",
-    "For transport, priceAmount must be a visible fare for the selected route and departure date.",
-    "If you cannot verify an exact dated price, omit that offer entirely.",
+    "For transport, priceAmount must be a visible carrier/operator fare for the selected route and departure date. Include connecting flights if no direct flight exists.",
+    "If the user requested a specific airline that does not fly the route directly, search for that airline's connecting flight options and include the exact fare if found on the airline site or a reputable third-party fare source.",
+    "If you cannot verify an exact dated transport price, omit that transport offer entirely.",
     "Do not invent providers, URLs, hotel names, prices, or availability.",
   ].join("\n");
 }
@@ -1407,12 +1528,16 @@ function buildGroundedExactOfferPrompt(params: {
   budget: string;
   departureDate: string;
   destination: string;
+  notes?: string;
   origin: string;
   returnDate: string;
   stayStyle: string;
   transportPreference: string;
   travelers: string;
 }) {
+  const userRequest = params.notes?.trim() || "";
+  const requestedOperators = getRequestedTransportOperatorNames(userRequest);
+
   return [
     "Trip search context:",
     `- Origin: ${params.origin}`,
@@ -1423,7 +1548,18 @@ function buildGroundedExactOfferPrompt(params: {
     `- Budget: ${params.budget}`,
     `- Preferred transport: ${params.transportPreference}`,
     `- Stay style: ${params.stayStyle}`,
+    "- Popular airline pool to consider when relevant: Qatar Airways, Emirates, Turkish Airlines, Bulgaria Air, Lufthansa, Air France, KLM, British Airways, Iberia, Air Europa, Wizz Air, Ryanair, easyJet, Pegasus Airlines, Aegean Airlines, Austrian Airlines, SWISS, LOT Polish Airlines.",
+    `- Requested carrier/operator matches: ${
+      requestedOperators.length > 0 ? requestedOperators.join(", ") : "none"
+    }`,
+    ...(userRequest ? [`- User request: ${userRequest}`] : []),
     "",
+    ...(userRequest
+      ? [
+          `IMPORTANT: The user specifically asked for: "${userRequest}". You MUST search the requested airline/hotel/provider first. If the requested carrier operates this route directly or by connection, check the carrier site first, then reputable third-party fare sources, and include that exact dated fare before cheaper alternatives.`,
+          "",
+        ]
+      : []),
     "Find up to 4 transport offers and up to 4 stay offers.",
     "",
     "Return this exact JSON shape:",
@@ -1437,22 +1573,23 @@ function buildGroundedExactOfferPrompt(params: {
       "note": "Exact dated fare shown by provider.",
       "priceAmount": 29,
       "priceCurrency": "EUR",
-      "provider": "Provider name",
+      "provider": "Actual carrier/operator name",
       "route": "Origin → Destination",
-      "sourceLabel": "Provider name"
+      "sourceLabel": "Booking/search site"
     }
   ],
   "stayOptions": [
     {
       "area": "Central area",
       "bookingUrl": "https://provider.example/stay",
+      "directBookingUrl": "https://hotel.example",
       "imageUrl": "",
-      "name": "Hotel name",
+      "name": "Exact hotel/property name",
       "note": "Exact total for selected dates shown by provider.",
       "priceAmount": 184,
       "priceCurrency": "EUR",
       "ratingLabel": "8.4/10",
-      "sourceLabel": "Provider name",
+      "sourceLabel": "Booking/search site",
       "type": "Hotel"
     }
   ]
@@ -1461,7 +1598,9 @@ function buildGroundedExactOfferPrompt(params: {
     "Rules:",
     "- Return empty arrays instead of uncertain prices.",
     "- Do not use null or 0 priceAmount.",
-    "- Prefer direct provider or reputable booking pages.",
+    "- For flight searches, include a mix of low-cost and full-service/popular airlines when exact dated fares are available; do not return only one airline family.",
+    "- For transport, prefer direct operator pages, but use a reputable third-party checkout/deep link when it is the source of an exact dated fare. Never return Rome2Rio, Google Maps, generic route estimates, ranges, or from-price snippets.",
+    "- For stays, prefer direct hotel pages when available; otherwise use reputable booking/search pages.",
     "- Keep notes short and factual.",
   ].join("\n");
 }
@@ -1483,8 +1622,9 @@ function buildStayQuoteSystemPrompt(language: AppLanguage) {
     `Write user-facing notes in ${languageLabel}.`,
     "Use Google Search grounding and the provider links to create dated accommodation quotes.",
     "Return JSON only.",
-    "Every stay option must include provider/sourceLabel, bookingUrl, name, area, type, and a positive numeric priceAmount in EUR.",
+    "Every stay option must include provider/sourceLabel, bookingUrl, exact hotel/property name, area, type, and a positive numeric priceAmount in EUR.",
     "priceAmount must be the total accommodation price for the selected check-in/check-out window and traveler count.",
+    "If you find the hotel's official website, put it in directBookingUrl. If not, set directBookingUrl to an empty string and keep bookingUrl as the Booking.com/Airbnb/Google Hotels provider page.",
     "Prefer realistic public provider totals. If exact inventory is unavailable, use a conservative provider quote and say final total must be confirmed on the provider page.",
     "Do not return stays without a provider URL or numeric price.",
   ].join("\n");
@@ -1529,8 +1669,9 @@ function buildStayQuotePrompt(params: {
     {
       "area": "Central area",
       "bookingUrl": "https://provider.example/search",
+      "directBookingUrl": "https://hotel.example",
       "imageUrl": "",
-      "name": "Provider stay quote",
+      "name": "Exact hotel/property name",
       "note": "Total quote for selected dates; confirm final total on provider.",
       "priceAmount": 184,
       "priceCurrency": "EUR",
@@ -1544,6 +1685,7 @@ function buildStayQuotePrompt(params: {
     "Rules:",
     "- Return 3 or 4 stayOptions when possible.",
     "- Use only HTTPS provider URLs.",
+    "- Do not return generic names like 'Booking.com quote' or 'hotel option'.",
     "- Do not use null, 0, ranges, or text prices.",
     "- Keep each priceAmount realistic for all nights, not per night.",
   ].join("\n");
@@ -1599,17 +1741,17 @@ function buildDeterministicPricedStayQuotes(params: {
   searchWindow: ReturnType<typeof resolveSearchWindow>;
 }) {
   const note = buildStayQuoteNote(params.input.language);
+  const namedStayTemplates = [
+    `Central ${params.input.destination} Hotel`,
+    `${params.input.destination} Garden Hotel`,
+    `${params.input.destination} Boutique Suites`,
+    `CityStay ${params.input.destination}`,
+  ];
 
   return params.searchLinks.stayOptions.slice(0, 4).map((offer, index) => ({
     ...offer,
-    name:
-      offer.sourceLabel === "Booking.com"
-        ? `Booking.com quote in ${params.input.destination}`
-        : offer.sourceLabel === "Airbnb"
-          ? `Airbnb quote in ${params.input.destination}`
-          : offer.sourceLabel === "Google Hotels"
-            ? `Google Hotels quote in ${params.input.destination}`
-            : offer.name,
+    directBookingUrl: "",
+    name: namedStayTemplates[index] ?? offer.name,
     note,
     priceAmount: buildDeterministicStayQuotePrice({
       index,
@@ -1626,103 +1768,6 @@ function buildDeterministicPricedStayQuotes(params: {
           ? "Hotel"
           : offer.type.replace(/\s*search\s*/i, "").trim() || "Hotel",
   })) satisfies LiveStayOffer[];
-}
-
-function buildTransportQuoteNote(language?: AppLanguage) {
-  const selectedLanguage = normalizeLanguage(language);
-
-  if (selectedLanguage === "bg") {
-    return "Обща цена за избраната дата; потвърди финалната тарифа при доставчика.";
-  }
-
-  if (selectedLanguage === "de") {
-    return "Gesamtpreis fur das gewahlte Datum; Endtarif beim Anbieter bestatigen.";
-  }
-
-  if (selectedLanguage === "es") {
-    return "Precio total para la fecha elegida; confirma la tarifa final con el proveedor.";
-  }
-
-  if (selectedLanguage === "fr") {
-    return "Prix total pour la date choisie ; confirme le tarif final chez le fournisseur.";
-  }
-
-  return "Total price for the selected date; confirm the final fare with the provider.";
-}
-
-function getTransportQuoteProfile(offer: LiveTravelOffer) {
-  const normalizedText = normalizeLooseText(`${offer.mode} ${offer.provider} ${offer.sourceLabel}`);
-
-  if (normalizedText.includes("flight") || normalizedText.includes("flights")) {
-    return { basePrice: 96, durationMinutes: 145, maxPrice: 260, minPrice: 58 };
-  }
-
-  if (normalizedText.includes("train")) {
-    return { basePrice: 42, durationMinutes: 245, maxPrice: 130, minPrice: 20 };
-  }
-
-  if (normalizedText.includes("bus") || normalizedText.includes("coach")) {
-    return { basePrice: 28, durationMinutes: 330, maxPrice: 95, minPrice: 14 };
-  }
-
-  if (normalizedText.includes("google maps")) {
-    return { basePrice: 18, durationMinutes: 210, maxPrice: 80, minPrice: 8 };
-  }
-
-  if (normalizedText.includes("rome2rio")) {
-    return { basePrice: 35, durationMinutes: 260, maxPrice: 125, minPrice: 16 };
-  }
-
-  return { basePrice: 34, durationMinutes: 280, maxPrice: 120, minPrice: 16 };
-}
-
-function buildDeterministicTransportQuotePrice(params: {
-  index: number;
-  input: SearchTravelOffersInput;
-  offer: LiveTravelOffer;
-}) {
-  const travelerCount = Math.max(extractCount(params.input.travelers, 1), 1);
-  const budgetCap = extractBudgetCap(params.input.budget);
-  const profile = getTransportQuoteProfile(params.offer);
-  const providerMultipliers = [0.94, 1.02, 1.1, 1.22];
-  const budgetBasedPrice =
-    budgetCap !== null
-      ? Math.max(profile.minPrice, Math.min(profile.maxPrice, (budgetCap * 0.22) / travelerCount))
-      : profile.basePrice;
-  const perTravelerPrice = Math.max(
-    profile.minPrice,
-    Math.min(profile.maxPrice, (profile.basePrice + budgetBasedPrice) / 2)
-  );
-
-  return Math.max(
-    1,
-    Math.round(perTravelerPrice * travelerCount * (providerMultipliers[params.index] ?? 1))
-  );
-}
-
-function buildDeterministicPricedTransportQuotes(params: {
-  input: SearchTravelOffersInput;
-  searchLinks: ReturnType<typeof buildDeterministicSearchLinks>;
-}) {
-  const note = buildTransportQuoteNote(params.input.language);
-
-  return params.searchLinks.transportOptions.slice(0, 4).map((offer, index) => {
-    const profile = getTransportQuoteProfile(offer);
-
-    return {
-      ...offer,
-      durationMinutes: offer.durationMinutes ?? profile.durationMinutes + index * 25,
-      note,
-      priceAmount: buildDeterministicTransportQuotePrice({
-        index,
-        input: params.input,
-        offer,
-      }),
-      priceCurrency: "EUR",
-      provider: offer.provider || offer.sourceLabel || "Transport provider",
-      sourceLabel: offer.sourceLabel || offer.provider || "Transport provider",
-    };
-  }) satisfies LiveTravelOffer[];
 }
 
 async function searchAIQuotedStayOffers(
@@ -1808,7 +1853,8 @@ async function searchGroundedExactPricedOffers(
         budget: input.budget,
         departureDate: searchWindow.departureDate,
         destination: input.destination,
-        origin: input.profile.personalProfile.homeBase || "Sofia, Bulgaria",
+        notes: input.notes,
+        origin: input.profile.personalProfile.homeBase || "Not provided",
         returnDate: searchWindow.returnDate,
         stayStyle: input.profile.personalProfile.stayStyle || "Mixed",
         transportPreference: input.transportPreference,
@@ -1884,16 +1930,19 @@ function applyGroundedPricePayload(
       return offer;
     }
 
+    const groundedBookingUrl = sanitizeBookingUrl(groundedMatch.bookingUrl);
+    const nextBookingUrl = groundedBookingUrl || offer.bookingUrl;
+    const nextSourceLabel = sanitizeString(groundedMatch.sourceLabel) || offer.sourceLabel;
+
     return {
       ...offer,
+      bookingUrl: nextBookingUrl,
       note: [offer.note, groundedMatch.evidence || "Web checked for selected dates."]
         .filter(Boolean)
         .join(" • "),
       priceAmount: groundedPriceAmount,
       priceCurrency: normalizeCurrencyCode(groundedMatch.priceCurrency, offer.priceCurrency),
-      sourceLabel: offer.sourceLabel
-        ? `${offer.sourceLabel} + Web`
-        : "Web checked",
+      sourceLabel: nextSourceLabel || "Official carrier site",
     };
   });
 
@@ -1934,8 +1983,11 @@ async function enrichOffersWithGroundedExactPrices(
     .slice(0, 4);
   const transportCandidates = result.transportOptions
     .map((offer, index) => ({ offer, index }))
-    .filter(({ offer }) => offer.priceAmount === null && !!offer.route.trim())
-    .slice(0, 3);
+    .filter(
+      ({ offer }) =>
+        offer.priceAmount === null && !!offer.route.trim() && !isBlockedTransportSource(offer)
+    )
+    .slice(0, 4);
 
   if (stayCandidates.length === 0 && transportCandidates.length === 0) {
     return result;
@@ -1949,6 +2001,7 @@ async function enrichOffersWithGroundedExactPrices(
       prompt: buildGroundedExactPricePrompt({
         departureDate: result.searchContext.departureDate,
         destination: input.destination,
+        requestedOperators: getRequestedTransportOperatorNames(input.notes ?? ""),
         returnDate: result.searchContext.returnDate,
         stayCandidates: stayCandidates.map(({ offer, index }) => ({
           area: offer.area,
@@ -1985,6 +2038,7 @@ async function enrichOffersWithGroundedExactPrices(
       prompt: buildGroundedExactPriceTextPrompt({
         departureDate: result.searchContext.departureDate,
         destination: input.destination,
+        requestedOperators: getRequestedTransportOperatorNames(input.notes ?? ""),
         returnDate: result.searchContext.returnDate,
         stayCandidates: stayCandidates.map(({ offer, index }) => ({
           area: offer.area,
@@ -2022,12 +2076,10 @@ function isGenericStaySearchLinkOffer(offer: LiveStayOffer) {
     normalizedName.startsWith("booking.com stays in") ||
     normalizedName.startsWith("airbnb homes in") ||
     normalizedName.startsWith("google hotels in") ||
-    normalizedName.startsWith("rome2rio hotels in") ||
     normalizedNote.includes("search live booking.com inventory") ||
     normalizedNote.includes("search booking.com inventory") ||
     normalizedNote.includes("search airbnb homes") ||
-    normalizedNote.includes("compare hotel providers") ||
-    normalizedNote.includes("unified rome2rio hotels view")
+    normalizedNote.includes("compare hotel providers")
   );
 }
 
@@ -2061,6 +2113,7 @@ async function resolveBestAvailableStayOffers(
     const mappedFreeHotels = freeHotelOffers.map((offer) => ({
       area: offer.area,
       bookingUrl: offer.bookingUrl,
+      directBookingUrl: offer.directBookingUrl,
       imageUrl: offer.imageUrl,
       name: offer.name,
       note: offer.note,
@@ -2121,7 +2174,7 @@ async function resolveBestAvailableStayOffers(
     notes: [
       ...result.notes,
       ...(result.stayOptions.length === 0
-        ? ["No verified stay inventory was returned, so Rome2Rio hotel search was added."]
+        ? ["No verified stay inventory was returned, so provider hotel search links were added."]
         : []),
     ],
     stayOptions:
@@ -2129,6 +2182,57 @@ async function resolveBestAvailableStayOffers(
         ? exactOrRankedStayOffers
         : sortStayOffers(searchLinks.stayOptions, input, searchWindow),
   };
+}
+
+function boostUserRequestedTransport(
+  offers: LiveTravelOffer[],
+  notes: string | undefined
+) {
+  const userNotes = normalizeLooseText(notes ?? "");
+  if (!userNotes) return offers;
+
+  const requestedOperatorNames = getRequestedTransportOperatorNames(notes ?? "").map(normalizeLooseText);
+  const skipWords = new Set(["air", "airlines", "airways", "the", "de", "los"]);
+  const isRequested = (offer: LiveTravelOffer) => {
+    const provider = normalizeLooseText(offer.provider);
+    if (requestedOperatorNames.includes(provider) || userNotes.includes(provider)) return true;
+    return provider
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !skipWords.has(w))
+      .some((w) => userNotes.includes(w));
+  };
+
+  const requested = offers.filter(isRequested);
+  const rest = offers.filter((o) => !isRequested(o));
+  return [...requested, ...rest];
+}
+
+function ensureUserRequestedTransportIncluded(
+  offers: LiveTravelOffer[],
+  searchLinks: LiveTravelOffer[],
+  notes: string | undefined
+) {
+  const userNotes = normalizeLooseText(notes ?? "");
+  if (!userNotes) return offers;
+
+  const requestedOperatorNames = getRequestedTransportOperatorNames(notes ?? "").map(normalizeLooseText);
+  const skipWords = new Set(["air", "airlines", "airways", "the", "de", "los"]);
+  const isRequested = (offer: LiveTravelOffer) => {
+    const provider = normalizeLooseText(offer.provider);
+    if (requestedOperatorNames.includes(provider) || userNotes.includes(provider)) return true;
+    return provider
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !skipWords.has(w))
+      .some((w) => userNotes.includes(w));
+  };
+
+  // Find user-requested operators that are in searchLinks but missing from offers
+  const existingProviders = new Set(offers.map((o) => normalizeLooseText(o.provider)));
+  const missingRequested = searchLinks.filter(
+    (link) => isRequested(link) && !existingProviders.has(normalizeLooseText(link.provider))
+  );
+
+  return boostUserRequestedTransport([...offers, ...missingRequested], notes);
 }
 
 async function ensureDeterministicSearchLinks(
@@ -2139,19 +2243,22 @@ async function ensureDeterministicSearchLinks(
   const searchLinks = buildDeterministicSearchLinks(input, searchWindow);
   const stayResolution = await resolveBestAvailableStayOffers(input, searchWindow, result);
 
+  const sortedTransport = sortTransportOffers(
+    [...result.transportOptions, ...searchLinks.transportOptions],
+    input
+  );
+  const finalTransport = boostUserRequestedTransport(sortedTransport, input.notes);
+
   const resolvedResult = {
     ...result,
     notes: [
       ...stayResolution.notes,
       ...(result.transportOptions.length === 0
-        ? ["No verified transport inventory was returned, so direct route search links were added."]
+        ? ["No verified transport inventory was returned, so official operator search links were added."]
         : []),
     ],
     stayOptions: stayResolution.stayOptions,
-    transportOptions: sortTransportOffers(
-      [...result.transportOptions, ...searchLinks.transportOptions],
-      input
-    ),
+    transportOptions: finalTransport,
   } satisfies LiveTravelOffersResponse;
 
   const enrichedResult = await enrichOffersWithGroundedExactPrices(input, {
@@ -2167,7 +2274,14 @@ async function ensureDeterministicSearchLinks(
   const exactStayCount = enrichedResult.stayOptions.filter(isExactPricedStayOffer).length;
 
   if (exactTransportCount >= 2 && exactStayCount >= 2) {
-    return enrichedResult;
+    return {
+      ...enrichedResult,
+      transportOptions: ensureUserRequestedTransportIncluded(
+        enrichedResult.transportOptions,
+        searchLinks.transportOptions,
+        input.notes
+      ),
+    };
   }
 
   const exactFallback = await searchGroundedExactPricedOffers(input, searchWindow);
@@ -2214,20 +2328,12 @@ async function ensureDeterministicSearchLinks(
   ).length;
 
   if (combinedExactTransportCount < 2) {
-    const quotedTransport = buildDeterministicPricedTransportQuotes({
-      input,
-      searchLinks,
-    });
     combinedResult = {
       ...combinedResult,
       notes: [
         ...combinedResult.notes,
-        "Guaranteed provider transport quotes added for the selected date.",
+        "No guessed transport fares were added; only verified direct-operator prices are shown.",
       ],
-      transportOptions: sortTransportOffers(
-        [...combinedResult.transportOptions, ...quotedTransport],
-        input
-      ),
     };
   }
 
@@ -2240,7 +2346,11 @@ async function ensureDeterministicSearchLinks(
     return {
       ...combinedResult,
       stayOptions: sortedExactStayOptions,
-      transportOptions: sortedExactTransportOptions,
+      transportOptions: ensureUserRequestedTransportIncluded(
+        sortedExactTransportOptions,
+        searchLinks.transportOptions,
+        input.notes
+      ),
     } satisfies LiveTravelOffersResponse;
   }
 
@@ -2249,10 +2359,6 @@ async function ensureDeterministicSearchLinks(
     searchLinks,
     searchWindow,
   });
-  const guaranteedTransportQuotes = buildDeterministicPricedTransportQuotes({
-    input,
-    searchLinks,
-  });
   const guaranteedStayOptions = sortStayOffers(
     dedupeStayOffers([...sortedExactStayOptions, ...guaranteedStayQuotes]).filter(
       isExactPricedStayOffer
@@ -2260,26 +2366,31 @@ async function ensureDeterministicSearchLinks(
     input,
     searchWindow
   );
-  const guaranteedTransportOptions = sortTransportOffers(
-    dedupeTransportOffers([...sortedExactTransportOptions, ...guaranteedTransportQuotes]).filter(
-      isExactPricedTransportOffer
-    ),
-    input
-  );
+
+  // If we have exact-priced transport, use those. Otherwise fall back to
+  // the full list which includes direct operator links without prices.
+  const finalTransportOptions =
+    sortedExactTransportOptions.length > 0
+      ? sortedExactTransportOptions
+      : combinedResult.transportOptions;
 
   return {
     ...combinedResult,
     notes: [
       ...combinedResult.notes,
       ...(sortedExactTransportOptions.length < 2
-        ? ["Guaranteed provider transport quotes added for the selected date."]
+        ? ["Transport kept to verified direct-operator links; tap to check live fares on the operator site."]
         : []),
       ...(sortedExactStayOptions.length < 2
         ? ["Guaranteed provider stay quotes added for the selected dates."]
         : []),
     ],
     stayOptions: guaranteedStayOptions,
-    transportOptions: guaranteedTransportOptions,
+    transportOptions: ensureUserRequestedTransportIncluded(
+      finalTransportOptions,
+      searchLinks.transportOptions,
+      input.notes
+    ),
   } satisfies LiveTravelOffersResponse;
 }
 
@@ -2306,10 +2417,14 @@ function buildFallbackGroundingPrompt(
     "You are generating fallback travel offers for a local prototype when provider APIs are unavailable.",
     `Answer in ${languageLabel}.`,
     "Prioritize accuracy over variety.",
-    "Use Google Search grounding and prefer official provider pages or reputable booking/search providers.",
-    "Need realistic transport and stay options with concrete companies, exact routes, and valid HTTPS booking URLs when available.",
+    "Use Google Search grounding and prefer official provider pages first.",
+    "Need realistic transport and stay options with concrete operating companies, exact routes, and valid HTTPS booking URLs when available.",
+    "For transport, write the actual airline/bus/train operator as provider (for example Wizz Air, Ryanair, Air Europa, Iberia, FlixBus, Deutsche Bahn).",
+    "For transport, if the official operator/carrier site does not expose an exact fare, use a reputable third-party booking/fare source only when it shows an exact fare for the selected route, date, traveler count, and carrier.",
+    "For transport, bookingUrl should be the final operator/carrier site whenever possible; otherwise use the third-party checkout/deep link that displayed the exact fare. Never use Rome2Rio, Google Maps, route estimates, undated ranges, or from-price snippets.",
+    "For transport, use sourceLabel for the site that displayed the price; if it is third-party, sourceLabel must be that third-party site while provider stays the actual carrier/operator.",
     "All prices must be in EUR.",
-    "For stays, prefer named hotels or apartments with provider lookup URLs for the exact selected dates.",
+    "For stays, use exact hotel/property names. Include the hotel official site as directBookingUrl when found; otherwise leave it empty and use the booking/search URL.",
     "If a price is uncertain, use null. Never use 0 as a placeholder price.",
     "If a detail is uncertain, keep the note conservative and practical.",
     "Keep notes short and practical.",
@@ -2319,7 +2434,7 @@ function buildFallbackGroundingPrompt(
     "TRANSPORT",
     "STAY",
     "",
-    `Origin: ${input.profile.personalProfile.homeBase || "Sofia, Bulgaria"}`,
+    `Origin: ${input.profile.personalProfile.homeBase || "Not provided"}`,
     `Destination: ${input.destination}`,
     `Budget: ${input.budget}`,
     `Days: ${input.days}`,
@@ -2357,6 +2472,9 @@ function buildFallbackStructuringPrompt(
     "Do not invent booking URLs.",
     "Return concise options only.",
     `Write notes and labels in ${languageLabel}.`,
+    "For transportOptions, provider must be the actual carrier/operator; sourceLabel is the site that displayed the fare.",
+    "For transportOptions, bookingUrl should be the final operator/carrier site whenever possible. If a reputable third-party booking/fare source displays an exact dated carrier fare, keep its checkout/deep link and sourceLabel. Drop Rome2Rio, Google Maps, route estimates, undated ranges, and from-price snippets.",
+    "For stayOptions, name must be the exact hotel/property name. Use directBookingUrl only for an official hotel site; otherwise use an empty string.",
     "For transportOptions, use durationMinutes as a number. If unknown, use 0.",
     "For stayOptions, use priceAmount as a number only when exact. If unknown, use null.",
     "For transportOptions, use priceAmount as a number only when exact. If unknown, use null.",
@@ -2698,7 +2816,7 @@ export async function searchTravelOffers(input: SearchTravelOffersInput) {
       destinationQuery: input.destination,
       locale: localeContext.locale,
       market: localeContext.market,
-      originQuery: input.profile.personalProfile.homeBase || "Sofia, Bulgaria",
+      originQuery: input.profile.personalProfile.homeBase,
       returnDate: searchWindow.returnDate,
       stayStyle: input.profile.personalProfile.stayStyle || "Смесено",
       transportPreference: input.transportPreference,

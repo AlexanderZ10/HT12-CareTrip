@@ -54,9 +54,14 @@ import {
   type PlannerIntakeSnapshot,
 } from "../../utils/home-planner-intake";
 import {
+  getPlannerFollowUpErrorMessage,
+  runPlannerFollowUpTurn,
+} from "../../utils/home-planner-follow-up";
+import {
   formatGroundedTravelPlan,
   generateGroundedTravelPlan,
   getHomePlannerErrorMessage,
+  type GroundedTravelPlan,
 } from "../../utils/home-travel-planner";
 import { getProfileDisplayName } from "../../utils/profile-info";
 import { createTestCheckoutSession } from "../../utils/travel-offers";
@@ -85,8 +90,248 @@ import { PlanCard } from "../../features/home/components/PlanCard";
 import { BookingModal } from "../../features/home/components/BookingModal";
 import { ChatComposer } from "../../features/home/components/ChatComposer";
 import { ChatDrawer } from "../../features/home/components/ChatDrawer";
+import { getRequestedTransportOperatorNames } from "../../travel-providers/transport-links";
 
 WebBrowser.maybeCompleteAuthSession();
+
+type PlannerRunStage = "idle" | "intake" | "generating";
+
+const OPTIMISTIC_CHAT_SNAPSHOT_GRACE_MS = 45000;
+
+function getChatActivityMs(chat: HomePlannerChatThread) {
+  const messageActivityMs = Math.max(
+    0,
+    ...chat.state.messages.map((message) => message.createdAtMs),
+    ...chat.state.followUpMessages.map((message) => message.createdAtMs)
+  );
+
+  return Math.max(chat.updatedAtMs, chat.state.latestPlan?.createdAtMs ?? 0, messageActivityMs);
+}
+
+function containsAllConversationMessages(
+  target: HomePlannerChatThread,
+  source: HomePlannerChatThread
+) {
+  const targetMessageIds = new Set([
+    ...target.state.messages.map((message) => message.id),
+    ...target.state.followUpMessages.map((message) => message.id),
+  ]);
+
+  return [...source.state.messages, ...source.state.followUpMessages].every((message) =>
+    targetMessageIds.has(message.id)
+  );
+}
+
+function shouldPreferOptimisticChat(
+  optimisticChat: HomePlannerChatThread,
+  remoteChat: HomePlannerChatThread | undefined
+) {
+  if (!remoteChat) {
+    return true;
+  }
+
+  if (!containsAllConversationMessages(remoteChat, optimisticChat)) {
+    return true;
+  }
+
+  return getChatActivityMs(remoteChat) + 250 < getChatActivityMs(optimisticChat);
+}
+
+function mergeStoreWithOptimisticChat({
+  forceProtect,
+  optimisticChatId,
+  optimisticStore,
+  remoteStore,
+}: {
+  forceProtect: boolean;
+  optimisticChatId: string | null;
+  optimisticStore: HomePlannerStore | null;
+  remoteStore: HomePlannerStore;
+}) {
+  if (!optimisticStore) {
+    return { caughtUp: true, store: remoteStore };
+  }
+
+  const protectedChat =
+    optimisticStore.chats.find((chat) => chat.id === optimisticChatId) ??
+    optimisticStore.chats.find((chat) => chat.id === optimisticStore.currentChatId);
+
+  if (!protectedChat) {
+    return { caughtUp: true, store: remoteStore };
+  }
+
+  const remoteChat = remoteStore.chats.find((chat) => chat.id === protectedChat.id);
+
+  if (!shouldPreferOptimisticChat(protectedChat, remoteChat)) {
+    return { caughtUp: true, store: remoteStore };
+  }
+
+  if (!forceProtect) {
+    return { caughtUp: false, store: remoteStore };
+  }
+
+  return {
+    caughtUp: false,
+    store: {
+      ...remoteStore,
+      chats: sortHomePlannerChats([
+        protectedChat,
+        ...remoteStore.chats.filter((chat) => chat.id !== protectedChat.id),
+      ]),
+      currentChatId: protectedChat.id,
+    },
+  };
+}
+
+function applyAutomaticChatTitles(
+  store: HomePlannerStore,
+  language: ReturnType<typeof useAppLanguage>["language"]
+) {
+  return {
+    ...store,
+    chats: store.chats.map((chat) => ({
+      ...chat,
+      title: getAutoChatTitle(
+        chat.title,
+        chat.state.destination || chat.state.latestPlan?.destination || "",
+        chat.state.latestPlan?.plan.title || "",
+        language
+      ),
+    })),
+  } satisfies HomePlannerStore;
+}
+
+function normalizeProviderMatchText(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function findRequestedTransportOption(plan: GroundedTravelPlan, requestedOperators: string[]) {
+  const requestedNames = requestedOperators.map(normalizeProviderMatchText).filter(Boolean);
+
+  if (requestedNames.length === 0) {
+    return null;
+  }
+
+  return (
+    plan.transportOptions.find((option) => {
+      const provider = normalizeProviderMatchText(option.provider);
+      return requestedNames.some((requestedName) => provider.includes(requestedName) || requestedName.includes(provider));
+    }) ?? null
+  );
+}
+
+function hasVisibleTransportPrice(
+  option: GroundedTravelPlan["transportOptions"][number] | null | undefined
+) {
+  return !!option?.price?.match(/\d/);
+}
+
+function hasPricedTransportOption(plan: GroundedTravelPlan) {
+  return plan.transportOptions.some((option) => hasVisibleTransportPrice(option));
+}
+
+function buildTicketPriceSearchMessage(
+  plan: GroundedTravelPlan,
+  language: ReturnType<typeof useAppLanguage>["language"]
+) {
+  const transportProviders = plan.transportOptions
+    .filter((option) => hasVisibleTransportPrice(option))
+    .slice(0, 3)
+    .map((option) => `${option.provider}${option.price ? ` ${option.price}` : ""}${option.sourceLabel ? ` via ${option.sourceLabel}` : ""}`)
+    .join(", ");
+
+  if (language === "bg") {
+    if (transportProviders) {
+      return `Обнових ticket цените в картата: ${transportProviders}. Provider-ът остава реалната компания, а booking site показва откъде идва цената.`;
+    }
+
+    return "Проверих airline и trusted third-party fare източници за избраните дати, но не намерих достатъчно сигурна точна ticket цена. Запазих текущия trip card, вместо да показвам estimate.";
+  }
+
+  if (transportProviders) {
+    return `I updated the ticket prices in the card: ${transportProviders}. The provider stays as the real carrier, and the booking site shows where the fare came from.`;
+  }
+
+  return "I searched airline and trusted third-party fare sources for the selected dates, but no exact ticket fare was safe enough to show. I kept the current trip card instead of showing an estimate.";
+}
+
+function buildRequestedCarrierUnavailableMessage(
+  requestedOperators: string[],
+  language: ReturnType<typeof useAppLanguage>["language"]
+) {
+  const requestedLabel = requestedOperators.join(", ");
+
+  if (language === "bg") {
+    return `${requestedLabel} не върна сигурна цена за избраните дати в този run. Запазих досегашния trip card и оставих наличните точни оферти на място.`;
+  }
+
+  return `${requestedLabel} did not return a safe date-matched fare in this run. I kept the current trip card and left the existing priced options in place.`;
+}
+
+function buildRegeneratedPlanMessage(
+  plan: GroundedTravelPlan,
+  language: ReturnType<typeof useAppLanguage>["language"],
+  requestedOperators: string[] = []
+) {
+  const requestedTransport = findRequestedTransportOption(plan, requestedOperators);
+  if (requestedTransport) {
+    if (language === "bg") {
+      return `Намерих точна оферта от ${requestedTransport.provider}${requestedTransport.price ? ` за ${requestedTransport.price}` : ""} и обнових плана по-горе. Билетът продължава през официалния provider checkout.`;
+    }
+
+    return `I found an exact ${requestedTransport.provider}${requestedTransport.price ? ` fare for ${requestedTransport.price}` : " fare"} and updated the plan above. Ticket checkout continues through the official provider.`;
+  }
+
+  const transportProviders = plan.transportOptions
+    .filter((option) => hasVisibleTransportPrice(option))
+    .slice(0, 2)
+    .map((option) => `${option.provider}${option.price ? ` ${option.price}` : ""}`)
+    .filter(Boolean)
+    .join(", ");
+  const stayProviders = plan.stayOptions
+    .slice(0, 2)
+    .map((stay) => `${stay.name}${stay.pricePerNight ? ` ${stay.pricePerNight}` : ""}`)
+    .filter(Boolean)
+    .join(", ");
+  const hasTransport = transportProviders.length > 0;
+  const hasStay = stayProviders.length > 0;
+
+  if (language === "bg") {
+    if (hasTransport && hasStay) {
+      return `Обнових плана по-горе. Най-добрите точни оферти са ${transportProviders} и ${stayProviders}. Детайлите и booking бутоните са в картата.`;
+    }
+
+    if (hasTransport) {
+      return `Обнових плана по-горе с точни transport цени: ${transportProviders}. За настаняване оставих само проверени оферти в картата.`;
+    }
+
+    if (hasStay) {
+      return `Обнових плана по-горе с точни оферти за настаняване: ${stayProviders}. Няма да показвам transport цена без точна проверка за датите.`;
+    }
+
+    return "Обнових плана по-горе. Няма да показвам оферти без точна provider цена за избраните дати.";
+  }
+
+  if (hasTransport && hasStay) {
+    return `I updated the plan above. The best exact offers are ${transportProviders} and ${stayProviders}. Details and booking buttons are in the card.`;
+  }
+
+  if (hasTransport) {
+    return `I updated the plan above with exact transport prices: ${transportProviders}. Accommodation stays limited to verified provider offers in the card.`;
+  }
+
+  if (hasStay) {
+    return `I updated the plan above with exact accommodation prices: ${stayProviders}. I will not show a transport fare unless it is exact for your dates.`;
+  }
+
+  return "I updated the plan above. I will not show offers without an exact provider price for the selected dates.";
+}
 
 export default function HomeTabScreen() {
   const { colors } = useAppTheme();
@@ -99,7 +344,8 @@ export default function HomeTabScreen() {
 
 
   const [loading, setLoading] = useState(true);
-  const [planning, setPlanning] = useState(false);
+  const [plannerRunStage, setPlannerRunStage] = useState<PlannerRunStage>("idle");
+  const planning = plannerRunStage !== "idle";
   const [savingPlan, setSavingPlan] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<DiscoverProfile | null>(null);
@@ -145,6 +391,11 @@ export default function HomeTabScreen() {
   const typingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const homeFocusHandledRef = useRef(false);
+  const planningRef = useRef(false);
+  planningRef.current = planning;
+  const optimisticHomeStoreRef = useRef<HomePlannerStore | null>(null);
+  const optimisticChatIdRef = useRef<string | null>(null);
+  const optimisticStoreUpdatedAtRef = useRef(0);
   const [typingMessageId, setTypingMessageId] = useState<string | null>(null);
   const [typingVisibleText, setTypingVisibleText] = useState("");
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
@@ -218,27 +469,19 @@ export default function HomeTabScreen() {
   const lastPlannerMessage =
     currentPlannerState.messages[currentPlannerState.messages.length - 1] ?? null;
   const lastFollowUpMessage = followUpMessages[followUpMessages.length - 1] ?? null;
-  const lastConversationMessageCreatedAtMs = Math.max(
-    lastPlannerMessage?.createdAtMs ?? 0,
-    lastFollowUpMessage?.createdAtMs ?? 0
-  );
-  const latestPlanIsCurrent =
-    !!latestPlan &&
-    (lastConversationMessageCreatedAtMs <= 0 ||
-      latestPlan.createdAtMs >= lastConversationMessageCreatedAtMs - 500);
-  const shouldShowLatestPlan = !!latestPlan && !planning && latestPlanIsCurrent;
-  const plannerStatusText = planning
-    ? currentPlannerState.step === "done"
-      ? t("home.searchingPrices")
-      : t("home.aiThinking")
+  const shouldShowLatestPlan = !!latestPlan;
+  const plannerStatusText = plannerRunStage === "generating"
+    ? t("home.searchingPrices")
     : currentChat?.title ?? t("home.newPlan");
+  const activePlanningLabel =
+    plannerRunStage === "generating" ? t("home.searchingPrices") : null;
   const conversationContentKey = [
     currentChat?.id ?? "no-chat",
     currentPlannerState.messages.length,
     lastPlannerMessage?.id ?? "no-message",
     followUpMessages.length,
     lastFollowUpMessage?.id ?? "no-follow-up",
-    planning ? "planning" : "idle",
+    plannerRunStage,
     shouldShowLatestPlan ? latestPlan?.sourceKey ?? "plan" : "no-plan",
   ].join("|");
   const selectedTransport =
@@ -271,7 +514,10 @@ export default function HomeTabScreen() {
         ? subtotalAmount + platformFeeAmount
         : subtotalAmount;
     const providerLabel =
-      selectedStay?.sourceLabel || selectedTransport?.sourceLabel || "Travel provider";
+      selectedStay?.sourceLabel ||
+      selectedTransport?.provider ||
+      selectedTransport?.sourceLabel ||
+      "Travel provider";
     const providerBookingUrl =
       selectedStay?.bookingUrl || selectedTransport?.bookingUrl || "";
     const reservationMode =
@@ -286,7 +532,9 @@ export default function HomeTabScreen() {
       providerLabel,
       reservationMode,
       reservationStatusLabel: providerBookingUrl
-        ? `Stripe test плащането ще се запише тук, а финалната резервация ще продължи през ${providerLabel}.`
+        ? selectedTransport
+          ? `Stripe test плащането ще се запише тук, а финалният билет ще продължи през ${providerLabel}.`
+          : `Stripe test плащането ще се запише тук, а финалната резервация ще продължи през ${providerLabel}.`
         : "Stripe test плащането ще се запише вътрешно като тестова резервация.",
       subtotalAmount,
       subtotalLabel:
@@ -298,11 +546,8 @@ export default function HomeTabScreen() {
   }, [
     bookingEstimate.totalEstimate,
     bookingEstimate.totalLabel,
-    selectedStay?.bookingUrl,
-    selectedStay?.reservationMode,
-    selectedStay?.sourceLabel,
-    selectedTransport?.bookingUrl,
-    selectedTransport?.sourceLabel,
+    selectedStay,
+    selectedTransport,
     t,
   ]);
 
@@ -521,12 +766,69 @@ export default function HomeTabScreen() {
           setProfile(nextProfile);
           setProfileName(nextProfileName);
           setSavedSourceKeys(parseSavedTrips(profileData).map((trip) => trip.sourceKey));
-          setHomeStore(
+          const nextStore = applyAutomaticChatTitles(
             parseStoredHomePlannerStore(
               profileData,
               buildInitialAssistantMessage(nextProfileName, languageRef.current)
-            )
+            ),
+            languageRef.current
           );
+
+          setHomeStore((currentLocalStore) => {
+            const optimisticStore = optimisticHomeStoreRef.current;
+            const optimisticStoreAgeMs =
+              optimisticStoreUpdatedAtRef.current > 0
+                ? Date.now() - optimisticStoreUpdatedAtRef.current
+                : Number.POSITIVE_INFINITY;
+            const optimisticMerge = mergeStoreWithOptimisticChat({
+              forceProtect:
+                planningRef.current ||
+                optimisticStoreAgeMs < OPTIMISTIC_CHAT_SNAPSHOT_GRACE_MS,
+              optimisticChatId: optimisticChatIdRef.current,
+              optimisticStore,
+              remoteStore: nextStore,
+            });
+
+            if (optimisticMerge.caughtUp) {
+              optimisticHomeStoreRef.current = null;
+              optimisticChatIdRef.current = null;
+              optimisticStoreUpdatedAtRef.current = 0;
+              return optimisticMerge.store;
+            }
+
+            if (optimisticMerge.store !== nextStore) {
+              return optimisticMerge.store;
+            }
+
+            if (!planningRef.current) {
+              return nextStore;
+            }
+
+            const localCurrentChat = currentLocalStore.chats.find(
+              (chat) => chat.id === currentLocalStore.currentChatId
+            );
+
+            if (!localCurrentChat || isHomePlannerChatUntouched(localCurrentChat)) {
+              return nextStore;
+            }
+
+            const remoteCurrentChat = nextStore.chats.find(
+              (chat) => chat.id === localCurrentChat.id
+            );
+
+            if (!shouldPreferOptimisticChat(localCurrentChat, remoteCurrentChat)) {
+              return nextStore;
+            }
+
+            return {
+              ...nextStore,
+              chats: sortHomePlannerChats([
+                localCurrentChat,
+                ...nextStore.chats.filter((chat) => chat.id !== localCurrentChat.id),
+              ]),
+              currentChatId: localCurrentChat.id,
+            };
+          });
           setLoading(false);
         },
         (nextError) => {
@@ -664,6 +966,12 @@ export default function HomeTabScreen() {
       chats: nextChats,
       currentChatId: currentChat.id,
     };
+
+    if (planningRef.current) {
+      optimisticHomeStoreRef.current = nextStore;
+      optimisticChatIdRef.current = currentChat.id;
+      optimisticStoreUpdatedAtRef.current = Date.now();
+    }
 
     setHomeStore(nextStore);
     await persistStore(nextStore);
@@ -882,28 +1190,28 @@ export default function HomeTabScreen() {
 
   const runPlanGeneration = async (
     snapshot: PlannerIntakeSnapshot,
-    messagesAfterUser: HomeChatMessage[]
+    messagesAfterUser: HomeChatMessage[],
+    options: {
+      appendAssistantToFollowUps?: boolean;
+      followUpMessages?: HomeChatMessage[];
+      preservePlanIfRequestedTransportMissing?: boolean;
+      preservePlanIfTransportPriceMissing?: boolean;
+      requestedTransportOperators?: string[];
+      transportPriceRequest?: boolean;
+    } = {}
   ) => {
     if (!profile) {
       return false;
     }
 
-    const searchingMessage = createHomeChatMessage("assistant", t("home.preparingRoute"));
-    const messagesWhilePlanning = [...messagesAfterUser, searchingMessage];
+    planningRef.current = true;
+    optimisticChatIdRef.current = currentChat?.id ?? optimisticChatIdRef.current;
+    setPlannerRunStage("generating");
 
-    await replaceCurrentChatWithAssistant(
-      (chat) => ({
-        ...chat,
-        updatedAtMs: Date.now(),
-        state: {
-          ...applySnapshotToState(chat.state, snapshot, "done"),
-          followUpMessages: [],
-          latestPlan: chat.state.latestPlan,
-          messages: messagesWhilePlanning,
-        },
-      }),
-      searchingMessage
-    );
+    // The caller already set messages, followUpMessages, and latestPlan
+    // correctly and persisted to Firestore. Do NOT call replaceCurrentChat
+    // here — it would read stale React state and overwrite the follow-up
+    // messages the caller just set.
 
     try {
       const plan = await generateGroundedTravelPlan({
@@ -918,7 +1226,30 @@ export default function HomeTabScreen() {
         profile,
         tripStyle: snapshot.tripStyle,
       });
-      const readyMessage = createHomeChatMessage("assistant", t("home.planReady"));
+      const requestedTransportOperators = options.requestedTransportOperators ?? [];
+      const requestedTransportOption = findRequestedTransportOption(
+        plan,
+        requestedTransportOperators
+      );
+      const hasExactTicketPrice = hasPricedTransportOption(plan);
+      const shouldPreserveForRequestedTransportMissing =
+        options.preservePlanIfRequestedTransportMissing === true &&
+        requestedTransportOperators.length > 0 &&
+        !requestedTransportOption;
+      const shouldPreserveForMissingTicketPrice =
+        options.preservePlanIfTransportPriceMissing === true && !hasExactTicketPrice;
+      const shouldPreserveExistingPlan =
+        shouldPreserveForRequestedTransportMissing || shouldPreserveForMissingTicketPrice;
+      const readyMessage = createHomeChatMessage(
+        "assistant",
+        options.transportPriceRequest
+            ? buildTicketPriceSearchMessage(plan, language)
+          : shouldPreserveExistingPlan
+          ? buildRequestedCarrierUnavailableMessage(requestedTransportOperators, language)
+          : options.appendAssistantToFollowUps
+            ? buildRegeneratedPlanMessage(plan, language, requestedTransportOperators)
+            : t("home.planReady")
+      );
       const formattedPlanText = formatGroundedTravelPlan(plan, language);
       const nextLatestPlan = normalizeLatestPlan({
         budget: snapshot.budget,
@@ -941,13 +1272,21 @@ export default function HomeTabScreen() {
       await replaceCurrentChatWithAssistant(
         (chat) => ({
           ...chat,
-          title: getAutoChatTitle(chat.title, snapshot.destination, plan.title, language),
+          title: shouldPreserveExistingPlan
+            ? chat.title
+            : getAutoChatTitle(chat.title, snapshot.destination, plan.title, language),
           updatedAtMs: Date.now(),
           state: {
             ...applySnapshotToState(chat.state, snapshot, "done"),
-            followUpMessages: [],
-            latestPlan: nextLatestPlan,
-            messages: [...messagesWhilePlanning, readyMessage],
+            followUpMessages: options.appendAssistantToFollowUps
+              ? [...(options.followUpMessages ?? chat.state.followUpMessages), readyMessage]
+              : [],
+            latestPlan: shouldPreserveExistingPlan
+              ? chat.state.latestPlan
+              : nextLatestPlan,
+            messages: options.appendAssistantToFollowUps
+              ? messagesAfterUser
+              : [...messagesAfterUser, readyMessage],
           },
         }),
         readyMessage
@@ -964,10 +1303,18 @@ export default function HomeTabScreen() {
           ...chat,
           updatedAtMs: Date.now(),
           state: {
-            ...applySnapshotToState(chat.state, snapshot, "chatting"),
-            followUpMessages: [],
+            ...applySnapshotToState(
+              chat.state,
+              snapshot,
+              chat.state.latestPlan ? "done" : "chatting"
+            ),
+            followUpMessages: options.appendAssistantToFollowUps
+              ? [...(options.followUpMessages ?? chat.state.followUpMessages), errorMessage]
+              : [],
             latestPlan: chat.state.latestPlan,
-            messages: [...messagesAfterUser, errorMessage],
+            messages: options.appendAssistantToFollowUps
+              ? messagesAfterUser
+              : [...messagesAfterUser, errorMessage],
           },
         }),
         errorMessage
@@ -975,6 +1322,62 @@ export default function HomeTabScreen() {
       scrollMessagesToBottom(true);
       return false;
     }
+  };
+
+  const appendRegenerationRequestToSnapshot = (
+    snapshot: PlannerIntakeSnapshot,
+    request: string
+  ) => ({
+    ...snapshot,
+    notes: [snapshot.notes, `USER REQUEST: ${request}`].filter(Boolean).join("\n"),
+  });
+
+  const appendTicketPriceRequestToSnapshot = (
+    snapshot: PlannerIntakeSnapshot,
+    request: string,
+    currentProviders: string[]
+  ) =>
+    appendRegenerationRequestToSnapshot(
+      snapshot,
+      [
+        "Find exact dated ticket/transport prices for the current trip.",
+        currentProviders.length > 0
+          ? `Current transport providers to price first: ${currentProviders.join(", ")}.`
+          : "Search relevant airlines/operators for this route.",
+        "Search the direct carrier/operator first.",
+        "If direct carrier pricing is unavailable, use reputable third-party fare/booking sources only when the fare exactly matches the selected route, dates, travelers, and carrier.",
+        "Do not answer that ticket prices fluctuate.",
+        "Update the trip card with exact ticket prices when verified; otherwise keep the current card instead of showing estimates.",
+        request,
+      ].join(" ")
+    );
+
+  const appendCarrierRequestToSnapshot = (
+    snapshot: PlannerIntakeSnapshot,
+    request: string,
+    operators: string[]
+  ) =>
+    appendRegenerationRequestToSnapshot(
+      snapshot,
+      `Prefer exact airline/operator fares from ${operators.join(", ")}. ${request}`
+    );
+
+  const isTicketPriceRequest = (request: string) => {
+    const normalized = normalizeProviderMatchText(request);
+    const hasPriceTerm =
+      /\b(price|prices|priced|fare|fares|cost|costs|quote|quotes)\b/.test(normalized) ||
+      normalized.includes("цена") ||
+      normalized.includes("цени") ||
+      normalized.includes("стойност");
+    const hasTicketOrTransportTerm =
+      /\b(ticket|tickets|flight|flights|plane|airline|airlines|transport|transit)\b/.test(normalized) ||
+      normalized.includes("билет") ||
+      normalized.includes("билети") ||
+      normalized.includes("полет") ||
+      normalized.includes("самолет") ||
+      normalized.includes("транспорт");
+
+    return hasPriceTerm && hasTicketOrTransportTerm;
   };
 
   const sendPlannerMessage = async (rawValue: string) => {
@@ -997,11 +1400,288 @@ export default function HomeTabScreen() {
 
     const plannerState = currentChat.state;
     const userMessage = createHomeChatMessage("user", value);
-    const messagesAfterUser = [...plannerState.messages, userMessage];
     const currentSnapshot = buildPlannerSnapshot(plannerState);
 
-    // Show the user's message and planning state immediately
-    setPlanning(true);
+    if (plannerState.step === "done" && plannerState.latestPlan) {
+      const requestedTransportOperators = getRequestedTransportOperatorNames(value);
+      const ticketPriceRequest = isTicketPriceRequest(value);
+      const currentTransportProviders = Array.from(
+        new Set(
+          plannerState.latestPlan.plan.transportOptions
+            .map((option) => option.provider.trim())
+            .filter(Boolean)
+        )
+      );
+      const currentPlanNeedsTransportPrices =
+        !hasPricedTransportOption(plannerState.latestPlan.plan);
+      const shouldRetryTransportPrices =
+        ticketPriceRequest || (currentPlanNeedsTransportPrices && isPlannerRegenerateCommand(value));
+
+      if (isPlannerRegenerateCommand(value)) {
+        const hasCarrierRequest = requestedTransportOperators.length > 0;
+        const regenerationSnapshot = hasCarrierRequest
+          ? appendCarrierRequestToSnapshot(currentSnapshot, value, requestedTransportOperators)
+          : shouldRetryTransportPrices
+            ? appendTicketPriceRequestToSnapshot(
+                currentSnapshot,
+                value,
+                currentTransportProviders
+              )
+            : appendRegenerationRequestToSnapshot(
+                currentSnapshot,
+                value
+              );
+        // Keep existing messages above the plan card untouched.
+        // The user's regeneration request stays as a follow-up (below the plan).
+        const followUpWithUser = [...plannerState.followUpMessages, userMessage];
+
+        planningRef.current = true;
+        optimisticChatIdRef.current = currentChat.id;
+        setPlannerRunStage("generating");
+        shouldStickToBottomRef.current = true;
+
+        const nextChats = sortHomePlannerChats(
+          homeStore.chats.map((chat) =>
+            chat.id === currentChat.id
+              ? {
+                  ...chat,
+                  updatedAtMs: Date.now(),
+                  state: {
+                    ...applySnapshotToState(chat.state, regenerationSnapshot, "done"),
+                    followUpMessages: followUpWithUser,
+                    latestPlan: chat.state.latestPlan,
+                    messages: plannerState.messages,
+                  },
+                }
+              : chat
+          )
+        );
+        const nextStore = { ...homeStore, chats: nextChats, currentChatId: currentChat.id };
+
+        optimisticHomeStoreRef.current = nextStore;
+        optimisticStoreUpdatedAtRef.current = Date.now();
+        setHomeStore(nextStore);
+        scrollMessagesToBottom(true);
+        await persistStore(nextStore);
+
+        try {
+          await runPlanGeneration(regenerationSnapshot, plannerState.messages, {
+            appendAssistantToFollowUps: true,
+            followUpMessages: followUpWithUser,
+            preservePlanIfRequestedTransportMissing: hasCarrierRequest,
+            preservePlanIfTransportPriceMissing: shouldRetryTransportPrices,
+            requestedTransportOperators,
+            transportPriceRequest: shouldRetryTransportPrices,
+          });
+        } finally {
+          planningRef.current = false;
+          setPlannerRunStage("idle");
+        }
+
+        return;
+      }
+
+      if (requestedTransportOperators.length > 0) {
+        const regenerationSnapshot = appendCarrierRequestToSnapshot(
+          currentSnapshot,
+          value,
+          requestedTransportOperators
+        );
+        const followUpWithUser = [...plannerState.followUpMessages, userMessage];
+
+        planningRef.current = true;
+        optimisticChatIdRef.current = currentChat.id;
+        setPlannerRunStage("generating");
+        shouldStickToBottomRef.current = true;
+
+        const nextChats = sortHomePlannerChats(
+          homeStore.chats.map((chat) =>
+            chat.id === currentChat.id
+              ? {
+                  ...chat,
+                  updatedAtMs: Date.now(),
+                  state: {
+                    ...applySnapshotToState(chat.state, regenerationSnapshot, "done"),
+                    followUpMessages: followUpWithUser,
+                    latestPlan: chat.state.latestPlan,
+                    messages: plannerState.messages,
+                  },
+                }
+              : chat
+          )
+        );
+        const nextStore = { ...homeStore, chats: nextChats, currentChatId: currentChat.id };
+
+        optimisticHomeStoreRef.current = nextStore;
+        optimisticStoreUpdatedAtRef.current = Date.now();
+        setHomeStore(nextStore);
+        scrollMessagesToBottom(true);
+        await persistStore(nextStore);
+
+        try {
+          await runPlanGeneration(regenerationSnapshot, plannerState.messages, {
+            appendAssistantToFollowUps: true,
+            followUpMessages: followUpWithUser,
+            preservePlanIfRequestedTransportMissing: true,
+            preservePlanIfTransportPriceMissing: shouldRetryTransportPrices,
+            requestedTransportOperators,
+            transportPriceRequest: shouldRetryTransportPrices,
+          });
+        } finally {
+          planningRef.current = false;
+          setPlannerRunStage("idle");
+        }
+
+        return;
+      }
+
+      if (shouldRetryTransportPrices) {
+        const regenerationSnapshot = appendTicketPriceRequestToSnapshot(
+          currentSnapshot,
+          value,
+          currentTransportProviders
+        );
+        const followUpWithUser = [...plannerState.followUpMessages, userMessage];
+
+        planningRef.current = true;
+        optimisticChatIdRef.current = currentChat.id;
+        setPlannerRunStage("generating");
+        shouldStickToBottomRef.current = true;
+
+        const nextChats = sortHomePlannerChats(
+          homeStore.chats.map((chat) =>
+            chat.id === currentChat.id
+              ? {
+                  ...chat,
+                  updatedAtMs: Date.now(),
+                  state: {
+                    ...applySnapshotToState(chat.state, regenerationSnapshot, "done"),
+                    followUpMessages: followUpWithUser,
+                    latestPlan: chat.state.latestPlan,
+                    messages: plannerState.messages,
+                  },
+                }
+              : chat
+          )
+        );
+        const nextStore = { ...homeStore, chats: nextChats, currentChatId: currentChat.id };
+
+        optimisticHomeStoreRef.current = nextStore;
+        optimisticStoreUpdatedAtRef.current = Date.now();
+        setHomeStore(nextStore);
+        scrollMessagesToBottom(true);
+        await persistStore(nextStore);
+
+        try {
+          await runPlanGeneration(regenerationSnapshot, plannerState.messages, {
+            appendAssistantToFollowUps: true,
+            followUpMessages: followUpWithUser,
+            preservePlanIfTransportPriceMissing: true,
+            transportPriceRequest: true,
+          });
+        } finally {
+          planningRef.current = false;
+          setPlannerRunStage("idle");
+        }
+
+        return;
+      }
+
+      const followUpMessagesAfterUser = [...plannerState.followUpMessages, userMessage];
+
+      planningRef.current = true;
+      optimisticChatIdRef.current = currentChat.id;
+      setPlannerRunStage("intake");
+      shouldStickToBottomRef.current = true;
+
+      const nextChats = sortHomePlannerChats(
+        homeStore.chats.map((chat) =>
+          chat.id === currentChat.id
+            ? {
+                ...chat,
+                updatedAtMs: Date.now(),
+                state: {
+                  ...chat.state,
+                  followUpMessages: followUpMessagesAfterUser,
+                  latestPlan: chat.state.latestPlan,
+                  step: "done",
+                },
+              }
+            : chat
+        )
+      );
+      const nextStore = { ...homeStore, chats: nextChats, currentChatId: currentChat.id };
+
+      optimisticHomeStoreRef.current = nextStore;
+      optimisticStoreUpdatedAtRef.current = Date.now();
+      setHomeStore(nextStore);
+      scrollMessagesToBottom(true);
+      await persistStore(nextStore);
+
+      try {
+        const followUpTurn = await runPlannerFollowUpTurn({
+          followUpMessages: followUpMessagesAfterUser,
+          language,
+          latestPlan: plannerState.latestPlan,
+          latestUserInput: value,
+          messages: plannerState.messages,
+          profile,
+          snapshot: currentSnapshot,
+        });
+        const assistantMessage = createHomeChatMessage(
+          "assistant",
+          followUpTurn.assistantText
+        );
+
+        await replaceCurrentChatWithAssistant(
+          (chat) => ({
+            ...chat,
+            updatedAtMs: Date.now(),
+            state: {
+              ...applySnapshotToState(chat.state, followUpTurn.snapshot, "done"),
+              followUpMessages: [...followUpMessagesAfterUser, assistantMessage],
+              latestPlan: chat.state.latestPlan,
+              messages: plannerState.messages,
+            },
+          }),
+          assistantMessage
+        );
+        scrollMessagesToBottom(true);
+      } catch {
+        const message = getPlannerFollowUpErrorMessage(language);
+        const errorMessage = createHomeChatMessage("assistant", message);
+        setError(message);
+
+        await replaceCurrentChatWithAssistant(
+          (chat) => ({
+            ...chat,
+            updatedAtMs: Date.now(),
+            state: {
+              ...chat.state,
+              followUpMessages: [...followUpMessagesAfterUser, errorMessage],
+              latestPlan: chat.state.latestPlan,
+              messages: plannerState.messages,
+              step: "done",
+            },
+          }),
+          errorMessage
+        );
+        scrollMessagesToBottom(true);
+      } finally {
+        planningRef.current = false;
+        setPlannerRunStage("idle");
+      }
+
+      return;
+    }
+
+    const messagesAfterUser = [...plannerState.messages, userMessage];
+
+    // Show and persist the user's message before the AI call so remote snapshots
+    // cannot roll the visible chat back while generation is running.
+    planningRef.current = true;
+    optimisticChatIdRef.current = currentChat.id;
+    setPlannerRunStage("intake");
     shouldStickToBottomRef.current = true;
     const nextChats = sortHomePlannerChats(
       homeStore.chats.map((chat) =>
@@ -1010,15 +1690,14 @@ export default function HomeTabScreen() {
           : chat
       )
     );
-    setHomeStore({ ...homeStore, chats: nextChats, currentChatId: currentChat.id });
+    const nextStore = { ...homeStore, chats: nextChats, currentChatId: currentChat.id };
+    optimisticHomeStoreRef.current = nextStore;
+    optimisticStoreUpdatedAtRef.current = Date.now();
+    setHomeStore(nextStore);
     scrollMessagesToBottom(true);
+    await persistStore(nextStore);
 
     try {
-      if (plannerState.step === "done" && isPlannerRegenerateCommand(value)) {
-        await runPlanGeneration(currentSnapshot, messagesAfterUser);
-        return;
-      }
-
       const intakeTurn = await runPlannerIntakeTurn({
         language,
         latestUserInput: value,
@@ -1033,6 +1712,12 @@ export default function HomeTabScreen() {
         await replaceCurrentChatWithAssistant(
           (chat) => ({
             ...chat,
+            title: getAutoChatTitle(
+              chat.title,
+              intakeTurn.snapshot.destination,
+              "",
+              language
+            ),
             updatedAtMs: Date.now(),
             state: {
               ...applySnapshotToState(chat.state, intakeTurn.snapshot, "chatting"),
@@ -1069,7 +1754,8 @@ export default function HomeTabScreen() {
       );
       scrollMessagesToBottom(true);
     } finally {
-      setPlanning(false);
+      planningRef.current = false;
+      setPlannerRunStage("idle");
     }
   };
 
@@ -1511,6 +2197,24 @@ export default function HomeTabScreen() {
                   />
                 ))}
 
+                {shouldShowLatestPlan && latestPlan ? (
+                  <PlanCard
+                    latestPlan={latestPlan}
+                    isPhoneLayout={isPhoneLayout}
+                    saving={savingPlan}
+                    saved={savedSourceKeys.includes(latestPlan.sourceKey)}
+                    onSavePlan={() => { void handleSavePlan(); }}
+                    onBookNow={openBookingModal}
+                    onBookTransport={openBookingModalForTransport}
+                    onBookStay={openBookingModalForStay}
+                    saveSuccess={saveSuccess}
+                    saveError={saveError}
+                    bookingSuccess={bookingSuccess}
+                    bookingError={bookingError}
+                    bookingEstimateLabel={bookingChargeBreakdown.totalLabel}
+                  />
+                ) : null}
+
                 {followUpMessages.map((message) => (
                   <ChatMessageBubble
                     key={message.id}
@@ -1520,7 +2224,7 @@ export default function HomeTabScreen() {
                   />
                 ))}
 
-                {planning ? (
+                {activePlanningLabel ? (
                   <View style={styles.planningMessageRow}>
                     <View
                       style={[
@@ -1547,9 +2251,7 @@ export default function HomeTabScreen() {
                             style={styles.typingSpinner}
                           />
                           <Text style={[styles.planningText, { color: colors.textSecondary }]}>
-                            {currentPlannerState.step === "done"
-                              ? t("home.searchingPrices")
-                              : t("home.aiThinking")}
+                            {activePlanningLabel}
                           </Text>
                         </View>
                       </View>
@@ -1558,24 +2260,6 @@ export default function HomeTabScreen() {
                 ) : null}
 
                 {error ? <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text> : null}
-
-                {shouldShowLatestPlan && latestPlan ? (
-                  <PlanCard
-                    latestPlan={latestPlan}
-                    isPhoneLayout={isPhoneLayout}
-                    saving={savingPlan}
-                    saved={savedSourceKeys.includes(latestPlan.sourceKey)}
-                    onSavePlan={() => { void handleSavePlan(); }}
-                    onBookNow={openBookingModal}
-                    onBookTransport={openBookingModalForTransport}
-                    onBookStay={openBookingModalForStay}
-                    saveSuccess={saveSuccess}
-                    saveError={saveError}
-                    bookingSuccess={bookingSuccess}
-                    bookingError={bookingError}
-                    bookingEstimateLabel={bookingChargeBreakdown.totalLabel}
-                  />
-                ) : null}
               </ScrollView>
 
               {showScrollToBottom ? (
@@ -1607,6 +2291,7 @@ export default function HomeTabScreen() {
                 onChangeText={setChatInput}
                 onFocus={() => scrollMessagesToBottom(true)}
                 onLayout={(event) => setComposerHeight(event.nativeEvent.layout.height)}
+                planningLabel={activePlanningLabel}
                 onSend={() => { void sendPlannerMessage(chatInput); }}
                 onReset={() => { void resetConversation(); }}
               />

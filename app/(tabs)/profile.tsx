@@ -47,7 +47,6 @@ import {
   type AppThemePreference,
 } from "../../components/app-theme-provider";
 import {
-  getLanguageFlag,
   getLanguageLabel,
   LANGUAGE_OPTIONS,
   STAY_STYLE_KEYS,
@@ -108,6 +107,66 @@ const EMPTY_FORM: ProfileFormState = {
 };
 
 const PROFILE_PHOTO_MAX_LENGTH = 850000;
+
+const LANGUAGE_FLAG_BADGES: Record<
+  Exclude<AppLanguage, "en">,
+  { colors: string[]; orientation: "horizontal" | "vertical"; weights?: number[] }
+> = {
+  bg: { colors: ["#FFFFFF", "#00966E", "#D62612"], orientation: "horizontal" },
+  de: { colors: ["#000000", "#DD0000", "#FFCE00"], orientation: "horizontal" },
+  es: { colors: ["#AA151B", "#F1BF00", "#AA151B"], orientation: "horizontal", weights: [1, 2, 1] },
+  fr: { colors: ["#0055A4", "#FFFFFF", "#EF4135"], orientation: "vertical" },
+};
+
+function LanguageFlag({ borderColor, code }: { borderColor: string; code: AppLanguage }) {
+  if (code === "en") {
+    return (
+      <View
+        accessibilityLabel="English flag"
+        style={[
+          staticStyles.languageFlagBadge,
+          staticStyles.languageFlagUkBase,
+          { borderColor },
+        ]}
+      >
+        <View style={[staticStyles.languageFlagUkDiagonal, staticStyles.languageFlagUkDiagonalOne]} />
+        <View style={[staticStyles.languageFlagUkDiagonal, staticStyles.languageFlagUkDiagonalTwo]} />
+        <View style={[staticStyles.languageFlagUkRedDiagonal, staticStyles.languageFlagUkRedDiagonalOne]} />
+        <View style={[staticStyles.languageFlagUkRedDiagonal, staticStyles.languageFlagUkRedDiagonalTwo]} />
+        <View style={staticStyles.languageFlagUkWhiteHorizontal} />
+        <View style={staticStyles.languageFlagUkWhiteVertical} />
+        <View style={staticStyles.languageFlagUkRedHorizontal} />
+        <View style={staticStyles.languageFlagUkRedVertical} />
+      </View>
+    );
+  }
+
+  const flag = LANGUAGE_FLAG_BADGES[code];
+
+  return (
+    <View
+      accessibilityLabel={`${getLanguageLabel(code)} flag`}
+      style={[
+        staticStyles.languageFlagBadge,
+        flag.orientation === "vertical" && staticStyles.languageFlagVertical,
+        { borderColor },
+      ]}
+    >
+      {flag.colors.map((color, index) => (
+        <View
+          key={`${code}-${color}-${index}`}
+          style={[
+            staticStyles.languageFlagStripe,
+            {
+              backgroundColor: color,
+              flex: flag.weights?.[index] ?? 1,
+            },
+          ]}
+        />
+      ))}
+    </View>
+  );
+}
 
 // ── Main component ─────────────────────────────────────────────────────────
 
@@ -320,7 +379,6 @@ export default function ProfileTabScreen() {
   }));
   const selectedLanguageOption = useMemo(
     () => ({
-      flag: getLanguageFlag(language),
       label: getLanguageLabel(language),
     }),
     [language]
@@ -960,7 +1018,7 @@ export default function ProfileTabScreen() {
               ]}
             >
               <View style={staticStyles.languageMenuTriggerTextWrap}>
-                <Text style={staticStyles.languageFlag}>{selectedLanguageOption.flag}</Text>
+                <LanguageFlag code={language} borderColor={colors.inputBorder} />
                 <Text style={[staticStyles.languageLabel, { color: colors.textPrimary }]}>
                   {selectedLanguageOption.label}
                 </Text>
@@ -1233,7 +1291,7 @@ export default function ProfileTabScreen() {
                   ]}
                 >
                   <View style={staticStyles.languageMenuItemTextWrap}>
-                    <Text style={staticStyles.languageFlag}>{option.flag}</Text>
+                    <LanguageFlag code={option.code} borderColor={colors.inputBorder} />
                     <Text style={[staticStyles.languageLabel, { color: colors.textPrimary }]}>
                       {option.label}
                     </Text>
@@ -1574,8 +1632,83 @@ const staticStyles = StyleSheet.create({
     flexDirection: "row",
     gap: Spacing.sm,
   },
-  languageFlag: {
-    fontSize: 18,
+  languageFlagBadge: {
+    width: 30,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "column",
+    overflow: "hidden",
+  },
+  languageFlagVertical: {
+    flexDirection: "row",
+  },
+  languageFlagStripe: {
+    minHeight: 1,
+    minWidth: 1,
+  },
+  languageFlagUkBase: {
+    backgroundColor: "#012169",
+  },
+  languageFlagUkDiagonal: {
+    position: "absolute",
+    left: -5,
+    top: 8,
+    width: 40,
+    height: 4,
+    backgroundColor: "#FFFFFF",
+  },
+  languageFlagUkDiagonalOne: {
+    transform: [{ rotate: "34deg" }],
+  },
+  languageFlagUkDiagonalTwo: {
+    transform: [{ rotate: "-34deg" }],
+  },
+  languageFlagUkRedDiagonal: {
+    position: "absolute",
+    left: -5,
+    top: 8.5,
+    width: 40,
+    height: 2,
+    backgroundColor: "#C8102E",
+  },
+  languageFlagUkRedDiagonalOne: {
+    transform: [{ rotate: "34deg" }],
+  },
+  languageFlagUkRedDiagonalTwo: {
+    transform: [{ rotate: "-34deg" }],
+  },
+  languageFlagUkWhiteHorizontal: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 7,
+    height: 6,
+    backgroundColor: "#FFFFFF",
+  },
+  languageFlagUkWhiteVertical: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 12,
+    width: 6,
+    backgroundColor: "#FFFFFF",
+  },
+  languageFlagUkRedHorizontal: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 8.5,
+    height: 3,
+    backgroundColor: "#C8102E",
+  },
+  languageFlagUkRedVertical: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 13.5,
+    width: 3,
+    backgroundColor: "#C8102E",
   },
   languageLabel: {
     ...TypeScale.labelLg,
