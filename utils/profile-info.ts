@@ -44,14 +44,14 @@ export function extractPersonalProfile(profileData: RawProfileInfoData): Persona
 }
 
 export function getProfileDisplayName(profileData: RawProfileInfoData) {
-  if (typeof profileData.username === "string" && profileData.username.trim()) {
-    return profileData.username.trim();
-  }
-
   const personalProfile = extractPersonalProfile(profileData);
 
   if (personalProfile.fullName) {
     return personalProfile.fullName;
+  }
+
+  if (typeof profileData.username === "string" && profileData.username.trim()) {
+    return profileData.username.trim();
   }
 
   if (typeof profileData.email === "string" && profileData.email.trim()) {

@@ -113,6 +113,81 @@ function shouldIncludeTrain(transportPreference: string) {
   );
 }
 
+function toRome2RioSegment(value: string) {
+  return encodeURIComponent(
+    value
+      .trim()
+      .replace(/[,_/]+/g, " ")
+      .replace(/\s+/g, "-")
+  );
+}
+
+function buildRome2RioRouteUrl(params: {
+  destinationQuery: string;
+  originQuery: string;
+}) {
+  const originLabel = normalizeLocation(params.originQuery, "your origin");
+  const destinationLabel = normalizeLocation(params.destinationQuery, "your destination");
+
+  return `https://www.rome2rio.com/s/${toRome2RioSegment(originLabel)}/${toRome2RioSegment(destinationLabel)}`;
+}
+
+function buildGoogleMapsTransitUrl(params: {
+  destinationQuery: string;
+  originQuery: string;
+}) {
+  const url = new URL("https://www.google.com/maps/dir/");
+  url.searchParams.set("api", "1");
+  url.searchParams.set("origin", params.originQuery);
+  url.searchParams.set("destination", params.destinationQuery);
+  url.searchParams.set("travelmode", "transit");
+  return url.toString();
+}
+
+function buildGoogleFlightsUrl(params: {
+  departureDate: string;
+  destinationQuery: string;
+  originQuery: string;
+}) {
+  const url = new URL("https://www.google.com/travel/flights");
+  url.searchParams.set(
+    "q",
+    `Flights from ${params.originQuery} to ${params.destinationQuery} on ${params.departureDate}`
+  );
+  return url.toString();
+}
+
+function buildOmioSearchUrl(params: {
+  departureDate: string;
+  destinationQuery: string;
+  originQuery: string;
+}) {
+  const url = new URL("https://www.omio.com/search");
+  url.searchParams.set("departure_fk", params.originQuery);
+  url.searchParams.set("arrival_fk", params.destinationQuery);
+  url.searchParams.set("departure_date", params.departureDate);
+  url.searchParams.set("adults", "1");
+  return url.toString();
+}
+
+function buildOriginLogisticsNote(
+  transportPreference: string,
+  departureDate: string
+) {
+  const normalized = transportPreference.trim().toLowerCase();
+  const wantsFlight =
+    normalized.includes("flight") ||
+    normalized.includes("plane") ||
+    normalized.includes("самолет") ||
+    normalized.includes("полет");
+
+  if (wantsFlight) {
+    return `Compare route options for ${departureDate}, including ground transfer to a practical nearby airport if the origin city has no airport.`;
+  }
+
+  return `Compare current route options and operators for ${departureDate}.`;
+}
+
 const DIRECT_FLIGHT_OPERATORS: DirectOperatorTemplate[] = [
   // Low-cost carriers
   { aliases: ["wizz"], bookingUrl: "https://wizzair.com/en-gb", mode: "Flight", provider: "Wizz Air" },
@@ -273,16 +348,78 @@ export function buildTransportSearchLinkOffers(params: {
   const routeLabel = `${originLabel} → ${destinationLabel}`;
   const modeLabel = normalizeTransportModeLabel(params.transportPreference);
 
-  // If the user explicitly asked for a specific airline, put it first
+  const aggregatorOffers: TransportSearchLinkOffer[] = [
+    {
+      bookingUrl: buildRome2RioRouteUrl({
+        destinationQuery: destinationLabel,
+        originQuery: originLabel,
+      }),
+      durationMinutes: null,
+      mode: modeLabel,
+      note: buildOriginLogisticsNote(params.transportPreference, params.departureDate),
+      priceAmount: null,
+      priceCurrency: params.currency,
+      provider: "Rome2Rio",
+      route: routeLabel,
+      sourceLabel: "Rome2Rio",
+    },
+    {
+      bookingUrl: buildGoogleMapsTransitUrl({
+        destinationQuery: destinationLabel,
+        originQuery: originLabel,
+      }),
+      durationMinutes: null,
+      mode: "Transit",
+      note: `Open live public transport and driving directions for ${params.departureDate}.`,
+      priceAmount: null,
+      priceCurrency: params.currency,
+      provider: "Google Maps",
+      route: routeLabel,
+      sourceLabel: "Google Maps",
+    },
+    {
+      bookingUrl: buildOmioSearchUrl({
+        departureDate: params.departureDate,
+        destinationQuery: destinationLabel,
+        originQuery: originLabel,
+      }),
+      durationMinutes: null,
+      mode: modeLabel === "Flight" ? "Transit" : modeLabel,
+      note: `Check train, bus, and mixed route availability for ${params.departureDate}.`,
+      priceAmount: null,
+      priceCurrency: params.currency,
+      provider: "Omio",
+      route: routeLabel,
+      sourceLabel: "Omio",
+    },
+  ];
+
+  if (shouldIncludeFlights(params.transportPreference)) {
+    aggregatorOffers.push({
+      bookingUrl: buildGoogleFlightsUrl({
+        departureDate: params.departureDate,
+        destinationQuery: destinationLabel,
+        originQuery: originLabel,
+      }),
+      durationMinutes: null,
+      mode: "Flight",
+      note: `Compare flight availability for ${params.departureDate}; if there is no airport in ${originLabel}, first check the nearest practical departure airport and transfer time.`,
+      priceAmount: null,
+      priceCurrency: params.currency,
+      provider: "Google Flights",
+      route: routeLabel,
+      sourceLabel: "Google Flights",
+    });
+  }
+
+  // Direct operator deep-links: prioritize anything the user named
   const requestedOperators = findRequestedOperators(params.notes ?? "");
   const baseOperators = getDirectOperatorTemplates(params.transportPreference, modeLabel);
-
-  // Deduplicate: requested first, then remaining from base list
   const requestedProviderNames = new Set(requestedOperators.map((op) => op.provider));
   const remainingOperators = baseOperators.filter((op) => !requestedProviderNames.has(op.provider));
   const allOperators = [...requestedOperators, ...remainingOperators];
 
-  const offers = allOperators.map(
+  const directOperatorOffers = allOperators.map(
     (operator) =>
       ({
         bookingUrl: operator.bookingUrl,
@@ -297,5 +434,5 @@ export function buildTransportSearchLinkOffers(params: {
       }) satisfies TransportSearchLinkOffer
   );
 
-  return offers.slice(0, 8) satisfies TransportSearchLinkOffer[];
+  return [...aggregatorOffers, ...directOperatorOffers].slice(0, 8) satisfies TransportSearchLinkOffer[];
 }

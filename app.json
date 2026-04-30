@@ -15,7 +15,11 @@
     "newArchEnabled": true,
     "ios": {
       "bundleIdentifier": "com.martin5555.caretrip",
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "Allow CareTrip to convert your speech into text for the AI Planner.",
+        "NSMicrophoneUsageDescription": "Allow CareTrip to use your microphone for voice input in the AI Planner."
+      }
     },
     "android": {
       "package": "com.martin5555.caretrip",
@@ -68,10 +72,14 @@
           "microphonePermission": "Allow CareTrip to use the microphone so you can dictate trip ideas to the AI planner.",
           "speechRecognitionPermission": "Allow CareTrip to use speech recognition so the AI planner can understand your voice messages.",
           "androidSpeechServicePackages": [
-            "com.google.android.googlequicksearchbox"
+            "com.google.android.googlequicksearchbox",
+            "com.google.android.as",
+            "com.google.android.tts",
+            "com.samsung.android.bixby.agent"
           ]
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

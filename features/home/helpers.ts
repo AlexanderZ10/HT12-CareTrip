@@ -189,10 +189,12 @@ function getHomeCopy(language: AppLanguage) {
 
 export function buildInitialAssistantMessage(
   profileName: string,
-  language: AppLanguage = "bg"
+  language: AppLanguage = "bg",
+  _profileOrigin = ""
 ) {
   return getHomeCopy(language).initialAssistant(profileName);
 }
+
 
 export function normalizeDaysLabel(value: string) {
   const trimmedValue = value.trim();

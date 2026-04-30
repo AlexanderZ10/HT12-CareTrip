@@ -102,8 +102,8 @@ export default function GroupsTabScreen() {
       return (
         <FriendProfileCard
           actionDisabled={connectionState === "following"}
-          actionLabel={connectionState === "mutual" ? "Message" : "Following"}
-          badge="Following"
+          actionLabel={connectionState === "mutual" ? t("groups.message") : t("groups.following")}
+          badge={t("groups.following")}
           fullWidth={fullWidth}
           key={profile.uid}
           label={preview.label}
@@ -113,7 +113,7 @@ export default function GroupsTabScreen() {
             void vm.removeFriendship(connection);
           }}
           photoUrl={preview.photoUrl}
-          secondaryActionLabel="Unfollow"
+          secondaryActionLabel={t("groups.unfollow")}
           username={preview.username}
           aboutMe={preview.aboutMe}
           homeBase={preview.homeBase}
@@ -124,8 +124,8 @@ export default function GroupsTabScreen() {
     if (connection && connectionState === "followed-by") {
       return (
         <FriendProfileCard
-          actionLabel="Follow back"
-          badge="Follows you"
+          actionLabel={t("groups.followBack")}
+          badge={t("groups.followsYou")}
           fullWidth={fullWidth}
           key={profile.uid}
           label={preview.label}
@@ -137,7 +137,7 @@ export default function GroupsTabScreen() {
             void vm.removeFriendship(connection);
           }}
           photoUrl={preview.photoUrl}
-          secondaryActionLabel="Decline"
+          secondaryActionLabel={t("groups.decline")}
           username={preview.username}
           aboutMe={preview.aboutMe}
           homeBase={preview.homeBase}
@@ -147,8 +147,8 @@ export default function GroupsTabScreen() {
 
     return (
       <FriendProfileCard
-        actionLabel="Follow"
-        badge="Public profile"
+        actionLabel={t("groups.follow")}
+        badge={t("groups.publicProfile")}
         fullWidth={fullWidth}
         key={profile.uid}
         label={preview.label}
@@ -169,7 +169,7 @@ export default function GroupsTabScreen() {
         }}
         onSecondaryActionPress={() => vm.openComposer(preview.uid)}
         photoUrl={preview.photoUrl}
-        secondaryActionLabel="Write"
+        secondaryActionLabel={t("groups.write")}
         username={preview.username}
         aboutMe={preview.aboutMe}
         homeBase={preview.homeBase}
@@ -224,11 +224,14 @@ export default function GroupsTabScreen() {
             </View>
             <TouchableOpacity
               accessibilityLabel="Create new group or trip request"
-              activeOpacity={0.7}
+              activeOpacity={0.86}
               onPress={() => vm.setActionMenuVisible(true)}
-              style={styles.topBarIconButton}
+              style={[styles.topBarAddButton, { backgroundColor: colors.accent }]}
             >
-              <MaterialIcons color={colors.textPrimary} name="add-box" size={28} />
+              <MaterialIcons color={colors.buttonTextOnAction} name="add" size={19} />
+              <Text style={[styles.topBarAddButtonText, { color: colors.buttonTextOnAction }]}>
+                {t("groups.createGroup")}
+              </Text>
             </TouchableOpacity>
           </View>
 
@@ -246,7 +249,7 @@ export default function GroupsTabScreen() {
                 vm.setSearchQuery(value);
                 vm.clearFeedback();
               }}
-              placeholder="Search"
+              placeholder={t("groups.searchPlaceholder")}
               placeholderTextColor={colors.textMuted}
               style={[styles.searchInput, { color: colors.textPrimary }]}
               value={vm.searchQuery}
@@ -281,7 +284,7 @@ export default function GroupsTabScreen() {
             <View style={styles.sectionBlock}>
               <View style={styles.sectionHeader}>
                 <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-                  Smart alerts
+                  {t("groups.smartAlerts")}
                 </Text>
                 <Text style={[styles.sectionMeta, { color: colors.textSecondary }]}>
                   {vm.smartAlerts.length}
@@ -336,7 +339,7 @@ export default function GroupsTabScreen() {
               <View style={styles.sectionBlock}>
                 <View style={styles.sectionHeader}>
                   <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-                    People
+                    {t("groups.people")}
                   </Text>
                   <Text style={[styles.sectionMeta, { color: colors.textSecondary }]}>
                     {vm.searchedPublicProfiles.length}
@@ -345,8 +348,8 @@ export default function GroupsTabScreen() {
 
                 {vm.searchedPublicProfiles.length === 0
                   ? renderEmptyState(
-                      "No travelers matched that search.",
-                      "Try a name, city, or username to find new people faster."
+                      t("groups.noTravelersMatched"),
+                      t("groups.noTravelersMatchedHint")
                     )
                   : (
                     <View style={styles.verticalCards}>
@@ -358,7 +361,7 @@ export default function GroupsTabScreen() {
               <View style={styles.sectionBlock}>
                 <View style={styles.sectionHeader}>
                   <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-                    Public groups
+                    {t("groups.publicGroupsSection")}
                   </Text>
                   <Text style={[styles.sectionMeta, { color: colors.textSecondary }]}>
                     {vm.searchedPublicGroups.length}
@@ -384,7 +387,7 @@ export default function GroupsTabScreen() {
                           group.memberIds.includes(vm.userId) ? undefined : () => vm.joinGroup(group.id)
                         }
                         onPress={() => vm.openGroupChat(group.id)}
-                        preview={group.description || `Created by ${group.creatorLabel}`}
+                        preview={group.description || `${t("groups.createdBy")} ${group.creatorLabel}`}
                         rightMeta={formatRelativeTime(group.updatedAtMs ?? group.createdAtMs, locale)}
                       />
                     ))
@@ -426,10 +429,10 @@ export default function GroupsTabScreen() {
 
               {/* ── Messages section header (Instagram DM "Messages" + "Requests") ── */}
               <View style={styles.dmHeader}>
-                <Text style={[styles.dmHeaderTitle, { color: colors.textPrimary }]}>Messages</Text>
+                <Text style={[styles.dmHeaderTitle, { color: colors.textPrimary }]}>{t("groups.messages")}</Text>
                 {vm.invitedGroups.length > 0 || vm.pendingIncomingFriendships.length > 0 ? (
                   <Text style={[styles.dmRequestsLink, { color: colors.accent }]}>
-                    Requests ({vm.invitedGroups.length + vm.pendingIncomingFriendships.length})
+                    {t("groups.requests")} ({vm.invitedGroups.length + vm.pendingIncomingFriendships.length})
                   </Text>
                 ) : null}
               </View>
@@ -443,7 +446,7 @@ export default function GroupsTabScreen() {
                   group={group}
                   key={`invite-${group.id}`}
                   onActionPress={() => vm.joinGroup(group.id)}
-                  preview={`${group.creatorLabel} invited you${group.description ? ` • ${group.description}` : ""}`}
+                  preview={`${group.creatorLabel} ${t("groups.invitedYou")}${group.description ? ` • ${group.description}` : ""}`}
                   rightMeta={t("groups.request")}
                 />
               ))}
@@ -451,8 +454,8 @@ export default function GroupsTabScreen() {
               {/* ── Joined groups (clean flat rows) ── */}
               {vm.joinedGroups.length === 0 && vm.invitedGroups.length === 0
                 ? renderEmptyState(
-                    "No chats yet.",
-                    "Tap the + icon to create a group, accept an invite, or use a private key to join one."
+                    t("groups.noChatsYet"),
+                    t("groups.noChatsHint")
                   )
                 : vm.joinedGroups.map((group) => {
                     const invitedLabels = group.invitedUserIds
@@ -465,8 +468,8 @@ export default function GroupsTabScreen() {
                       .filter(Boolean);
                     const previewText =
                       invitedLabels.length > 0
-                        ? `Invited ${invitedLabels.join(", ")}`
-                        : group.description || `Created by ${group.creatorLabel}`;
+                        ? `${t("groups.invited")} ${invitedLabels.join(", ")}`
+                        : group.description || `${t("groups.createdBy")} ${group.creatorLabel}`;
 
                     return (
                       <GroupRow
@@ -490,7 +493,7 @@ export default function GroupsTabScreen() {
                 <>
                   <View style={[styles.dmHeader, styles.dmHeaderSpaced]}>
                     <Text style={[styles.dmHeaderTitle, { color: colors.textPrimary }]}>
-                      Friend requests
+                      {t("groups.friendRequests")}
                     </Text>
                   </View>
                   {vm.pendingIncomingFriendships.map((friendship) =>
@@ -511,7 +514,7 @@ export default function GroupsTabScreen() {
                 <>
                   <View style={[styles.dmHeader, styles.dmHeaderSpaced]}>
                     <Text style={[styles.dmHeaderTitle, { color: colors.textPrimary }]}>
-                      Trip ideas
+                      {t("groups.tripIdeas")}
                     </Text>
                   </View>
                   <ScrollView
@@ -545,7 +548,7 @@ export default function GroupsTabScreen() {
                 <>
                   <View style={[styles.dmHeader, styles.dmHeaderSpaced]}>
                     <Text style={[styles.dmHeaderTitle, { color: colors.textPrimary }]}>
-                      Discover groups
+                      {t("groups.discoverGroups")}
                     </Text>
                   </View>
                   {vm.publicGroups
@@ -560,7 +563,7 @@ export default function GroupsTabScreen() {
                         key={`public-${group.id}`}
                         onActionPress={() => vm.joinGroup(group.id)}
                         onPress={() => vm.openGroupChat(group.id)}
-                        preview={group.description || `Created by ${group.creatorLabel}`}
+                        preview={group.description || `${t("groups.createdBy")} ${group.creatorLabel}`}
                         rightMeta={formatRelativeTime(group.updatedAtMs ?? group.createdAtMs, locale)}
                       />
                     ))}
@@ -683,8 +686,17 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: FontWeight.black,
   },
-  topBarIconButton: {
-    padding: 4,
+  topBarAddButton: {
+    alignItems: "center",
+    borderRadius: Radius.full,
+    flexDirection: "row",
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 9,
+  },
+  topBarAddButtonText: {
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.extrabold,
   },
   searchShell: {
     alignItems: "center",

@@ -1,4 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
+import Constants, { ExecutionEnvironment } from "expo-constants";
 import { useIsFocused } from "@react-navigation/native";
 import * as WebBrowser from "expo-web-browser";
 import { useRouter } from "expo-router";
@@ -63,6 +64,7 @@ import {
   getHomePlannerErrorMessage,
   type GroundedTravelPlan,
 } from "../../utils/home-travel-planner";
+import { getCurrencyConversionAnswer } from "../../utils/currency";
 import { getProfileDisplayName } from "../../utils/profile-info";
 import { createTestCheckoutSession } from "../../utils/travel-offers";
 import { getBookingEstimate } from "../../utils/bookings";
@@ -75,6 +77,7 @@ import {
   saveTripForUser,
 } from "../../utils/saved-trips";
 import { extractDiscoverProfile, type DiscoverProfile } from "../../utils/trip-recommendations";
+import type { AppLanguage } from "../../utils/translations";
 
 import type { BookingCheckoutStage, BookingReceipt } from "../../features/home/types";
 import {
@@ -85,6 +88,10 @@ import {
   parseCheckoutReturnState,
   wait,
 } from "../../features/home/helpers";
+import {
+  formatPlannerDaysLabel,
+  formatPlannerTravelersLabel,
+} from "../../features/home/display-format";
 import { ChatMessageBubble } from "../../features/home/components/ChatMessageBubble";
 import { PlanCard } from "../../features/home/components/PlanCard";
 import { BookingModal } from "../../features/home/components/BookingModal";
@@ -333,6 +340,75 @@ function buildRegeneratedPlanMessage(
   return "I updated the plan above. I will not show offers without an exact provider price for the selected dates.";
 }
 
+type SpeechRecognitionModuleShape = {
+  abort: () => void;
+  stop: () => void;
+  start: (options: Record<string, unknown>) => void;
+  requestPermissionsAsync: () => Promise<{ granted: boolean }>;
+  isRecognitionAvailable: () => boolean;
+  addListener: (
+    eventName: "start" | "end" | "result" | "error",
+    listener: (event?: {
+      error?: string;
+      isFinal?: boolean;
+      message?: string;
+      results?: { transcript?: string }[];
+    } | null) => void
+  ) => { remove: () => void };
+};
+
+function loadSpeechRecognitionModule(): SpeechRecognitionModuleShape | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const speechModule = require("expo-speech-recognition") as {
+      ExpoSpeechRecognitionModule?: SpeechRecognitionModuleShape;
+    };
+
+    return speechModule.ExpoSpeechRecognitionModule ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const speechRecognitionModule = loadSpeechRecognitionModule();
+
+function getSpeechRecognitionLocale(language: AppLanguage) {
+  switch (language) {
+    case "de":
+      return "de-DE";
+    case "es":
+      return "es-ES";
+    case "fr":
+      return "fr-FR";
+    case "en":
+      return "en-US";
+    case "bg":
+    default:
+      return "bg-BG";
+  }
+}
+
+function combineSpeechInput(baseText: string, transcript: string) {
+  const trimmedTranscript = transcript.trim();
+
+  if (!trimmedTranscript) {
+    return baseText;
+  }
+
+  if (!baseText.trim()) {
+    return trimmedTranscript;
+  }
+
+  return `${baseText.trimEnd()} ${trimmedTranscript}`;
+}
+
+function isExpoGoLikeClient() {
+  return (
+    Constants.executionEnvironment === ExecutionEnvironment.StoreClient ||
+    Constants.appOwnership === "expo"
+  );
+}
+
 export default function HomeTabScreen() {
   const { colors } = useAppTheme();
   const { language, t } = useAppLanguage();
@@ -386,6 +462,7 @@ export default function HomeTabScreen() {
   );
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [composerHeight, setComposerHeight] = useState(0);
+  const [collapsedPlanKeys, setCollapsedPlanKeys] = useState<string[]>([]);
   const phoneDrawerTranslateX = useRef(new Animated.Value(-320)).current;
   const phoneDrawerWidth = Math.min(width * 0.84, 330);
   const typingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -399,8 +476,13 @@ export default function HomeTabScreen() {
   const [typingMessageId, setTypingMessageId] = useState<string | null>(null);
   const [typingVisibleText, setTypingVisibleText] = useState("");
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  const [isVoiceInputAvailable, setIsVoiceInputAvailable] = useState(false);
+  const [isVoiceListening, setIsVoiceListening] = useState(false);
   const isKeyboardOpenRef = useRef(false);
   const keyboardHeightRef = useRef(0);
+  const hasMeasuredMessagesLayoutRef = useRef(false);
+  const voiceInputBaseRef = useRef("");
+  const voiceInputTranscriptRef = useRef("");
   const languageRef = useRef(language);
   languageRef.current = language;
 
@@ -408,6 +490,7 @@ export default function HomeTabScreen() {
     () => sortHomePlannerChats(homeStore.chats),
     [homeStore.chats]
   );
+  const currentProfileOrigin = profile?.personalProfile.homeBase.trim() ?? "";
   const filteredChats = useMemo(() => {
     const query = chatSearch.trim().toLowerCase();
 
@@ -435,32 +518,88 @@ export default function HomeTabScreen() {
 
   const currentPlannerState =
     currentChat?.state ??
-    createEmptyPlannerState(buildInitialAssistantMessage(profileName, language));
+    createEmptyPlannerState(
+      buildInitialAssistantMessage(profileName, language, currentProfileOrigin)
+    );
   const paymentMethods = useMemo(
     () => [t("home.paymentBankCard"), "Apple Pay", "Google Pay"],
     [t]
   );
+  const archivedPlans = currentPlannerState.archivedPlans ?? [];
+  const awaitingGenerationConfirmation =
+    currentPlannerState.awaitingGenerationConfirmation === true;
   const latestPlan = currentPlannerState.latestPlan;
   const followUpMessages = currentPlannerState.followUpMessages ?? [];
+  const planCardLabel =
+    language === "en"
+      ? "Offer"
+      : language === "de"
+        ? "Angebot"
+        : language === "es"
+          ? "Oferta"
+          : language === "fr"
+            ? "Offre"
+            : "Оферта";
+  const effectivePlannerOrigin = currentPlannerState.origin.trim() || currentProfileOrigin;
+  const plannerOriginChip = effectivePlannerOrigin
+    ? language === "en"
+      ? `Start: ${effectivePlannerOrigin}`
+      : `Старт: ${effectivePlannerOrigin}`
+    : "";
+  const plannerDestinationChip = currentPlannerState.destination.trim()
+    ? language === "en"
+      ? `End: ${currentPlannerState.destination.trim()}`
+      : `Край: ${currentPlannerState.destination.trim()}`
+    : "";
+  const profileOriginActionLabel = currentProfileOrigin
+    ? language === "en"
+      ? `Current from profile: ${currentProfileOrigin}`
+      : `Настояща от профила: ${currentProfileOrigin}`
+    : "";
+  const navigateToDiscoverFromOrigin = useCallback(() => {
+    const target = effectivePlannerOrigin.trim();
+    if (!target) {
+      router.push("/(tabs)/discover");
+      return;
+    }
+    router.push({
+      pathname: "/(tabs)/discover",
+      params: { origin: target },
+    });
+  }, [effectivePlannerOrigin, router]);
   const plannerContextChips = useMemo(
     () =>
       [
-        currentPlannerState.budget,
-        currentPlannerState.days,
-        currentPlannerState.travelers,
-        currentPlannerState.transportPreference,
-        currentPlannerState.timing,
-        currentPlannerState.destination,
-        currentPlannerState.tripStyle,
-      ].map((value) => value.trim()).filter(Boolean),
+        {
+          key: "origin",
+          label: plannerOriginChip,
+          onPress: effectivePlannerOrigin ? navigateToDiscoverFromOrigin : undefined,
+        },
+        { key: "budget", label: currentPlannerState.budget },
+        { key: "days", label: formatPlannerDaysLabel(currentPlannerState.days, language) },
+        {
+          key: "travelers",
+          label: formatPlannerTravelersLabel(currentPlannerState.travelers, language),
+        },
+        { key: "transport", label: currentPlannerState.transportPreference },
+        { key: "timing", label: currentPlannerState.timing },
+        { key: "destination", label: plannerDestinationChip },
+        { key: "tripStyle", label: currentPlannerState.tripStyle },
+      ]
+        .map((chip) => ({ ...chip, label: chip.label.trim() }))
+        .filter((chip) => chip.label.length > 0),
     [
       currentPlannerState.budget,
       currentPlannerState.days,
-      currentPlannerState.destination,
       currentPlannerState.timing,
       currentPlannerState.transportPreference,
       currentPlannerState.travelers,
       currentPlannerState.tripStyle,
+      effectivePlannerOrigin,
+      language,
+      navigateToDiscoverFromOrigin,
+      plannerDestinationChip,
+      plannerOriginChip,
     ]
   );
   const messagesScrollRef = useRef<ScrollView | null>(null);
@@ -470,18 +609,26 @@ export default function HomeTabScreen() {
     currentPlannerState.messages[currentPlannerState.messages.length - 1] ?? null;
   const lastFollowUpMessage = followUpMessages[followUpMessages.length - 1] ?? null;
   const shouldShowLatestPlan = !!latestPlan;
-  const plannerStatusText = plannerRunStage === "generating"
-    ? t("home.searchingPrices")
-    : currentChat?.title ?? t("home.newPlan");
+  const plannerStatusText =
+    plannerRunStage === "generating"
+      ? t("home.searchingPrices")
+      : planning
+        ? currentPlannerState.step === "done"
+          ? t("home.searchingPrices")
+          : t("home.aiThinking")
+        : currentChat?.title ?? t("home.newPlan");
   const activePlanningLabel =
     plannerRunStage === "generating" ? t("home.searchingPrices") : null;
   const conversationContentKey = [
     currentChat?.id ?? "no-chat",
     currentPlannerState.messages.length,
     lastPlannerMessage?.id ?? "no-message",
+    archivedPlans.length,
     followUpMessages.length,
     lastFollowUpMessage?.id ?? "no-follow-up",
     plannerRunStage,
+    planning ? "planning" : "idle",
+    awaitingGenerationConfirmation ? "awaiting-confirm" : "no-confirm",
     shouldShowLatestPlan ? latestPlan?.sourceKey ?? "plan" : "no-plan",
   ].join("|");
   const selectedTransport =
@@ -610,7 +757,9 @@ export default function HomeTabScreen() {
       scrollTimerRef.current = null;
       shouldStickToBottomRef.current = true;
       setShowScrollToBottom(false);
-      messagesScrollRef.current?.scrollToEnd({ animated });
+      messagesScrollRef.current?.scrollToEnd({
+        animated: Platform.OS === "ios" ? animated : false,
+      });
     }, Platform.OS === "android" ? 16 : 8);
   }, []);
 
@@ -631,14 +780,91 @@ export default function HomeTabScreen() {
     []
   );
 
+  const stopVoiceInput = useCallback((abort = false) => {
+    if (!speechRecognitionModule) {
+      return;
+    }
+
+    try {
+      if (abort) {
+        speechRecognitionModule.abort();
+      } else {
+        speechRecognitionModule.stop();
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (!speechRecognitionModule) {
+      return;
+    }
+
+    const startSubscription = speechRecognitionModule.addListener("start", () => {
+      voiceInputTranscriptRef.current = "";
+      setIsVoiceListening(true);
+      scrollMessagesToBottom(false);
+    });
+    const endSubscription = speechRecognitionModule.addListener("end", () => {
+      if (voiceInputTranscriptRef.current.trim()) {
+        setChatInput(
+          combineSpeechInput(voiceInputBaseRef.current, voiceInputTranscriptRef.current)
+        );
+      }
+      setIsVoiceListening(false);
+    });
+    const resultSubscription = speechRecognitionModule.addListener("result", (event) => {
+      const transcript =
+        event?.results
+          ?.map((result) => result.transcript?.trim() ?? "")
+          .filter(Boolean)
+          .join(" ")
+          .trim() ?? "";
+
+      if (!transcript.trim()) {
+        return;
+      }
+
+      voiceInputTranscriptRef.current = transcript;
+      setChatInput(combineSpeechInput(voiceInputBaseRef.current, transcript));
+    });
+    const errorSubscription = speechRecognitionModule.addListener("error", (event) => {
+      voiceInputTranscriptRef.current = "";
+      setIsVoiceListening(false);
+
+      if (event?.error === "aborted" || event?.error === "no-speech") {
+        return;
+      }
+
+      setError(event?.message || t("home.voiceInputFailed"));
+    });
+
+    return () => {
+      startSubscription.remove();
+      endSubscription.remove();
+      resultSubscription.remove();
+      errorSubscription.remove();
+    };
+  }, [scrollMessagesToBottom, t]);
+
   useEffect(() => {
     return () => {
       clearTypingAnimation();
       if (scrollTimerRef.current) {
         clearTimeout(scrollTimerRef.current);
       }
+      stopVoiceInput(true);
     };
-  }, [clearTypingAnimation]);
+  }, [clearTypingAnimation, stopVoiceInput]);
+
+  useEffect(() => {
+    try {
+      setIsVoiceInputAvailable(
+        !!speechRecognitionModule && speechRecognitionModule.isRecognitionAvailable()
+      );
+    } catch {
+      setIsVoiceInputAvailable(false);
+    }
+  }, [isFocused]);
 
   useEffect(() => {
     if (shouldStickToBottomRef.current || planning || isKeyboardOpenRef.current) {
@@ -660,7 +886,10 @@ export default function HomeTabScreen() {
       isKeyboardOpenRef.current = true;
       setIsKeyboardOpen(true);
       keyboardHeightRef.current = event?.endCoordinates?.height ?? 0;
-      scrollMessagesToBottom(true);
+
+      if (shouldStickToBottomRef.current) {
+        scrollMessagesToBottom(false);
+      }
     });
     const hideSubscription = Keyboard.addListener(hideEvent, () => {
       isKeyboardOpenRef.current = false;
@@ -673,6 +902,12 @@ export default function HomeTabScreen() {
       hideSubscription.remove();
     };
   }, [scrollMessagesToBottom]);
+
+  useEffect(() => {
+    if (planning && isVoiceListening) {
+      stopVoiceInput(true);
+    }
+  }, [isVoiceListening, planning, stopVoiceInput]);
 
   useEffect(() => {
     if (!isPhoneLayout) {
@@ -769,7 +1004,11 @@ export default function HomeTabScreen() {
           const nextStore = applyAutomaticChatTitles(
             parseStoredHomePlannerStore(
               profileData,
-              buildInitialAssistantMessage(nextProfileName, languageRef.current)
+              buildInitialAssistantMessage(
+                nextProfileName,
+                languageRef.current,
+                nextProfile.personalProfile.homeBase
+              )
             ),
             languageRef.current
           );
@@ -859,10 +1098,122 @@ export default function HomeTabScreen() {
     setTypingVisibleText("");
     setShowScrollToBottom(false);
     shouldStickToBottomRef.current = true;
+    hasMeasuredMessagesLayoutRef.current = false;
+    voiceInputBaseRef.current = "";
+    voiceInputTranscriptRef.current = "";
+    if (isVoiceListening) {
+      stopVoiceInput(true);
+    }
     scrollMessagesToBottom(false);
-  }, [clearTypingAnimation, currentChat?.id, scrollMessagesToBottom]);
+  }, [clearTypingAnimation, currentChat?.id, isVoiceListening, scrollMessagesToBottom, stopVoiceInput]);
 
   const canSend = chatInput.trim().length > 0 && !planning;
+
+  const buildPlanKey = useCallback(
+    (sourceKey: string) => (currentChat ? `${currentChat.id}:${sourceKey}` : ""),
+    [currentChat]
+  );
+
+  const togglePlanCollapsed = useCallback((planKey: string) => {
+    if (!planKey) {
+      return;
+    }
+
+    setCollapsedPlanKeys((currentKeys) =>
+      currentKeys.includes(planKey)
+        ? currentKeys.filter((key) => key !== planKey)
+        : [...currentKeys, planKey]
+    );
+  }, []);
+
+  const handleStartVoiceInput = useCallback(async () => {
+    if (planning) {
+      return;
+    }
+
+    if (isVoiceListening) {
+      return;
+    }
+
+    try {
+      setError("");
+
+      if (!speechRecognitionModule) {
+        setIsVoiceInputAvailable(false);
+        setError(t("home.voiceInputNeedsDevBuild"));
+        return;
+      }
+
+      if (Platform.OS !== "web" && isExpoGoLikeClient()) {
+        setError(t("home.voiceInputNeedsDevBuild"));
+        return;
+      }
+
+      const available = speechRecognitionModule.isRecognitionAvailable();
+      setIsVoiceInputAvailable(available);
+
+      if (!available) {
+        setError(t("home.voiceInputUnavailable"));
+        return;
+      }
+
+      const permission = await speechRecognitionModule.requestPermissionsAsync();
+
+      if (!permission.granted) {
+        setError(t("home.voiceInputPermissionDenied"));
+        return;
+      }
+
+      voiceInputBaseRef.current = chatInput;
+      voiceInputTranscriptRef.current = "";
+      setIsVoiceListening(true);
+      scrollMessagesToBottom(false);
+      speechRecognitionModule.start({
+        lang: getSpeechRecognitionLocale(language),
+        interimResults: true,
+        maxAlternatives: 1,
+        continuous: false,
+        addsPunctuation: Platform.OS === "ios",
+        androidIntentOptions:
+          Platform.OS === "android"
+            ? {
+                EXTRA_LANGUAGE_MODEL: "free_form",
+                EXTRA_PARTIAL_RESULTS: true,
+              }
+            : undefined,
+        requiresOnDeviceRecognition: Platform.OS === "ios",
+      });
+    } catch (nextError) {
+      console.warn("Voice input failed to start", nextError);
+      setIsVoiceListening(false);
+      setError(t("home.voiceInputFailed"));
+    }
+  }, [
+    chatInput,
+    isVoiceListening,
+    language,
+    planning,
+    scrollMessagesToBottom,
+    stopVoiceInput,
+    t,
+  ]);
+
+  const handleStopVoiceInput = useCallback(() => {
+    if (!isVoiceListening) {
+      return;
+    }
+
+    stopVoiceInput(false);
+  }, [isVoiceListening, stopVoiceInput]);
+
+  const handleToggleVoiceInput = useCallback(() => {
+    if (isVoiceListening) {
+      handleStopVoiceInput();
+      return;
+    }
+
+    void handleStartVoiceInput();
+  }, [handleStartVoiceInput, handleStopVoiceInput, isVoiceListening]);
 
   const persistStore = useCallback(
     async (nextStore: HomePlannerStore) => {
@@ -908,25 +1259,12 @@ export default function HomeTabScreen() {
 
     homeFocusHandledRef.current = true;
 
-    const untouchedChat = sortedChats.find((chat) => isHomePlannerChatUntouched(chat));
-
-    if (untouchedChat) {
-      if (homeStore.currentChatId !== untouchedChat.id) {
-        const nextStore = {
-          ...homeStore,
-          currentChatId: untouchedChat.id,
-        };
-
-        setChatInput("");
-        setHomeStore(nextStore);
-        void persistStore(nextStore);
-      }
-
+    if (sortedChats.length > 0) {
       return;
     }
 
     const nextChat = createHomePlannerChat(
-      buildInitialAssistantMessage(profileName, language),
+      buildInitialAssistantMessage(profileName, language, currentProfileOrigin),
       getDefaultChatTitle(homeStore.chats.length, language)
     );
     const nextStore = {
@@ -1005,9 +1343,13 @@ export default function HomeTabScreen() {
   };
 
   const handleCreateChat = async () => {
-    const initialAssistantMessage = buildInitialAssistantMessage(profileName, language);
+    const initialMessageWithOrigin = buildInitialAssistantMessage(
+      profileName,
+      language,
+      currentProfileOrigin
+    );
     const nextChat = createHomePlannerChat(
-      initialAssistantMessage,
+      initialMessageWithOrigin,
       getDefaultChatTitle(homeStore.chats.length, language)
     );
     const nextStore = {
@@ -1039,7 +1381,7 @@ export default function HomeTabScreen() {
           }
         : (() => {
             const nextChat = createHomePlannerChat(
-              buildInitialAssistantMessage(profileName, language)
+              buildInitialAssistantMessage(profileName, language, currentProfileOrigin)
             );
 
             return {
@@ -1128,7 +1470,13 @@ export default function HomeTabScreen() {
     await replaceCurrentChat((chat) => ({
       ...chat,
       updatedAtMs: Date.now(),
-      state: createEmptyPlannerState(buildInitialAssistantMessage(profileName, language)),
+      state: createEmptyPlannerState(
+        buildInitialAssistantMessage(
+          profileName,
+          language,
+          profile?.personalProfile.homeBase ?? ""
+        )
+      ),
       title: chat.title,
     }));
     setChatInput("");
@@ -1144,6 +1492,7 @@ export default function HomeTabScreen() {
     days: state.days,
     destination: state.destination,
     notes: state.notes,
+    origin: state.origin,
     questionCount: state.aiQuestionCount,
     timing: state.timing,
     transportPreference: state.transportPreference,
@@ -1162,6 +1511,7 @@ export default function HomeTabScreen() {
     days: snapshot.days,
     destination: snapshot.destination,
     notes: snapshot.notes,
+    origin: snapshot.origin,
     timing: snapshot.timing,
     transportPreference: snapshot.transportPreference,
     travelers: snapshot.travelers,
@@ -1188,15 +1538,228 @@ export default function HomeTabScreen() {
     );
   };
 
+  const normalizePlannerIntentText = (value: string) =>
+    value
+      .trim()
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const includesAnyIntentFragment = (value: string, fragments: string[]) =>
+    fragments.some((fragment) => value.includes(fragment));
+
+  const isOfferGenerationConfirmation = (value: string) => {
+    const normalized = value.trim().toLowerCase();
+    const intentText = normalizePlannerIntentText(value);
+    const hasOfferIntent = includesAnyIntentFragment(intentText, [
+      "оферт",
+      "offer",
+      "quote",
+      "deal",
+    ]);
+    const hasGenerateIntent = includesAnyIntentFragment(intentText, [
+      "генер",
+      "generate",
+      "направ",
+      "дай",
+      "искам",
+      "пусн",
+      "старт",
+    ]);
+    const hasDelayIntent = includesAnyIntentFragment(intentText, [
+      "въпрос",
+      "question",
+      "питай",
+      "ask",
+      "уточ",
+      "refin",
+      "допъл",
+      "detail",
+      "инфо",
+      "information",
+      "not yet",
+      "later",
+    ]);
+
+    if (
+      new Set([
+        "да",
+        "yes",
+        "ok",
+        "okay",
+        "sure",
+        "готово",
+        "става",
+        "айде",
+        "добре",
+        "go ahead",
+        "lets do it",
+      ]).has(intentText)
+    ) {
+      return true;
+    }
+
+    if (hasOfferIntent && hasGenerateIntent && !hasDelayIntent) {
+      return true;
+    }
+
+    if (hasGenerateIntent && !hasDelayIntent && intentText.length <= 24) {
+      return true;
+    }
+
+    const wantsOfferNow =
+      normalized.includes("оферта") &&
+      (
+        normalized.includes("дай") ||
+        normalized.includes("искам") ||
+        normalized.includes("направи") ||
+        normalized.includes("генерирай")
+      );
+
+    return (
+      normalized === "да" ||
+      normalized === "yes" ||
+      normalized === "ok" ||
+      normalized === "okay" ||
+      normalized === "готово" ||
+      normalized === "generate" ||
+      normalized === "генерирай" ||
+      normalized === "направи оферта" ||
+      normalized === "дай оферта" ||
+      normalized.includes("генерирай") ||
+      normalized.includes("дай оферта") ||
+      normalized.includes("готов съм") ||
+      normalized.includes("go ahead") ||
+      normalized.includes("дай ми оферта") ||
+      normalized.includes("искам оферта") ||
+      normalized.includes("направи ми оферта") ||
+      normalized.includes("генерирай офертата") ||
+      normalized.includes("направо оферта") ||
+      normalized.includes("оферта сега") ||
+      normalized.includes("всъщност дай ми оферта") ||
+      wantsOfferNow
+    );
+  };
+
+  const isOfferGenerationDeferral = (value: string) => {
+    const normalized = value.trim().toLowerCase();
+    const intentText = normalizePlannerIntentText(value);
+    const wantsMoreQuestions = includesAnyIntentFragment(intentText, [
+      "въпрос",
+      "question",
+      "питай",
+      "ask",
+      "още",
+      "more",
+      "уточ",
+      "refin",
+      "допъл",
+      "detail",
+      "детайл",
+      "инфо",
+      "information",
+      "чак",
+      "not yet",
+      "later",
+    ]);
+    const wantsGenerateNow =
+      includesAnyIntentFragment(intentText, ["оферт", "offer", "генер", "generate"]) &&
+      includesAnyIntentFragment(intentText, ["дай", "искам", "направ", "генер", "пусн"]);
+
+    if (wantsMoreQuestions && !wantsGenerateNow) {
+      return true;
+    }
+
+    return (
+      normalized === "не" ||
+      normalized.includes("още въпрос") ||
+      normalized.includes("още информация") ||
+      normalized.includes("още детайл") ||
+      normalized.includes("искам да допълня") ||
+      normalized.includes("нека допълня") ||
+      normalized.includes("чакай") ||
+      normalized.includes("not yet") ||
+      normalized.includes("more info") ||
+      normalized.includes("more questions") ||
+      normalized.includes("дай въпрос") ||
+      normalized.includes("дай някой въпрос") ||
+      normalized.includes("дай ми въпрос") ||
+      normalized.includes("задай въпрос") ||
+      normalized.includes("питай още") ||
+      normalized.includes("дай още въпрос") ||
+      normalized.includes("дай още въпроси") ||
+      normalized.includes("искам още въпроси") ||
+      normalized.includes("искам въпрос")
+    );
+  };
+
+  const getOfferConfirmationPrompt = () => {
+    if (language === "en") {
+      return "I already have enough information for an offer. Do you want me to generate it now, should I ask 1-2 more questions, or do you want to add more details first?";
+    }
+
+    return "Имам достатъчно информация за оферта. Искаш ли да я генерирам сега, да ти задам още 1-2 въпроса, или първо искаш да добавиш още детайли?";
+  };
+
+  const getOfferDeferralPrompt = () => {
+    if (language === "en") {
+      return "Perfect, let's refine it a bit more. You can add more details yourself, or tell me what to refine first: destination, dates, budget, transport, vibe, or something else.";
+    }
+
+    return "Супер, нека го доуточним още малко. Можеш директно да добавиш повече информация или да ми кажеш какво да уточним първо: дестинация, дати, бюджет, транспорт, вайб или нещо друго.";
+  };
+
+  const getOfferDeferralQuestion = (snapshot: PlannerIntakeSnapshot) => {
+    if (!snapshot.origin.trim()) {
+      if (language === "en") {
+        return currentProfileOrigin
+          ? `Where are you starting from? If you want, I can use your current profile location: ${currentProfileOrigin}.`
+          : "Where are you starting from?";
+      }
+
+      return currentProfileOrigin
+        ? `От къде тръгваш? Ако искаш, мога да ползвам настоящата точка от профила ти: ${currentProfileOrigin}.`
+        : "От къде тръгваш?";
+    }
+
+    if (!snapshot.tripStyle.trim()) {
+      if (language === "en") {
+        return "What vibe do you want for the trip: chill, food, culture, nightlife, nature, or something else?";
+      }
+
+      return "Какъв вайб искаш да има офертата: chill, food, culture, nightlife, nature или нещо друго?";
+    }
+
+    if (!snapshot.notes.trim()) {
+      if (language === "en") {
+        return "Is there anything important you want me to definitely include in the offer?";
+      }
+
+      return "Има ли нещо важно, което искаш задължително да включа в офертата?";
+    }
+
+    if (language === "en") {
+      return "Which one should I refine first before I generate the offer: destination, dates, budget, transport, or stay type?";
+    }
+
+    return "Кое искаш да доуточним първо преди да генерирам офертата: дестинация, дати, бюджет, транспорт или тип настаняване?";
+  };
+
   const runPlanGeneration = async (
     snapshot: PlannerIntakeSnapshot,
     messagesAfterUser: HomeChatMessage[],
     options: {
       appendAssistantToFollowUps?: boolean;
+      archivedPlans?: typeof archivedPlans;
+      existingPlan?: typeof latestPlan;
       followUpMessages?: HomeChatMessage[];
+      leadMessages?: HomeChatMessage[];
       preservePlanIfRequestedTransportMissing?: boolean;
       preservePlanIfTransportPriceMissing?: boolean;
       requestedTransportOperators?: string[];
+      tailMessages?: HomeChatMessage[];
       transportPriceRequest?: boolean;
     } = {}
   ) => {
@@ -1208,10 +1771,38 @@ export default function HomeTabScreen() {
     optimisticChatIdRef.current = currentChat?.id ?? optimisticChatIdRef.current;
     setPlannerRunStage("generating");
 
-    // The caller already set messages, followUpMessages, and latestPlan
-    // correctly and persisted to Firestore. Do NOT call replaceCurrentChat
-    // here — it would read stale React state and overwrite the follow-up
-    // messages the caller just set.
+    const existingPlan = options.existingPlan ?? null;
+    const archivedPlanBlocks = options.archivedPlans ?? [];
+    const leadMessages = options.leadMessages ?? [];
+    const tailMessages = options.tailMessages ?? messagesAfterUser;
+    const useArchiveFlow = !!options.existingPlan;
+
+    const searchingMessage = createHomeChatMessage("assistant", t("home.preparingRoute"));
+    const messagesWhilePlanning = useArchiveFlow
+      ? [...messagesAfterUser, searchingMessage]
+      : messagesAfterUser;
+
+    if (useArchiveFlow) {
+      await replaceCurrentChatWithAssistant(
+        (chat) => ({
+          ...chat,
+          updatedAtMs: Date.now(),
+          state: {
+            ...applySnapshotToState(chat.state, snapshot, "done"),
+            archivedPlans: archivedPlanBlocks,
+            awaitingGenerationConfirmation: false,
+            followUpMessages: existingPlan ? [...tailMessages, searchingMessage] : [],
+            latestPlan: existingPlan ?? chat.state.latestPlan,
+            messages: existingPlan ? leadMessages : messagesWhilePlanning,
+          },
+        }),
+        searchingMessage
+      );
+    }
+    // For the follow-up refinement flow (HEAD), the caller already set messages,
+    // followUpMessages, and latestPlan correctly and persisted to Firestore.
+    // We skip replaceCurrentChat here to avoid overwriting follow-up messages
+    // the caller just set.
 
     try {
       const plan = await generateGroundedTravelPlan({
@@ -1220,6 +1811,7 @@ export default function HomeTabScreen() {
         destination: snapshot.destination,
         language,
         notes: snapshot.notes,
+        origin: snapshot.origin || currentProfileOrigin,
         timing: snapshot.timing,
         transportPreference: snapshot.transportPreference,
         travelers: snapshot.travelers,
@@ -1278,15 +1870,38 @@ export default function HomeTabScreen() {
           updatedAtMs: Date.now(),
           state: {
             ...applySnapshotToState(chat.state, snapshot, "done"),
-            followUpMessages: options.appendAssistantToFollowUps
-              ? [...(options.followUpMessages ?? chat.state.followUpMessages), readyMessage]
-              : [],
-            latestPlan: shouldPreserveExistingPlan
-              ? chat.state.latestPlan
-              : nextLatestPlan,
-            messages: options.appendAssistantToFollowUps
-              ? messagesAfterUser
-              : [...messagesAfterUser, readyMessage],
+            ...(useArchiveFlow
+              ? {
+                  archivedPlans: existingPlan
+                    ? [
+                        ...archivedPlanBlocks,
+                        {
+                          plan: existingPlan,
+                          trailingMessages: [...tailMessages, readyMessage],
+                        },
+                      ]
+                    : archivedPlanBlocks,
+                  awaitingGenerationConfirmation: false,
+                  followUpMessages: [],
+                  latestPlan: nextLatestPlan,
+                  messages: existingPlan
+                    ? leadMessages
+                    : [...messagesWhilePlanning, readyMessage],
+                }
+              : {
+                  followUpMessages: options.appendAssistantToFollowUps
+                    ? [
+                        ...(options.followUpMessages ?? chat.state.followUpMessages),
+                        readyMessage,
+                      ]
+                    : [],
+                  latestPlan: shouldPreserveExistingPlan
+                    ? chat.state.latestPlan
+                    : nextLatestPlan,
+                  messages: options.appendAssistantToFollowUps
+                    ? messagesAfterUser
+                    : [...messagesAfterUser, readyMessage],
+                }),
           },
         }),
         readyMessage
@@ -1308,13 +1923,30 @@ export default function HomeTabScreen() {
               snapshot,
               chat.state.latestPlan ? "done" : "chatting"
             ),
-            followUpMessages: options.appendAssistantToFollowUps
-              ? [...(options.followUpMessages ?? chat.state.followUpMessages), errorMessage]
-              : [],
-            latestPlan: chat.state.latestPlan,
-            messages: options.appendAssistantToFollowUps
-              ? messagesAfterUser
-              : [...messagesAfterUser, errorMessage],
+            ...(useArchiveFlow
+              ? {
+                  archivedPlans: archivedPlanBlocks,
+                  awaitingGenerationConfirmation: false,
+                  followUpMessages: existingPlan
+                    ? [...tailMessages, errorMessage]
+                    : [],
+                  latestPlan: existingPlan ?? chat.state.latestPlan,
+                  messages: existingPlan
+                    ? leadMessages
+                    : [...messagesAfterUser, errorMessage],
+                }
+              : {
+                  followUpMessages: options.appendAssistantToFollowUps
+                    ? [
+                        ...(options.followUpMessages ?? chat.state.followUpMessages),
+                        errorMessage,
+                      ]
+                    : [],
+                  latestPlan: chat.state.latestPlan,
+                  messages: options.appendAssistantToFollowUps
+                    ? messagesAfterUser
+                    : [...messagesAfterUser, errorMessage],
+                }),
           },
         }),
         errorMessage
@@ -1399,7 +2031,15 @@ export default function HomeTabScreen() {
     setSaveSuccess("");
 
     const plannerState = currentChat.state;
+    const archivedPlanBlocks = plannerState.archivedPlans ?? [];
+    const hasPinnedPlan = !!plannerState.latestPlan;
+    const leadMessages = plannerState.messages;
+    const tailMessages = plannerState.followUpMessages ?? [];
+    const contextMessages = hasPinnedPlan ? [...leadMessages, ...tailMessages] : leadMessages;
     const userMessage = createHomeChatMessage("user", value);
+    const messagesAfterUser = [...contextMessages, userMessage];
+    const leadMessagesAfterUser = hasPinnedPlan ? leadMessages : messagesAfterUser;
+    const tailMessagesAfterUser = hasPinnedPlan ? [...tailMessages, userMessage] : [];
     const currentSnapshot = buildPlannerSnapshot(plannerState);
 
     if (plannerState.step === "done" && plannerState.latestPlan) {
@@ -1675,8 +2315,6 @@ export default function HomeTabScreen() {
       return;
     }
 
-    const messagesAfterUser = [...plannerState.messages, userMessage];
-
     // Show and persist the user's message before the AI call so remote snapshots
     // cannot roll the visible chat back while generation is running.
     planningRef.current = true;
@@ -1686,7 +2324,17 @@ export default function HomeTabScreen() {
     const nextChats = sortHomePlannerChats(
       homeStore.chats.map((chat) =>
         chat.id === currentChat.id
-          ? { ...chat, updatedAtMs: Date.now(), state: { ...chat.state, messages: messagesAfterUser } }
+          ? {
+              ...chat,
+              updatedAtMs: Date.now(),
+              state: {
+              ...chat.state,
+              archivedPlans: archivedPlanBlocks,
+              awaitingGenerationConfirmation: false,
+              followUpMessages: tailMessagesAfterUser,
+              messages: leadMessagesAfterUser,
+            },
+            }
           : chat
       )
     );
@@ -1698,6 +2346,90 @@ export default function HomeTabScreen() {
     await persistStore(nextStore);
 
     try {
+      const currencyConversionAnswer = await getCurrencyConversionAnswer(
+        value,
+        language,
+        currentSnapshot.budget
+      );
+
+      if (currencyConversionAnswer) {
+        const assistantMessage = createHomeChatMessage("assistant", currencyConversionAnswer);
+
+        await replaceCurrentChatWithAssistant(
+          (chat) => ({
+            ...chat,
+            updatedAtMs: Date.now(),
+            state: {
+              ...chat.state,
+              archivedPlans: archivedPlanBlocks,
+              awaitingGenerationConfirmation: false,
+              followUpMessages: hasPinnedPlan
+                ? [...tailMessagesAfterUser, assistantMessage]
+                : [],
+              latestPlan: chat.state.latestPlan,
+              messages: hasPinnedPlan
+                ? leadMessages
+                : [...messagesAfterUser, assistantMessage],
+            },
+          }),
+          assistantMessage
+        );
+        scrollMessagesToBottom(true);
+        return;
+      }
+
+      if (plannerState.awaitingGenerationConfirmation) {
+        if (isOfferGenerationConfirmation(value)) {
+          await runPlanGeneration(currentSnapshot, messagesAfterUser, {
+            archivedPlans: archivedPlanBlocks,
+            existingPlan: plannerState.latestPlan,
+            leadMessages,
+            tailMessages: tailMessagesAfterUser,
+          });
+          return;
+        }
+
+        if (isOfferGenerationDeferral(value)) {
+          const assistantMessage = createHomeChatMessage(
+            "assistant",
+            getOfferDeferralQuestion(currentSnapshot)
+          );
+
+          await replaceCurrentChatWithAssistant(
+            (chat) => ({
+              ...chat,
+              updatedAtMs: Date.now(),
+              state: {
+                ...chat.state,
+                archivedPlans: archivedPlanBlocks,
+                awaitingGenerationConfirmation: false,
+                followUpMessages: hasPinnedPlan
+                  ? [...tailMessagesAfterUser, assistantMessage]
+                  : [],
+                latestPlan: chat.state.latestPlan,
+                messages: hasPinnedPlan
+                  ? leadMessages
+                  : [...messagesAfterUser, assistantMessage],
+                step: "chatting",
+              },
+            }),
+            assistantMessage
+          );
+          scrollMessagesToBottom(true);
+          return;
+        }
+      }
+
+      if (plannerState.step === "done" && isPlannerRegenerateCommand(value)) {
+        await runPlanGeneration(currentSnapshot, messagesAfterUser, {
+          archivedPlans: archivedPlanBlocks,
+          existingPlan: plannerState.latestPlan,
+          leadMessages,
+          tailMessages: tailMessagesAfterUser,
+        });
+        return;
+      }
+
       const intakeTurn = await runPlannerIntakeTurn({
         language,
         latestUserInput: value,
@@ -1721,9 +2453,15 @@ export default function HomeTabScreen() {
             updatedAtMs: Date.now(),
             state: {
               ...applySnapshotToState(chat.state, intakeTurn.snapshot, "chatting"),
-              followUpMessages: [],
+              archivedPlans: archivedPlanBlocks,
+              awaitingGenerationConfirmation: false,
+              followUpMessages: hasPinnedPlan
+                ? [...tailMessagesAfterUser, assistantMessage]
+                : [],
               latestPlan: chat.state.latestPlan,
-              messages: [...messagesAfterUser, assistantMessage],
+              messages: hasPinnedPlan
+                ? leadMessages
+                : [...messagesAfterUser, assistantMessage],
             },
           }),
           assistantMessage
@@ -1732,7 +2470,43 @@ export default function HomeTabScreen() {
         return;
       }
 
-      await runPlanGeneration(intakeTurn.snapshot, messagesAfterUser);
+      if (isOfferGenerationConfirmation(value)) {
+        const readySnapshot = intakeTurn.snapshot;
+        const messagesForGeneration = hasPinnedPlan
+          ? [...leadMessages, ...tailMessagesAfterUser]
+          : messagesAfterUser;
+
+        await runPlanGeneration(readySnapshot, messagesForGeneration, {
+          archivedPlans: archivedPlanBlocks,
+          existingPlan: plannerState.latestPlan,
+          leadMessages,
+          tailMessages: tailMessagesAfterUser,
+        });
+        return;
+      }
+
+      const assistantMessage = createHomeChatMessage("assistant", getOfferConfirmationPrompt());
+
+      await replaceCurrentChatWithAssistant(
+        (chat) => ({
+          ...chat,
+          updatedAtMs: Date.now(),
+          state: {
+            ...applySnapshotToState(chat.state, intakeTurn.snapshot, "chatting"),
+            archivedPlans: archivedPlanBlocks,
+            awaitingGenerationConfirmation: true,
+            followUpMessages: hasPinnedPlan
+              ? [...tailMessagesAfterUser, assistantMessage]
+              : [],
+            latestPlan: chat.state.latestPlan,
+            messages: hasPinnedPlan
+              ? leadMessages
+              : [...messagesAfterUser, assistantMessage],
+          },
+        }),
+        assistantMessage
+      );
+      scrollMessagesToBottom(true);
     } catch {
       const message = getPlannerIntakeErrorMessage(language);
       const errorMessage = createHomeChatMessage("assistant", message);
@@ -1740,16 +2514,22 @@ export default function HomeTabScreen() {
 
       await replaceCurrentChatWithAssistant(
         (chat) => ({
-          ...chat,
-          updatedAtMs: Date.now(),
-          state: {
-            ...chat.state,
-            followUpMessages: [],
-            latestPlan: chat.state.latestPlan,
-            messages: [...messagesAfterUser, errorMessage],
-            step: "chatting",
-          },
-        }),
+            ...chat,
+            updatedAtMs: Date.now(),
+            state: {
+              ...chat.state,
+              archivedPlans: archivedPlanBlocks,
+              awaitingGenerationConfirmation: false,
+              followUpMessages: hasPinnedPlan
+                ? [...tailMessagesAfterUser, errorMessage]
+                : [],
+              latestPlan: chat.state.latestPlan,
+              messages: hasPinnedPlan
+                ? leadMessages
+                : [...messagesAfterUser, errorMessage],
+              step: "chatting",
+            },
+          }),
         errorMessage
       );
       scrollMessagesToBottom(true);
@@ -1757,6 +2537,18 @@ export default function HomeTabScreen() {
       planningRef.current = false;
       setPlannerRunStage("idle");
     }
+  };
+
+  const handleUseProfileOrigin = () => {
+    if (!currentProfileOrigin || planning) {
+      return;
+    }
+
+    void sendPlannerMessage(
+      language === "en"
+        ? `Use my current profile location as the trip origin: ${currentProfileOrigin}`
+        : `Ползвай настоящата точка от профила ми като начало: ${currentProfileOrigin}`
+    );
   };
 
   const handleSavePlan = async () => {
@@ -2059,6 +2851,77 @@ export default function HomeTabScreen() {
     }
   };
 
+  const renderPlanSection = (
+    plan: NonNullable<typeof latestPlan>,
+    allowActions: boolean
+  ) => {
+    const planKey = buildPlanKey(plan.sourceKey);
+    const isCollapsed = planKey ? collapsedPlanKeys.includes(planKey) : false;
+
+    return (
+      <View
+        key={planKey || plan.sourceKey}
+        style={[
+          styles.planCardSection,
+          { backgroundColor: colors.card, borderColor: colors.border },
+        ]}
+      >
+        <TouchableOpacity
+          activeOpacity={0.88}
+          onPress={() => {
+            togglePlanCollapsed(planKey);
+          }}
+          style={styles.planCardToggle}
+        >
+          <View style={styles.planCardToggleLeft}>
+            <View
+              style={[
+                styles.planCardToggleIcon,
+                { backgroundColor: colors.accentMuted },
+              ]}
+            >
+              <MaterialIcons
+                color={colors.accent}
+                name={isCollapsed ? "keyboard-arrow-right" : "keyboard-arrow-down"}
+                size={22}
+              />
+            </View>
+            <View style={styles.planCardToggleTextWrap}>
+              <Text style={[styles.planCardToggleLabel, { color: colors.textPrimary }]}>
+                {planCardLabel}
+              </Text>
+              <Text style={[styles.planCardToggleMeta, { color: colors.textMuted }]}>
+                {[plan.destination, plan.days, plan.budget].filter(Boolean).join(" • ")}
+              </Text>
+            </View>
+          </View>
+        </TouchableOpacity>
+
+        {!isCollapsed ? (
+          <PlanCard
+            latestPlan={plan}
+            isPhoneLayout={isPhoneLayout}
+            saving={allowActions ? savingPlan : false}
+            saved={savedSourceKeys.includes(plan.sourceKey)}
+            onSavePlan={() => {
+              if (allowActions) {
+                void handleSavePlan();
+              }
+            }}
+            onBookNow={allowActions ? openBookingModal : () => {}}
+            onBookTransport={allowActions ? openBookingModalForTransport : () => {}}
+            onBookStay={allowActions ? openBookingModalForStay : () => {}}
+            saveSuccess={allowActions ? saveSuccess : ""}
+            saveError={allowActions ? saveError : ""}
+            bookingSuccess={allowActions ? bookingSuccess : ""}
+            bookingError={allowActions ? bookingError : ""}
+            bookingEstimateLabel={bookingChargeBreakdown.totalLabel}
+          />
+        ) : null}
+      </View>
+    );
+  };
+
   if (loading) {
     return (
       <SafeAreaView
@@ -2133,13 +2996,16 @@ export default function HomeTabScreen() {
               </View>
               <TouchableOpacity
                 accessibilityLabel="Start new chat"
-                activeOpacity={0.7}
+                activeOpacity={0.86}
                 onPress={() => {
                   void handleCreateChat();
                 }}
-                style={styles.headerIconBtn}
+                style={[styles.headerNewPlanButton, { backgroundColor: colors.accent }]}
               >
-                <MaterialIcons color={colors.textPrimary} name="add-box" size={28} />
+                <MaterialIcons color={colors.buttonTextOnAction} name="add" size={19} />
+                <Text style={[styles.headerNewPlanButtonText, { color: colors.buttonTextOnAction }]}>
+                  {t("home.newPlan")}
+                </Text>
               </TouchableOpacity>
             </View>
 
@@ -2150,18 +3016,73 @@ export default function HomeTabScreen() {
                     {t("home.currentPlan")}
                   </Text>
                   <View style={styles.profileMetaRow}>
-                    {plannerContextChips.map((chip, index) => (
-                      <View
-                        key={`${chip}-${index}`}
-                        style={[styles.profileMetaChip, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}
-                      >
+                    {plannerContextChips.map((chip) => {
+                      const chipBody = (
                         <Text style={[styles.profileMetaChipText, { color: colors.textPrimary }]}>
-                          {chip}
+                          {chip.label}
                         </Text>
-                      </View>
-                    ))}
+                      );
+
+                      if (chip.onPress) {
+                        return (
+                          <TouchableOpacity
+                            key={chip.key}
+                            activeOpacity={0.85}
+                            onPress={chip.onPress}
+                            style={[
+                              styles.profileMetaChip,
+                              {
+                                backgroundColor: colors.inputBackground,
+                                borderColor: colors.inputBorder,
+                              },
+                            ]}
+                          >
+                            {chipBody}
+                          </TouchableOpacity>
+                        );
+                      }
+
+                      return (
+                        <View
+                          key={chip.key}
+                          style={[
+                            styles.profileMetaChip,
+                            {
+                              backgroundColor: colors.inputBackground,
+                              borderColor: colors.inputBorder,
+                            },
+                          ]}
+                        >
+                          {chipBody}
+                        </View>
+                      );
+                    })}
                   </View>
                 </View>
+              ) : null}
+
+              {currentProfileOrigin ? (
+                <TouchableOpacity
+                  activeOpacity={0.86}
+                  disabled={planning}
+                  onPress={handleUseProfileOrigin}
+                  style={[
+                    styles.currentOriginButton,
+                    {
+                      backgroundColor: colors.cardAlt,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <MaterialIcons
+                    color={colors.accent}
+                    name="my-location"
+                    size={16}
+                  />
+                  <Text style={[styles.currentOriginButtonText, { color: colors.textPrimary }]}>
+                    {profileOriginActionLabel}
+                  </Text>
+                </TouchableOpacity>
               ) : null}
 
               <ScrollView
@@ -2177,7 +3098,11 @@ export default function HomeTabScreen() {
                 scrollEventThrottle={16}
                 onLayout={(e) => {
                   scrollViewLayoutHeight.current = e.nativeEvent.layout.height;
-                  scrollMessagesToBottom(false);
+
+                  if (!hasMeasuredMessagesLayoutRef.current) {
+                    hasMeasuredMessagesLayoutRef.current = true;
+                    scrollMessagesToBottom(false);
+                  }
                 }}
                 onContentSizeChange={(_, contentHeight) => {
                   if (
@@ -2197,22 +3122,22 @@ export default function HomeTabScreen() {
                   />
                 ))}
 
+                {archivedPlans.map((block, blockIndex) => (
+                  <React.Fragment key={`${block.plan.sourceKey}-${blockIndex}`}>
+                    {renderPlanSection(block.plan, false)}
+                    {block.trailingMessages.map((message) => (
+                      <ChatMessageBubble
+                        key={message.id}
+                        colors={colors}
+                        displayedText={getDisplayedMessageText(message)}
+                        role={message.role}
+                      />
+                    ))}
+                  </React.Fragment>
+                ))}
+
                 {shouldShowLatestPlan && latestPlan ? (
-                  <PlanCard
-                    latestPlan={latestPlan}
-                    isPhoneLayout={isPhoneLayout}
-                    saving={savingPlan}
-                    saved={savedSourceKeys.includes(latestPlan.sourceKey)}
-                    onSavePlan={() => { void handleSavePlan(); }}
-                    onBookNow={openBookingModal}
-                    onBookTransport={openBookingModalForTransport}
-                    onBookStay={openBookingModalForStay}
-                    saveSuccess={saveSuccess}
-                    saveError={saveError}
-                    bookingSuccess={bookingSuccess}
-                    bookingError={bookingError}
-                    bookingEstimateLabel={bookingChargeBreakdown.totalLabel}
-                  />
+                  renderPlanSection(latestPlan, true)
                 ) : null}
 
                 {followUpMessages.map((message) => (
@@ -2289,11 +3214,21 @@ export default function HomeTabScreen() {
                 colors={colors}
                 insetBottom={isKeyboardOpen ? Spacing.md : insets.bottom + Spacing.md}
                 onChangeText={setChatInput}
-                onFocus={() => scrollMessagesToBottom(true)}
+                onFocus={() => scrollMessagesToBottom(Platform.OS === "ios")}
                 onLayout={(event) => setComposerHeight(event.nativeEvent.layout.height)}
                 planningLabel={activePlanningLabel}
-                onSend={() => { void sendPlannerMessage(chatInput); }}
                 onReset={() => { void resetConversation(); }}
+                onSend={() => {
+                  if (isVoiceListening) {
+                    stopVoiceInput(true);
+                  }
+                  void sendPlannerMessage(chatInput);
+                }}
+                onStartVoiceInput={() => { void handleStartVoiceInput(); }}
+                onStopVoiceInput={handleStopVoiceInput}
+                onToggleVoiceInput={() => { void handleToggleVoiceInput(); }}
+                voiceAvailable={isVoiceInputAvailable}
+                voiceListening={isVoiceListening}
               />
             </View>
           </View>
@@ -2411,6 +3346,19 @@ const styles = StyleSheet.create({
     padding: 4,
     width: 40,
   },
+  headerNewPlanButton: {
+    alignItems: "center",
+    borderRadius: Radius.full,
+    flexDirection: "row",
+    gap: Spacing.xs,
+    minHeight: 40,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 9,
+  },
+  headerNewPlanButtonText: {
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.extrabold,
+  },
   headerAssistantAvatar: {
     alignItems: "center",
     borderRadius: Radius.full,
@@ -2477,6 +3425,22 @@ const styles = StyleSheet.create({
     ...TypeScale.labelSm,
     fontWeight: FontWeight.semibold,
   },
+  currentOriginButton: {
+    alignItems: "center",
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: Spacing.xs,
+    marginBottom: Spacing.md,
+    marginHorizontal: Spacing.lg,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  currentOriginButtonText: {
+    ...TypeScale.labelMd,
+    flex: 1,
+    fontWeight: FontWeight.semibold,
+  },
   messagesContainer: {
     flex: 1,
   },
@@ -2507,6 +3471,43 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     flexDirection: "row",
     marginBottom: Spacing.md,
+  },
+  planCardSection: {
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+    marginBottom: Spacing.md,
+    overflow: "hidden",
+  },
+  planCardToggle: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  planCardToggleLeft: {
+    alignItems: "center",
+    flexDirection: "row",
+    flex: 1,
+    gap: Spacing.sm,
+  },
+  planCardToggleIcon: {
+    alignItems: "center",
+    borderRadius: Radius.full,
+    height: 28,
+    justifyContent: "center",
+    width: 28,
+  },
+  planCardToggleTextWrap: {
+    flex: 1,
+  },
+  planCardToggleLabel: {
+    ...TypeScale.bodySm,
+    fontWeight: FontWeight.extrabold,
+  },
+  planCardToggleMeta: {
+    ...TypeScale.labelMd,
+    marginTop: 2,
   },
   planningAvatar: {
     alignItems: "center",

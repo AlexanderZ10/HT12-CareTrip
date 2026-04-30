@@ -270,7 +270,14 @@ export function ChatDrawer({
             ]}
           >
             <View style={styles.phoneDrawerTopRow}>
-              <Text style={[styles.phoneDrawerBrand, { color: colors.textPrimary }]}>CareTrip</Text>
+              <View>
+                <Text style={[styles.phoneDrawerBrand, { color: colors.textPrimary }]}>
+                  {t("home.aiChats")}
+                </Text>
+                <Text style={[styles.hidden, styles.phoneDrawerSubtitle, { color: colors.textSecondary }]}>
+                  {savedChatsLabel}
+                </Text>
+              </View>
               <TouchableOpacity
                 style={[
                   styles.phoneDrawerCloseButton,
@@ -282,6 +289,16 @@ export function ChatDrawer({
                 <MaterialIcons name="close" size={20} color={colors.textPrimary} />
               </TouchableOpacity>
             </View>
+            <TouchableOpacity
+              style={[styles.newChatButton, styles.phoneDrawerNewChatButton, { backgroundColor: colors.accent }]}
+              onPress={onCreateChat}
+              activeOpacity={0.9}
+            >
+              <MaterialIcons name="add" size={18} color={colors.buttonTextOnAction} />
+              <Text style={[styles.newChatButtonText, { color: colors.buttonTextOnAction }]}>
+                {t("home.newPlan")}
+              </Text>
+            </TouchableOpacity>
             <View
               style={[
                 styles.phoneDrawerSearchWrap,
@@ -324,7 +341,7 @@ export function ChatDrawer({
                 <Text style={[styles.historyMenuTitle, { color: colors.textPrimary }]}>
                   {t("home.aiChats")}
                 </Text>
-                <Text style={[styles.historyMenuSubtitle, { color: colors.textSecondary }]}>
+                <Text style={[styles.hidden, styles.historyMenuSubtitle, { color: colors.textSecondary }]}>
                   {savedChatsLabel}
                 </Text>
               </View>
@@ -449,6 +466,13 @@ const styles = StyleSheet.create({
     ...TypeScale.headingLg,
     fontWeight: FontWeight.black,
   },
+  hidden: {
+    display: "none",
+  },
+  phoneDrawerSubtitle: {
+    ...TypeScale.bodySm,
+    marginTop: 2,
+  },
   phoneDrawerCloseButton: {
     width: 36,
     height: 36,
@@ -456,6 +480,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
+  },
+  phoneDrawerNewChatButton: {
+    marginBottom: Spacing.md,
   },
   phoneDrawerSearchWrap: {
     flexDirection: "row",

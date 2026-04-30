@@ -117,6 +117,8 @@ import {
 
 WebBrowser.maybeCompleteAuthSession();
 const GROUP_CHAT_PHOTO_MAX_LENGTH = 620000;
+const GROUP_JOURNAL_PHOTO_MAX_LENGTH = 760000;
+const GROUP_AVATAR_PHOTO_MAX_LENGTH = 900000;
 
 export default function GroupChatScreen() {
   const router = useRouter();
@@ -564,22 +566,40 @@ export default function GroupChatScreen() {
   }, [canReadMessages, groupId]);
 
   const handleAddPhoto = async () => {
-    if (!user || !groupId) return;
-    const ImagePicker = await import("expo-image-picker");
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      quality: 0.6,
-      base64: true,
-      allowsEditing: true,
-      aspect: [9, 16],
-    });
-
-    if (result.canceled || !result.assets[0]?.base64) return;
-
-    const asset = result.assets[0];
-    const imageUri = `data:image/jpeg;base64,${asset.base64}`;
+    if (!user || !groupId || !canReadMessages) return;
 
     try {
+      setPickingComposerPhoto(true);
+      setError("");
+      setInfoMessage("");
+
+      const permission =
+        Platform.OS === "web"
+          ? { granted: true }
+          : await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permission.granted) {
+        setError("Allow gallery access to add a group story photo.");
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        allowsEditing: true,
+        aspect: [9, 16],
+        base64: true,
+        mediaTypes: ["images"],
+        quality: 0.5,
+      });
+
+      if (result.canceled || !result.assets[0]) return;
+
+      const imageUri = await readAssetDataUrl(result.assets[0]);
+
+      if (imageUri.length > GROUP_JOURNAL_PHOTO_MAX_LENGTH) {
+        setError("The selected story photo is too large. Choose a smaller image.");
+        return;
+      }
+
       await addJournalPhoto({
         groupId,
         tripId: null,
@@ -589,8 +609,10 @@ export default function GroupChatScreen() {
         creatorId: user.uid,
         creatorLabel: profileName,
       });
-    } catch {
-      setError("Could not upload photo.");
+    } catch (nextError) {
+      setError(getGroupDetailErrorMessage(nextError, "write"));
+    } finally {
+      setPickingComposerPhoto(false);
     }
   };
 
@@ -1983,7 +2005,7 @@ export default function GroupChatScreen() {
         allowsEditing: true,
         aspect: [1, 1],
         base64: true,
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ["images"],
         quality: 0.45,
       });
 
@@ -1993,7 +2015,7 @@ export default function GroupChatScreen() {
 
       const nextPhotoUrl = await readAssetDataUrl(result.assets[0]);
 
-      if (nextPhotoUrl.length > 900000) {
+      if (nextPhotoUrl.length > GROUP_AVATAR_PHOTO_MAX_LENGTH) {
         setError("The selected photo is too large. Choose a smaller image.");
         return;
       }
@@ -2103,10 +2125,7 @@ export default function GroupChatScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Stories — only render the rail when there are actual stories.
-            When the chat is empty, there's no point showing a giant empty band
-            with just a dashed "Add" tile (it wastes a third of the screen). */}
-        {journalPhotos.length > 0 ? (
+        {(journalPhotos.length > 0 || canReadMessages) ? (
           <PhotoJournalGrid
             photos={journalPhotos}
             onAddPress={canReadMessages ? handleAddPhoto : undefined}

@@ -134,13 +134,23 @@ export function GroupChatComposer({
             activeOpacity={0.7}
             disabled={!canPickPhoto || sending || joining || pickingPhoto}
             onPress={onOpenPhotoLibrary}
-            onLongPress={onOpenCamera}
             style={[
               styles.actionIcon,
               (!canPickPhoto || sending || joining || pickingPhoto) && styles.actionIconDisabled,
             ]}
           >
             <MaterialIcons color={colors.accent} name="add-photo-alternate" size={22} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            disabled={!canPickPhoto || sending || joining || pickingPhoto}
+            onPress={onOpenCamera}
+            style={[
+              styles.actionIcon,
+              (!canPickPhoto || sending || joining || pickingPhoto) && styles.actionIconDisabled,
+            ]}
+          >
+            <MaterialIcons color={colors.textSecondary} name="photo-camera" size={22} />
           </TouchableOpacity>
           <TouchableOpacity
             activeOpacity={0.7}

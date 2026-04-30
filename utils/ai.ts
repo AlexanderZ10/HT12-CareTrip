@@ -130,6 +130,7 @@ export async function callAI(params: {
   prompt: string;
   systemPrompt?: string;
   jsonMode?: boolean;
+  responseSchema?: Record<string, unknown>;
   googleSearchGrounding?: boolean;
   conversationHistory?: { role: "user" | "assistant"; content: string }[];
 }): Promise<string> {
@@ -146,6 +147,7 @@ export async function callAI(params: {
     generationConfig: {
       temperature: params.jsonMode ? 0.2 : 0.7,
       responseMimeType: params.jsonMode ? "application/json" : "text/plain",
+      ...(params.responseSchema ? { responseSchema: params.responseSchema } : {}),
     },
   };
 

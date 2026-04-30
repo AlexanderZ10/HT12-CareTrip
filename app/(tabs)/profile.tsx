@@ -38,7 +38,7 @@ import Animated, {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AvatarSheet } from "../../features/profile/components/AvatarSheet";
-import { ChoicePill, MiniToggle, SectionHeader, SettingsRow } from "../../features/profile/components/ProfileHelpers";
+import { MiniToggle, SectionHeader } from "../../features/profile/components/ProfileHelpers";
 import { DismissKeyboard } from "../../components/dismiss-keyboard";
 import { auth, db } from "../../firebase";
 import { useAppLanguage } from "../../components/app-language-provider";
@@ -49,12 +49,10 @@ import {
 import {
   getLanguageLabel,
   LANGUAGE_OPTIONS,
-  STAY_STYLE_KEYS,
-  TRAVEL_PACE_KEYS,
   translateOnboardingOption,
   type AppLanguage,
 } from "../../utils/translations";
-import { getCitiesForCountry } from "../../utils/cities";
+import { cityMatchesSearch, getCitiesForCountry } from "../../utils/cities";
 import { getCountriesSorted, getCountryName, type Country } from "../../utils/countries";
 import { getFirestoreUserMessage } from "../../utils/firestore-errors";
 import {
@@ -168,6 +166,14 @@ function LanguageFlag({ borderColor, code }: { borderColor: string; code: AppLan
   );
 }
 
+function buildProfileInfoPayload(form: ProfileFormState) {
+  return {
+    aboutMe: form.aboutMe.trim(),
+    fullName: form.fullName.trim(),
+    homeBase: form.homeBase.trim(),
+  };
+}
+
 // ── Main component ─────────────────────────────────────────────────────────
 
 export default function ProfileTabScreen() {
@@ -192,6 +198,9 @@ export default function ProfileTabScreen() {
   const [sendingReset, setSendingReset] = useState(false);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const [avatarSheetVisible, setAvatarSheetVisible] = useState(false);
+  const [nameEditorVisible, setNameEditorVisible] = useState(false);
+  const [displayNameDraft, setDisplayNameDraft] = useState("");
+  const [savingName, setSavingName] = useState(false);
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
   const [languageMenuVisible, setLanguageMenuVisible] = useState(false);
   const [countryPickerVisible, setCountryPickerVisible] = useState(false);
@@ -199,6 +208,7 @@ export default function ProfileTabScreen() {
   const [citySearch, setCitySearch] = useState("");
   const [pickerStep, setPickerStep] = useState<"country" | "city">("country");
   const [selectedCountryCode, setSelectedCountryCode] = useState("");
+  const [selectedCountryName, setSelectedCountryName] = useState("");
   const [floatingNotice, setFloatingNotice] = useState<FloatingNotice | null>(null);
   const [onboardingSummary, setOnboardingSummary] = useState<{
     assistance: string[];
@@ -221,8 +231,6 @@ export default function ProfileTabScreen() {
   const sec2Y = useSharedValue(24);
   const sec3Op = useSharedValue(0);
   const sec3Y = useSharedValue(24);
-  const sec4Op = useSharedValue(0);
-  const sec4Y = useSharedValue(24);
 
   const triggerEntrance = useCallback(() => {
     avatarScale.value = withSpring(1, { damping: 14, stiffness: 160 });
@@ -233,9 +241,7 @@ export default function ProfileTabScreen() {
     sec2Y.value = withDelay(160, withTiming(0, TIMING_ENTRANCE));
     sec3Op.value = withDelay(240, withTiming(1, TIMING_ENTRANCE));
     sec3Y.value = withDelay(240, withTiming(0, TIMING_ENTRANCE));
-    sec4Op.value = withDelay(320, withTiming(1, TIMING_ENTRANCE));
-    sec4Y.value = withDelay(320, withTiming(0, TIMING_ENTRANCE));
-  }, [avatarOp, avatarScale, sec1Op, sec1Y, sec2Op, sec2Y, sec3Op, sec3Y, sec4Op, sec4Y]);
+  }, [avatarOp, avatarScale, sec1Op, sec1Y, sec2Op, sec2Y, sec3Op, sec3Y]);
 
   const avatarAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: avatarScale.value }],
@@ -252,10 +258,6 @@ export default function ProfileTabScreen() {
   const sec3Style = useAnimatedStyle(() => ({
     opacity: sec3Op.value,
     transform: [{ translateY: sec3Y.value }],
-  }));
-  const sec4Style = useAnimatedStyle(() => ({
-    opacity: sec4Op.value,
-    transform: [{ translateY: sec4Y.value }],
   }));
 
   // ── Floating notice (Reanimated + Gesture Handler) ─────────────────────
@@ -334,11 +336,9 @@ export default function ProfileTabScreen() {
     [selectedCountryCode]
   );
   const filteredCities = useMemo(() => {
-    const q = citySearch.trim().toLowerCase();
+    const q = citySearch.trim();
     if (!q) return citiesForSelected;
-    return citiesForSelected.filter((c) =>
-      c.name.toLowerCase().includes(q)
-    );
+    return citiesForSelected.filter((c) => cityMatchesSearch(c.name, q));
   }, [citySearch, citiesForSelected]);
 
   const homeBaseParts = form.homeBase.split(", ");
@@ -349,17 +349,23 @@ export default function ProfileTabScreen() {
     const countryName = getCountryName(country, language);
     updateField("homeBase", countryName);
     setCountrySearch("");
+    setCitySearch("");
     setSelectedCountryCode(country.code);
+    setSelectedCountryName(countryName);
     setPickerStep("city");
   };
 
   const handleSelectCity = (cityName: string) => {
-    if (homeBaseCountry) {
-      updateField("homeBase", `${cityName}, ${homeBaseCountry}`);
+    const countryName = selectedCountryName || homeBaseCountry;
+
+    if (countryName) {
+      updateField("homeBase", `${cityName}, ${countryName}`);
     }
+
     setCountryPickerVisible(false);
     setPickerStep("country");
     setSelectedCountryCode("");
+    setSelectedCountryName("");
     setCitySearch("");
     setCountrySearch("");
   };
@@ -368,6 +374,7 @@ export default function ProfileTabScreen() {
     setCountryPickerVisible(false);
     setPickerStep("country");
     setSelectedCountryCode("");
+    setSelectedCountryName("");
     setCitySearch("");
     setCountrySearch("");
   };
@@ -483,6 +490,72 @@ export default function ProfileTabScreen() {
     setSaveSuccess("");
   };
 
+  const openNameEditor = () => {
+    setDisplayNameDraft(form.fullName || profileName);
+    setSettingsMenuVisible(false);
+    setNameEditorVisible(true);
+    setError("");
+    setSaveSuccess("");
+  };
+
+  const handleSaveName = async () => {
+    const currentUser = auth.currentUser;
+    const nextName = displayNameDraft.trim();
+
+    if (!currentUser || savingName || !nextName) {
+      return;
+    }
+
+    try {
+      setSavingName(true);
+      setError("");
+      setSaveSuccess("");
+
+      const nextForm = {
+        ...form,
+        fullName: nextName,
+      };
+      const nextProfileInfo = buildProfileInfoPayload(nextForm);
+      const profileRef = doc(db, "profiles", currentUser.uid);
+      const publicProfileRef = doc(db, "publicProfiles", currentUser.uid);
+      const batch = writeBatch(db);
+
+      batch.set(
+        profileRef,
+        {
+          profileInfo: nextProfileInfo,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      if (profileVisibility === "public") {
+        batch.set(
+          publicProfileRef,
+          buildPublicProfilePayload({
+            email: currentUser.email,
+            profilePhotoUrl,
+            profileInfo: nextProfileInfo,
+            uid: currentUser.uid,
+            username,
+          }),
+          { merge: true }
+        );
+      }
+
+      await batch.commit();
+
+      setForm(nextForm);
+      setProfileName(nextName);
+      setNameEditorVisible(false);
+      setSaveSuccess(t("profile.saved"));
+    } catch (nextError) {
+      setError(getFirestoreUserMessage(nextError, "write", language));
+    } finally {
+      setSavingName(false);
+    }
+  };
+
   const readAssetDataUrl = async (asset: ImagePicker.ImagePickerAsset) => {
     const mimeType = asset.mimeType || "image/jpeg";
     if (asset.base64) return `data:${mimeType};base64,${asset.base64}`;
@@ -504,14 +577,7 @@ export default function ProfileTabScreen() {
       setError("");
       setSaveSuccess("");
 
-      const nextProfileInfo = {
-        aboutMe: form.aboutMe.trim(),
-        dreamDestinations: form.dreamDestinations.trim(),
-        fullName: form.fullName.trim(),
-        homeBase: form.homeBase.trim(),
-        stayStyle: form.stayStyle.trim(),
-        travelPace: form.travelPace.trim(),
-      };
+      const nextProfileInfo = buildProfileInfoPayload(form);
       const profileRef = doc(db, "profiles", currentUser.uid);
       const publicProfileRef = doc(db, "publicProfiles", currentUser.uid);
       const batch = writeBatch(db);
@@ -633,14 +699,7 @@ export default function ProfileTabScreen() {
       const currentUser = auth.currentUser;
       if (!currentUser) return;
 
-      const nextProfileInfo = {
-        aboutMe: form.aboutMe.trim(),
-        dreamDestinations: form.dreamDestinations.trim(),
-        fullName: form.fullName.trim(),
-        homeBase: form.homeBase.trim(),
-        stayStyle: form.stayStyle.trim(),
-        travelPace: form.travelPace.trim(),
-      };
+      const nextProfileInfo = buildProfileInfoPayload(form);
 
       await setDoc(
         doc(db, "profiles", currentUser.uid),
@@ -871,8 +930,16 @@ export default function ProfileTabScreen() {
           <Text style={[staticStyles.brandTitle, { color: colors.textPrimary }]} numberOfLines={1}>
             {t("tab.profile")}
           </Text>
-          <TouchableOpacity accessibilityLabel="Settings menu" activeOpacity={0.7} onPress={() => setSettingsMenuVisible(true)} style={staticStyles.topBarIconButton}>
-            <MaterialIcons name="menu" size={28} color={colors.textPrimary} />
+          <TouchableOpacity
+            accessibilityLabel={t("profile.edit")}
+            activeOpacity={0.8}
+            onPress={() => setSettingsMenuVisible(true)}
+            style={[staticStyles.topBarEditButton, { backgroundColor: colors.accent }]}
+          >
+            <MaterialIcons name="edit" size={18} color={colors.buttonTextOnAction} />
+            <Text style={[staticStyles.topBarEditButtonText, { color: colors.buttonTextOnAction }]}>
+              {t("profile.edit")}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -1059,50 +1126,6 @@ export default function ProfileTabScreen() {
             </Pressable>
 
             <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>
-              {t("profile.travelPace")}
-            </Text>
-            <View style={staticStyles.pillsRow}>
-              {TRAVEL_PACE_KEYS.map((k) => {
-                const label = t(k);
-                return (
-                  <ChoicePill
-                    key={k}
-                    label={label}
-                    selected={translateOnboardingOption(form.travelPace, language) === label}
-                    onPress={() => updateField("travelPace", label)}
-                    accentColor={colors.accent}
-                    cardBg={colors.card}
-                    cardBorder={colors.border}
-                    textColor={colors.textSecondary}
-                    selectedTextColor={colors.buttonTextOnAction}
-                  />
-                );
-              })}
-            </View>
-
-            <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>
-              {t("profile.stayStyle")}
-            </Text>
-            <View style={staticStyles.pillsRow}>
-              {STAY_STYLE_KEYS.map((k) => {
-                const label = t(k);
-                return (
-                  <ChoicePill
-                    key={k}
-                    label={label}
-                    selected={translateOnboardingOption(form.stayStyle, language) === label}
-                    onPress={() => updateField("stayStyle", label)}
-                    accentColor={colors.accent}
-                    cardBg={colors.card}
-                    cardBorder={colors.border}
-                    textColor={colors.textSecondary}
-                    selectedTextColor={colors.buttonTextOnAction}
-                  />
-                );
-              })}
-            </View>
-
-            <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>
               {t("profile.bio")}
             </Text>
             <TextInput
@@ -1137,7 +1160,12 @@ export default function ProfileTabScreen() {
                 {saving ? (
                   <ActivityIndicator color={colors.buttonTextOnAction} size="small" />
                 ) : (
-                  <Text style={[staticStyles.primaryBtnText, { color: colors.buttonTextOnAction }]}>{t("profile.saveChanges")}</Text>
+                  <>
+                    <MaterialIcons name="save" size={18} color={colors.buttonTextOnAction} />
+                    <Text style={[staticStyles.primaryBtnText, { color: colors.buttonTextOnAction }]}>
+                      {t("profile.saveChanges")}
+                    </Text>
+                  </>
                 )}
               </Pressable>
             </Animated.View>
@@ -1160,8 +1188,19 @@ export default function ProfileTabScreen() {
                     <Text style={[staticStyles.prefEmpty, { color: colors.textMuted }]}>{t("profile.noneSelected")}</Text>
                   ) : (
                     items.map((item) => (
-                      <View key={item} style={[staticStyles.readChip, { backgroundColor: colors.accentMuted }]}>
-                        <Text style={[staticStyles.readChipText, { color: colors.textPrimary }]}>{translateOnboardingOption(item, language)}</Text>
+                      <View
+                        key={item}
+                        style={[
+                          staticStyles.readChip,
+                          {
+                            backgroundColor: colors.accentMuted,
+                            borderColor: colors.accent,
+                          },
+                        ]}
+                      >
+                        <Text style={[staticStyles.readChipText, { color: colors.accent }]}>
+                          {translateOnboardingOption(item, language)}
+                        </Text>
                       </View>
                     ))
                   )}
@@ -1170,35 +1209,14 @@ export default function ProfileTabScreen() {
             ))}
 
             <Pressable
-              style={[staticStyles.outlineBtn, { borderColor: colors.accent }]}
+              style={[staticStyles.outlineBtn, { backgroundColor: colors.accent }]}
               onPress={() => router.push("/onboarding")}
             >
-              <MaterialIcons name="edit" size={16} color={colors.accent} />
-              <Text style={[staticStyles.outlineBtnText, { color: colors.accent }]}>
+              <MaterialIcons name="edit" size={16} color={colors.buttonTextOnAction} />
+              <Text style={[staticStyles.outlineBtnText, { color: colors.buttonTextOnAction }]}>
                 {t("profile.editPreferences")}
               </Text>
             </Pressable>
-          </View>
-        </Animated.View>
-
-        {/* ───────── 5. Account actions ───────── */}
-        <Animated.View style={sec4Style}>
-          <SectionHeader title={t("profile.account")} color={colors.textMuted} />
-          <View style={[staticStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <SettingsRow
-              icon="lock-reset"
-              label={t("profile.changePassword")}
-              onPress={() => void handleResetPassword()}
-              colors={colors}
-              loading={sendingReset}
-            />
-            <SettingsRow
-              icon="logout"
-              label={t("profile.signOut")}
-              onPress={() => void handleLogout()}
-              colors={colors}
-              destructive
-            />
           </View>
         </Animated.View>
 
@@ -1234,6 +1252,103 @@ export default function ProfileTabScreen() {
         updatingPhoto={updatingPhoto}
         colors={colors}
       />
+
+      <Modal
+        animationType="fade"
+        transparent
+        visible={nameEditorVisible}
+        onRequestClose={() => setNameEditorVisible(false)}
+      >
+        <Pressable
+          style={[staticStyles.modalOverlay, { backgroundColor: colors.modalOverlay }]}
+          onPress={() => setNameEditorVisible(false)}
+        >
+          <Pressable
+            style={[
+              staticStyles.nameEditSheet,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <View style={staticStyles.languageMenuHeader}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => {
+                  setNameEditorVisible(false);
+                  setSettingsMenuVisible(true);
+                }}
+                style={[
+                  staticStyles.languageMenuCloseButton,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: colors.inputBorder,
+                  },
+                ]}
+              >
+                <MaterialIcons name="arrow-back" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+              <Text style={[staticStyles.languageMenuTitle, { color: colors.textPrimary }]}>
+                {t("profile.changeName")}
+              </Text>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setNameEditorVisible(false)}
+                style={[
+                  staticStyles.languageMenuCloseButton,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: colors.inputBorder,
+                  },
+                ]}
+              >
+                <MaterialIcons name="close" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={[staticStyles.fieldLabel, { color: colors.textSecondary }]}>
+              {t("profile.name")}
+            </Text>
+            <TextInput
+              style={[
+                staticStyles.input,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.inputBorder,
+                  color: colors.textPrimary,
+                },
+              ]}
+              placeholder={t("profile.name")}
+              placeholderTextColor={colors.inputPlaceholder}
+              value={displayNameDraft}
+              onChangeText={setDisplayNameDraft}
+              autoCapitalize="words"
+              returnKeyType="done"
+              onSubmitEditing={() => void handleSaveName()}
+            />
+
+            <Pressable
+              disabled={savingName || !displayNameDraft.trim()}
+              onPress={() => void handleSaveName()}
+              style={[
+                staticStyles.primaryBtn,
+                { backgroundColor: colors.accent },
+                (savingName || !displayNameDraft.trim()) && staticStyles.disabled,
+              ]}
+            >
+              {savingName ? (
+                <ActivityIndicator color={colors.buttonTextOnAction} size="small" />
+              ) : (
+                <>
+                  <MaterialIcons name="save" size={18} color={colors.buttonTextOnAction} />
+                  <Text style={[staticStyles.primaryBtnText, { color: colors.buttonTextOnAction }]}>
+                    {t("profile.saveChanges")}
+                  </Text>
+                </>
+              )}
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal
         animationType="none"
@@ -1331,6 +1446,23 @@ export default function ProfileTabScreen() {
             onPress={(e) => e.stopPropagation()}
           >
             <View style={staticStyles.countryPickerHeader}>
+              {pickerStep === "city" ? (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    setPickerStep("country");
+                    setCitySearch("");
+                  }}
+                  style={[
+                    staticStyles.countryPickerBackButton,
+                    { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder },
+                  ]}
+                >
+                  <MaterialIcons name="arrow-back" size={18} color={colors.textPrimary} />
+                </TouchableOpacity>
+              ) : (
+                <View style={staticStyles.countryPickerHeaderSpacer} />
+              )}
               <Text style={[staticStyles.countryPickerTitle, { color: colors.textPrimary }]}>
                 {pickerStep === "country" ? t("profile.selectCountry") : t("profile.enterCity")}
               </Text>
@@ -1392,17 +1524,17 @@ export default function ProfileTabScreen() {
               </>
             ) : (
               <>
-                <Pressable
-                  style={[staticStyles.countryItem, { backgroundColor: colors.accentMuted }]}
-                  onPress={() => {
-                    setPickerStep("country");
-                    setCitySearch("");
-                  }}
+                <View
+                  style={[staticStyles.selectedCountryPill, { backgroundColor: colors.accentMuted }]}
                 >
-                  <Text style={[staticStyles.countryItemText, { color: colors.accent, fontWeight: FontWeight.semibold }]}>
-                    ← {homeBaseCountry}
+                  <MaterialIcons name="place" size={16} color={colors.accent} />
+                  <Text
+                    style={[staticStyles.selectedCountryPillText, { color: colors.accent }]}
+                    numberOfLines={1}
+                  >
+                    {selectedCountryName || homeBaseCountry}
                   </Text>
-                </Pressable>
+                </View>
                 <TextInput
                   style={[
                     staticStyles.countrySearchInput,
@@ -1412,19 +1544,19 @@ export default function ProfileTabScreen() {
                       color: colors.textPrimary,
                     },
                   ]}
-                  placeholder={t("profile.searchCountry")}
+                  placeholder={t("profile.searchCity")}
                   placeholderTextColor={colors.inputPlaceholder}
                   value={citySearch}
                   onChangeText={setCitySearch}
                   autoFocus
                 />
                 <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                  {filteredCities.map((city) => {
+                  {filteredCities.map((city, index) => {
                     const name = city.name;
                     const isSelected = homeBaseCity === name;
                     return (
                       <Pressable
-                        key={name}
+                        key={`${name}-${city.stateCode}-${index}`}
                         style={[
                           staticStyles.countryItem,
                           isSelected && { backgroundColor: colors.accentMuted },
@@ -1489,21 +1621,37 @@ export default function ProfileTabScreen() {
 
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={() => {
-                setSettingsMenuVisible(false);
-                router.push("/onboarding");
-              }}
+              onPress={openNameEditor}
               style={[staticStyles.settingsRow, { borderColor: colors.border }]}
             >
-              <View style={[staticStyles.settingsRowIcon, { backgroundColor: colors.accentMuted }]}>
-                <MaterialIcons name="tune" size={20} color={colors.accent} />
+              <View style={[staticStyles.settingsRowIcon, { backgroundColor: colors.inputBackground }]}>
+                <MaterialIcons name="edit" size={20} color={colors.textPrimary} />
               </View>
               <View style={staticStyles.settingsRowTextWrap}>
                 <Text style={[staticStyles.settingsRowLabel, { color: colors.textPrimary }]}>
-                  {t("profile.editPreferences")}
+                  {t("profile.changeName")}
                 </Text>
                 <Text style={[staticStyles.settingsRowHint, { color: colors.textSecondary }]}>
-                  Travel style, interests, skills
+                  {profileName}
+                </Text>
+              </View>
+              <MaterialIcons name="chevron-right" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => setSettingsMenuVisible(false)}
+              style={[staticStyles.settingsRow, { borderColor: colors.border }]}
+            >
+              <View style={[staticStyles.settingsRowIcon, { backgroundColor: colors.inputBackground }]}>
+                <MaterialIcons name="alternate-email" size={20} color={colors.textPrimary} />
+              </View>
+              <View style={staticStyles.settingsRowTextWrap}>
+                <Text style={[staticStyles.settingsRowLabel, { color: colors.textPrimary }]}>
+                  {t("profile.changeEmail")}
+                </Text>
+                <Text style={[staticStyles.settingsRowHint, { color: colors.textSecondary }]}>
+                  {email}
                 </Text>
               </View>
               <MaterialIcons name="chevron-right" size={20} color={colors.textMuted} />
@@ -1526,7 +1674,7 @@ export default function ProfileTabScreen() {
                   {t("profile.changePassword")}
                 </Text>
                 <Text style={[staticStyles.settingsRowHint, { color: colors.textSecondary }]}>
-                  Send a reset email
+                  {t("profile.sendResetEmail")}
                 </Text>
               </View>
               <MaterialIcons name="chevron-right" size={20} color={colors.textMuted} />
@@ -1589,6 +1737,18 @@ const staticStyles = StyleSheet.create({
   },
   topBarIconButton: {
     padding: 4,
+  },
+  topBarEditButton: {
+    alignItems: "center",
+    borderRadius: Radius.full,
+    flexDirection: "row",
+    gap: Spacing.xs,
+    minHeight: 40,
+    paddingHorizontal: Spacing.md,
+  },
+  topBarEditButtonText: {
+    ...TypeScale.labelLg,
+    fontWeight: FontWeight.bold,
   },
   profileHeader: {
     alignItems: "center",
@@ -1818,9 +1978,11 @@ const staticStyles = StyleSheet.create({
     minHeight: 48,
   },
   primaryBtn: {
-    borderRadius: Radius.md,
-    height: 48,
     alignItems: "center",
+    borderRadius: Radius.md,
+    flexDirection: "row",
+    gap: Spacing.sm,
+    height: 48,
     justifyContent: "center",
     marginTop: Spacing.xl,
   },
@@ -1841,6 +2003,7 @@ const staticStyles = StyleSheet.create({
   },
   readChip: {
     borderRadius: Radius.full,
+    borderWidth: 1,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.xs,
   },
@@ -1853,8 +2016,9 @@ const staticStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: Spacing.sm,
-    borderWidth: 1,
     borderRadius: Radius.md,
+    minHeight: 48,
+    paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
   },
   outlineBtnText: {
@@ -1871,6 +2035,14 @@ const staticStyles = StyleSheet.create({
     padding: Spacing.lg,
     ...shadow("lg"),
   },
+  nameEditSheet: {
+    alignSelf: "center",
+    borderRadius: Radius["2xl"],
+    borderWidth: 1,
+    padding: Spacing.lg,
+    width: "92%",
+    ...shadow("lg"),
+  },
   languageMenuHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -1879,7 +2051,9 @@ const staticStyles = StyleSheet.create({
   },
   languageMenuTitle: {
     ...TypeScale.titleLg,
+    flex: 1,
     fontWeight: FontWeight.bold,
+    textAlign: "center",
   },
   languageMenuCloseButton: {
     width: 36,
@@ -1928,7 +2102,21 @@ const staticStyles = StyleSheet.create({
   },
   countryPickerTitle: {
     ...TypeScale.titleLg,
+    flex: 1,
     fontWeight: FontWeight.bold,
+    textAlign: "center",
+  },
+  countryPickerBackButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  countryPickerHeaderSpacer: {
+    width: 36,
+    height: 36,
   },
   countryPickerCloseButton: {
     width: 36,
@@ -1945,6 +2133,20 @@ const staticStyles = StyleSheet.create({
     paddingVertical: Spacing.sm,
     marginBottom: Spacing.md,
     ...TypeScale.bodyMd,
+  },
+  selectedCountryPill: {
+    alignItems: "center",
+    borderRadius: Radius.full,
+    flexDirection: "row",
+    gap: Spacing.xs,
+    marginBottom: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  selectedCountryPillText: {
+    ...TypeScale.labelLg,
+    flex: 1,
+    fontWeight: FontWeight.semibold,
   },
   countryItem: {
     paddingVertical: Spacing.md,

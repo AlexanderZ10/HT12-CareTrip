@@ -6,34 +6,19 @@ node_modules/
 .expo-shared/
 expo-env.d.ts
 dist/
-web-build/
-
-# Expo / EAS build artifacts
-*-qr.png
-*.ipa
-*.apk
-*.aab
 .eas/local-builds/
 .expo-export-test/
 .expo-web-test/
-
-# Expo prebuild / native generated projects (also from `expo prebuild`)
-/ios
-/android
-android/
-ios/
-
-# Metro
-.metro-cache/
-.metro-health-check*
 
 # Firebase
 .firebase/
 functions/lib/
 
 # Environment variables
-.env
+# Keep the root .env for EXPO_PUBLIC_* values in cloud builds,
+# but don't upload extra local env variants.
 .env.*
+!.env
 !.env.example
 
 # Build output
@@ -44,10 +29,17 @@ build/Release
 *.aab
 *.apks
 
+# Expo prebuild / native generated projects
+android/
+ios/
+
 # Android / Java signing files
 *.jks
 *.keystore
 *.p12
+
+# Large non-source docs
+*.pptx
 
 # OS files
 .DS_Store
@@ -86,7 +78,3 @@ coverage/
 
 # Non-source files
 Igrichka*/
-c-algorithms-week/
-
-# Graphify output
-graphify-out/

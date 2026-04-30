@@ -37,6 +37,18 @@ export type DiscoverProfile = {
   username: string | null;
 };
 
+export type DiscoverSettlementType = "city" | "village";
+
+export type DiscoverSearchFilters = {
+  countries: string[];
+  maxDistanceKm: number | null;
+  minDistanceKm: number | null;
+  originLabel: string;
+  originLatitude: number | null;
+  originLongitude: number | null;
+  settlementTypes: DiscoverSettlementType[];
+};
+
 export type TripRecommendation = {
   accessibilityNotes: string;
   attractions: string[];
@@ -55,9 +67,12 @@ export type TripRecommendation = {
 };
 
 export type StoredDiscoverData = {
+  filters: DiscoverSearchFilters;
   generatedAtMs: number | null;
   language: string | null;
   lastRefreshDateKey: string | null;
+  refreshCountForDate: number;
+  profileSignature: string | null;
   sourceModel: string;
   summary: string;
   trips: TripRecommendation[];
@@ -194,6 +209,107 @@ function sanitizeNumber(value: unknown) {
   }
 
   return null;
+}
+
+function sanitizeSettlementTypes(value: unknown): DiscoverSettlementType[] {
+  if (!Array.isArray(value)) {
+    return ["city", "village"];
+  }
+
+  const types = value
+    .filter((item): item is DiscoverSettlementType => item === "city" || item === "village")
+    .filter((item, index, array) => array.indexOf(item) === index);
+
+  return types.length === 0 ? ["city", "village"] : types;
+}
+
+function sanitizeDiscoverSearchFilters(
+  value: unknown,
+  fallbackOriginLabel = ""
+): DiscoverSearchFilters {
+  const rawFilters =
+    value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+
+  return {
+    countries: sanitizeStringArray(rawFilters.countries)
+      .map((country) => country.trim())
+      .filter((country, index, array) => country && array.indexOf(country) === index),
+    maxDistanceKm: sanitizeNumber(rawFilters.maxDistanceKm),
+    minDistanceKm: sanitizeNumber(rawFilters.minDistanceKm),
+    originLabel: sanitizeString(rawFilters.originLabel, fallbackOriginLabel),
+    originLatitude: sanitizeNumber(rawFilters.originLatitude),
+    originLongitude: sanitizeNumber(rawFilters.originLongitude),
+    settlementTypes: sanitizeSettlementTypes(rawFilters.settlementTypes),
+  };
+}
+
+function toRadians(value: number) {
+  return (value * Math.PI) / 180;
+}
+
+function parseJsonValueFromText(rawText: string) {
+  const trimmedText = rawText.trim();
+
+  if (!trimmedText) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(trimmedText) as unknown;
+  } catch {
+    const fencedMatch = trimmedText.match(/```(?:json)?\s*([\s\S]*?)```/i);
+
+    if (fencedMatch?.[1]) {
+      try {
+        return JSON.parse(fencedMatch[1].trim()) as unknown;
+      } catch {
+        // Continue to brace extraction below.
+      }
+    }
+
+    const firstBraceIndex = trimmedText.indexOf("{");
+    const lastBraceIndex = trimmedText.lastIndexOf("}");
+
+    if (firstBraceIndex >= 0 && lastBraceIndex > firstBraceIndex) {
+      try {
+        return JSON.parse(trimmedText.slice(firstBraceIndex, lastBraceIndex + 1)) as unknown;
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
+  }
+}
+
+function parseStructuredDiscoverResult(rawText: string): Partial<StructuredDiscoverResult> {
+  const parsedValue = parseJsonValueFromText(rawText);
+
+  if (Array.isArray(parsedValue)) {
+    return {
+      settlements: parsedValue as RawSettlementRecommendation[],
+      summary: "",
+    };
+  }
+
+  if (!parsedValue || typeof parsedValue !== "object") {
+    return {};
+  }
+
+  const rawObject = parsedValue as Record<string, unknown>;
+  const settlements =
+    rawObject.settlements ||
+    rawObject.trips ||
+    rawObject.destinations ||
+    rawObject.places ||
+    rawObject.recommendations;
+
+  return {
+    settlements: Array.isArray(settlements)
+      ? (settlements as RawSettlementRecommendation[])
+      : [],
+    summary: sanitizeString(rawObject.summary),
+  };
 }
 
 function hasCoordinates(latitude: number | null, longitude: number | null) {
@@ -485,6 +601,114 @@ async function fetchSettlementCoordinates(candidates: string[]) {
   } satisfies SettlementCoordinates;
 }
 
+export async function resolveDiscoverOriginCoordinates(originLabel: string) {
+  const trimmedOriginLabel = sanitizeString(originLabel);
+
+  if (!trimmedOriginLabel) {
+    return {
+      latitude: null,
+      longitude: null,
+    } satisfies SettlementCoordinates;
+  }
+
+  const parts = trimmedOriginLabel
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  return fetchSettlementCoordinates(
+    dedupeCandidates([trimmedOriginLabel, ...parts])
+  );
+}
+
+export function getDiscoverSearchFiltersSignature(filters: DiscoverSearchFilters) {
+  return JSON.stringify({
+    countries: [...filters.countries].sort((left, right) => left.localeCompare(right)),
+    maxDistanceKm: filters.maxDistanceKm,
+    minDistanceKm: filters.minDistanceKm,
+    originLabel: filters.originLabel,
+    settlementTypes: [...filters.settlementTypes].sort(),
+  });
+}
+
+export function calculateDistanceKm(
+  originLatitude: number,
+  originLongitude: number,
+  targetLatitude: number,
+  targetLongitude: number
+) {
+  const earthRadiusKm = 6371;
+  const latitudeDelta = toRadians(targetLatitude - originLatitude);
+  const longitudeDelta = toRadians(targetLongitude - originLongitude);
+  const startLatitude = toRadians(originLatitude);
+  const endLatitude = toRadians(targetLatitude);
+
+  const haversine =
+    Math.sin(latitudeDelta / 2) * Math.sin(latitudeDelta / 2) +
+    Math.cos(startLatitude) *
+      Math.cos(endLatitude) *
+      Math.sin(longitudeDelta / 2) *
+      Math.sin(longitudeDelta / 2);
+
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+export function filterDiscoverTripsByFilters(
+  trips: TripRecommendation[],
+  filters: DiscoverSearchFilters
+) {
+  const hasCountryFilter = filters.countries.length > 0;
+  const countrySet = new Set(
+    filters.countries.map((country) => normalizeComparableText(country))
+  );
+  const hasDistanceFilter =
+    (typeof filters.minDistanceKm === "number" && Number.isFinite(filters.minDistanceKm)) ||
+    (typeof filters.maxDistanceKm === "number" && Number.isFinite(filters.maxDistanceKm));
+  const canMeasureDistance =
+    hasDistanceFilter &&
+    hasCoordinates(filters.originLatitude, filters.originLongitude);
+
+  return trips.filter((trip) => {
+    if (hasCountryFilter) {
+      const normalizedCountry = normalizeComparableText(trip.country);
+      if (!countrySet.has(normalizedCountry)) {
+        return false;
+      }
+    }
+
+    if (canMeasureDistance) {
+      if (!hasCoordinates(trip.latitude, trip.longitude)) {
+        return false;
+      }
+
+      const distanceKm = calculateDistanceKm(
+        filters.originLatitude as number,
+        filters.originLongitude as number,
+        trip.latitude as number,
+        trip.longitude as number
+      );
+
+      if (
+        typeof filters.minDistanceKm === "number" &&
+        Number.isFinite(filters.minDistanceKm) &&
+        distanceKm < filters.minDistanceKm
+      ) {
+        return false;
+      }
+
+      if (
+        typeof filters.maxDistanceKm === "number" &&
+        Number.isFinite(filters.maxDistanceKm) &&
+        distanceKm > filters.maxDistanceKm
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}
+
 export function buildSettlementMapUrl(
   latitude: number | null,
   longitude: number | null,
@@ -543,8 +767,21 @@ export function extractDiscoverProfile(profileData: RawProfileData): DiscoverPro
   };
 }
 
+export function getDiscoverProfileSignature(
+  profile: DiscoverProfile,
+  filters?: DiscoverSearchFilters | null
+) {
+  return JSON.stringify({
+    aboutMe: profile.personalProfile.aboutMe,
+    filters: filters ? JSON.parse(getDiscoverSearchFiltersSignature(filters)) : null,
+    homeBase: profile.personalProfile.homeBase,
+  });
+}
+
 export function parseStoredDiscoverData(profileData: Record<string, unknown>) {
   const discover = profileData.discover;
+  const fallbackOriginLabel =
+    extractPersonalProfile(profileData as RawProfileData).homeBase || "";
 
   if (!discover || typeof discover !== "object") {
     return null;
@@ -581,6 +818,7 @@ export function parseStoredDiscoverData(profileData: Record<string, unknown>) {
     );
 
   return {
+    filters: sanitizeDiscoverSearchFilters(rawDiscover.filters, fallbackOriginLabel),
     generatedAtMs:
       typeof rawDiscover.generatedAtMs === "number" ? rawDiscover.generatedAtMs : null,
     language:
@@ -588,6 +826,15 @@ export function parseStoredDiscoverData(profileData: Record<string, unknown>) {
     lastRefreshDateKey:
       typeof rawDiscover.lastRefreshDateKey === "string"
         ? rawDiscover.lastRefreshDateKey
+        : null,
+    refreshCountForDate:
+      typeof rawDiscover.refreshCountForDate === "number" &&
+      Number.isFinite(rawDiscover.refreshCountForDate)
+        ? Math.max(0, Math.floor(rawDiscover.refreshCountForDate))
+        : 0,
+    profileSignature:
+      typeof rawDiscover.profileSignature === "string"
+        ? rawDiscover.profileSignature
         : null,
     sourceModel:
       typeof rawDiscover.sourceModel === "string"
@@ -608,6 +855,7 @@ export function getLocalDateKey(date = new Date()) {
 function buildGroundedSettlementResearchPrompt(
   profile: DiscoverProfile,
   previousTrips: TripRecommendation[],
+  filters: DiscoverSearchFilters,
   language = "Bulgarian"
 ) {
   const previousSettlementHints =
@@ -616,6 +864,29 @@ function buildGroundedSettlementResearchPrompt(
           .map((trip) => trip.destination)
           .join("; ")}.`
       : "This is the first settlement set for this user.";
+  const countryFilterHint =
+    filters.countries.length > 0
+      ? `Return settlements only from these countries: ${filters.countries.join(", ")}.`
+      : "You may use any country when it matches the rest of the constraints.";
+  const settlementTypeFilterHint =
+    filters.settlementTypes.length === 1
+      ? filters.settlementTypes[0] === "city"
+        ? "Return ONLY cities and small towns. Do not include villages, hamlets, or rural settlements."
+        : "Return ONLY villages, hamlets, and small rural settlements. Do not include cities or larger towns."
+      : "Mix cities, small towns, and villages.";
+  const distanceFilterHint =
+    filters.originLabel &&
+    (filters.minDistanceKm !== null || filters.maxDistanceKm !== null)
+      ? `Use ${filters.originLabel} as the starting point. Return only settlements whose straight-line distance is ${
+          filters.minDistanceKm !== null ? `at least ${filters.minDistanceKm} km` : ""
+        }${
+          filters.minDistanceKm !== null && filters.maxDistanceKm !== null ? " and " : ""
+        }${
+          filters.maxDistanceKm !== null ? `at most ${filters.maxDistanceKm} km` : ""
+        } from that starting point. Exclude any settlement that does not match the distance range.`
+      : filters.originLabel
+        ? `Use ${filters.originLabel} as the starting point context for distance and route practicality.`
+        : "No explicit starting point was provided beyond the user's profile.";
 
   return [
     "You are researching travel-friendly settlements for a mobile app discover screen.",
@@ -623,8 +894,14 @@ function buildGroundedSettlementResearchPrompt(
     "Use Google Search grounding to find real villages, small towns, and settlements around the world.",
     "Return research notes only. No intro. No filler.",
     "Focus on settlements that are often visited, have tourism activity, and offer several things to do plus notable attractions.",
-    "Prefer places with a strong mix of scenery, culture, food, craft, history, or outdoor activities depending on the user profile.",
-    "Use the user's accessibility needs and interests carefully.",
+    "Prefer places with a strong mix of scenery, culture, food, craft, history, or outdoor activities depending on the user's bio.",
+    "Use the user's city/country only as soft context for travel taste unless explicit search filters override it.",
+    countryFilterHint,
+    distanceFilterHint,
+    settlementTypeFilterHint,
+    "If explicit search filters are present, treat them as hard constraints.",
+    "When no country filter is present, return a geographically varied set from multiple countries when possible.",
+    "Use only the user's About You profile fields for personalization, not as a location filter.",
     previousSettlementHints,
     "Structure the notes with these headings exactly:",
     "SETTLEMENTS",
@@ -632,24 +909,19 @@ function buildGroundedSettlementResearchPrompt(
     "",
     `Username: ${profile.username ?? "Unknown"}`,
     `Email: ${profile.email ?? "Unknown"}`,
-    `Full name: ${profile.personalProfile.fullName || "Not provided"}`,
-    `Home base: ${profile.personalProfile.homeBase || "Not provided"}`,
-    `About me: ${profile.personalProfile.aboutMe || "Not provided"}`,
-    `Dream destinations: ${profile.personalProfile.dreamDestinations || "Not provided"}`,
-    `Travel pace: ${profile.personalProfile.travelPace || "Not provided"}`,
-    `Stay style: ${profile.personalProfile.stayStyle || "Not provided"}`,
-    `Interests: ${profile.interests.selectedOptions.join(", ") || "None provided"}`,
-    `Interests note: ${profile.interests.note || "None"}`,
-    `Accessibility / assistance needs: ${
-      profile.assistance.selectedOptions.join(", ") || "None provided"
+    `City and country: ${profile.personalProfile.homeBase || "Not provided"}`,
+    `Bio: ${profile.personalProfile.aboutMe || "Not provided"}`,
+    `Search origin: ${filters.originLabel || "Not provided"}`,
+    `Search distance min km: ${filters.minDistanceKm ?? "Not provided"}`,
+    `Search distance max km: ${filters.maxDistanceKm ?? "Not provided"}`,
+    `Search countries: ${
+      filters.countries.length > 0 ? filters.countries.join(", ") : "Not provided"
     }`,
-    `Assistance note: ${profile.assistance.note || "None"}`,
-    `Skills / ways to help: ${profile.skills.selectedOptions.join(", ") || "None provided"}`,
-    `Skills note: ${profile.skills.note || "None"}`,
   ].join("\n");
 }
 
 function buildStructuredDiscoverPrompt(params: {
+  filters: DiscoverSearchFilters;
   groundedNotes: string;
   language?: string;
   profile: DiscoverProfile;
@@ -661,16 +933,48 @@ function buildStructuredDiscoverPrompt(params: {
     "Use only the grounded notes for factual claims.",
     "Return exactly 8 settlements.",
     "Each settlement must be a real village, small town, or settlement with tourism activity.",
+    params.filters.settlementTypes.length === 1
+      ? params.filters.settlementTypes[0] === "city"
+        ? "Only include cities and small towns. Exclude villages, hamlets, and rural settlements."
+        : "Only include villages, hamlets, and small rural settlements. Exclude cities and larger towns."
+      : "Mix cities, small towns, and villages so the feed feels varied.",
     "Every settlement must be unique.",
     "Do not repeat the same place under alternate names, nearby district labels, or slightly different spellings.",
     "Prefer places that are often visited and have several things to do plus notable attractions.",
+    params.filters.countries.length > 0
+      ? `Only include settlements from these countries: ${params.filters.countries.join(", ")}.`
+      : "Keep the final feed geographically varied and include settlements from multiple countries when the grounded notes allow it.",
+    params.filters.originLabel &&
+    (params.filters.minDistanceKm !== null || params.filters.maxDistanceKm !== null)
+      ? `Only include settlements whose straight-line distance from ${params.filters.originLabel} is ${
+          params.filters.minDistanceKm !== null
+            ? `at least ${params.filters.minDistanceKm} km`
+            : ""
+        }${
+          params.filters.minDistanceKm !== null &&
+          params.filters.maxDistanceKm !== null
+            ? " and "
+            : ""
+        }${
+          params.filters.maxDistanceKm !== null
+            ? `at most ${params.filters.maxDistanceKm} km`
+            : ""
+        }.`
+      : "Distance filtering is optional unless the grounded notes mention one.",
     "Use concise mobile-friendly copy.",
     "For latitude and longitude, include best-effort coordinates for the settlement center.",
     "For wikipediaTitle, use the most likely English Wikipedia article title for image lookup.",
     "",
-    `Profile interests: ${params.profile.interests.selectedOptions.join(", ") || "None"}`,
-    `Accessibility needs: ${
-      params.profile.assistance.selectedOptions.join(", ") || "None"
+    "About You profile:",
+    `City and country: ${params.profile.personalProfile.homeBase || "Not provided"}`,
+    `Bio: ${params.profile.personalProfile.aboutMe || "Not provided"}`,
+    `Search origin: ${params.filters.originLabel || "Not provided"}`,
+    `Search distance min km: ${params.filters.minDistanceKm ?? "Not provided"}`,
+    `Search distance max km: ${params.filters.maxDistanceKm ?? "Not provided"}`,
+    `Search countries: ${
+      params.filters.countries.length > 0
+        ? params.filters.countries.join(", ")
+        : "Not provided"
     }`,
     "",
     "Grounded notes:",
@@ -731,6 +1035,7 @@ const DISCOVER_RESPONSE_SCHEMA = {
 export async function generateTripsWithGemini(
   profile: DiscoverProfile,
   previousTrips: TripRecommendation[],
+  filters: DiscoverSearchFilters,
   language = "Bulgarian"
 ) {
   const apiKey = getAIApiKey();
@@ -741,20 +1046,22 @@ export async function generateTripsWithGemini(
 
   const groundedNotes = await callAI({
     apiKey,
-    prompt: buildGroundedSettlementResearchPrompt(profile, previousTrips, language),
+    prompt: buildGroundedSettlementResearchPrompt(profile, previousTrips, filters, language),
   });
 
   const structuredJsonText = await callAI({
     apiKey,
     prompt: buildStructuredDiscoverPrompt({
+      filters,
       groundedNotes,
       language,
       profile,
     }),
     jsonMode: true,
+    responseSchema: DISCOVER_RESPONSE_SCHEMA,
   });
 
-  const parsedResponse = JSON.parse(structuredJsonText) as Partial<StructuredDiscoverResult>;
+  const parsedResponse = parseStructuredDiscoverResult(structuredJsonText);
 
   if (
     !Array.isArray(parsedResponse.settlements) ||

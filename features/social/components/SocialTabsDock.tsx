@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "expo-router";
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
+import { useAppLanguage } from "../../../components/app-language-provider";
 import { useAppTheme } from "../../../components/app-theme-provider";
 import {
   FontWeight,
@@ -34,15 +35,16 @@ export const SOCIAL_DOCK_CONTENT_SPACER = Spacing.lg;
 const SOCIAL_ITEMS: {
   icon: React.ComponentProps<typeof MaterialIcons>["name"];
   key: SocialRoute;
-  label: string;
+  labelKey: "tab.groups" | "tab.feed" | "tab.profile";
 }[] = [
-  { key: "/groups", label: "Groups", icon: "forum" },
-  { key: "/feed", label: "Feed", icon: "dynamic-feed" },
-  { key: "/social-profile", label: "Profile", icon: "person-outline" },
+  { key: "/groups", labelKey: "tab.groups", icon: "forum" },
+  { key: "/feed", labelKey: "tab.feed", icon: "dynamic-feed" },
+  { key: "/social-profile", labelKey: "tab.profile", icon: "person-outline" },
 ];
 
 export function SocialTabsDock() {
   const { colors } = useAppTheme();
+  const { t } = useAppLanguage();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -81,11 +83,12 @@ export function SocialTabsDock() {
       >
         {SOCIAL_ITEMS.map((item) => {
           const active = item.key === activeKey;
+          const label = t(item.labelKey);
 
           return (
             <TouchableOpacity
               key={item.key}
-              accessibilityLabel={item.label}
+              accessibilityLabel={label}
               accessibilityRole="tab"
               activeOpacity={0.88}
               onPress={() => router.replace(item.key)}
@@ -108,7 +111,7 @@ export function SocialTabsDock() {
                   },
                 ]}
               >
-                {item.label}
+                {label}
               </Text>
             </TouchableOpacity>
           );

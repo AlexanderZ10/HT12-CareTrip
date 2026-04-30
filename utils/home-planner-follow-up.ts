@@ -207,6 +207,7 @@ function mergeSnapshot(
     days: sanitizeString(result.days) || currentSnapshot.days,
     destination: sanitizeString(result.destination) || currentSnapshot.destination,
     notes: sanitizeString(result.notes) || currentSnapshot.notes,
+    origin: currentSnapshot.origin,
     questionCount: currentSnapshot.questionCount,
     timing: sanitizeString(result.timing) || currentSnapshot.timing,
     transportPreference:
