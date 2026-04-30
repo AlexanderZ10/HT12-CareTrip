@@ -41,6 +41,7 @@ export type DiscoverSettlementType = "city" | "village";
 
 export type DiscoverSearchFilters = {
   countries: string[];
+  destinationQuery: string;
   maxDistanceKm: number | null;
   minDistanceKm: number | null;
   originLabel: string;
@@ -234,6 +235,7 @@ function sanitizeDiscoverSearchFilters(
     countries: sanitizeStringArray(rawFilters.countries)
       .map((country) => country.trim())
       .filter((country, index, array) => country && array.indexOf(country) === index),
+    destinationQuery: sanitizeString(rawFilters.destinationQuery),
     maxDistanceKm: sanitizeNumber(rawFilters.maxDistanceKm),
     minDistanceKm: sanitizeNumber(rawFilters.minDistanceKm),
     originLabel: sanitizeString(rawFilters.originLabel, fallbackOriginLabel),
@@ -624,6 +626,7 @@ export async function resolveDiscoverOriginCoordinates(originLabel: string) {
 export function getDiscoverSearchFiltersSignature(filters: DiscoverSearchFilters) {
   return JSON.stringify({
     countries: [...filters.countries].sort((left, right) => left.localeCompare(right)),
+    destinationQuery: filters.destinationQuery,
     maxDistanceKm: filters.maxDistanceKm,
     minDistanceKm: filters.minDistanceKm,
     originLabel: filters.originLabel,
@@ -874,6 +877,9 @@ function buildGroundedSettlementResearchPrompt(
         ? "Return ONLY cities and small towns. Do not include villages, hamlets, or rural settlements."
         : "Return ONLY villages, hamlets, and small rural settlements. Do not include cities or larger towns."
       : "Mix cities, small towns, and villages.";
+  const destinationQueryHint = filters.destinationQuery
+    ? `Match this destination style or theme as a hard preference: ${filters.destinationQuery}.`
+    : "No custom destination style or theme was provided.";
   const distanceFilterHint =
     filters.originLabel &&
     (filters.minDistanceKm !== null || filters.maxDistanceKm !== null)
@@ -899,6 +905,7 @@ function buildGroundedSettlementResearchPrompt(
     countryFilterHint,
     distanceFilterHint,
     settlementTypeFilterHint,
+    destinationQueryHint,
     "If explicit search filters are present, treat them as hard constraints.",
     "When no country filter is present, return a geographically varied set from multiple countries when possible.",
     "Use only the user's About You profile fields for personalization, not as a location filter.",
@@ -917,6 +924,7 @@ function buildGroundedSettlementResearchPrompt(
     `Search countries: ${
       filters.countries.length > 0 ? filters.countries.join(", ") : "Not provided"
     }`,
+    `Search destination style: ${filters.destinationQuery || "Not provided"}`,
   ].join("\n");
 }
 
@@ -944,6 +952,9 @@ function buildStructuredDiscoverPrompt(params: {
     params.filters.countries.length > 0
       ? `Only include settlements from these countries: ${params.filters.countries.join(", ")}.`
       : "Keep the final feed geographically varied and include settlements from multiple countries when the grounded notes allow it.",
+    params.filters.destinationQuery
+      ? `Strongly match this destination style or travel theme: ${params.filters.destinationQuery}.`
+      : "No extra destination style filter was provided.",
     params.filters.originLabel &&
     (params.filters.minDistanceKm !== null || params.filters.maxDistanceKm !== null)
       ? `Only include settlements whose straight-line distance from ${params.filters.originLabel} is ${
@@ -976,6 +987,7 @@ function buildStructuredDiscoverPrompt(params: {
         ? params.filters.countries.join(", ")
         : "Not provided"
     }`,
+    `Search destination style: ${params.filters.destinationQuery || "Not provided"}`,
     "",
     "Grounded notes:",
     params.groundedNotes,

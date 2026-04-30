@@ -38,6 +38,45 @@ type EcbRatesCache = {
 
 let ecbRatesCache: EcbRatesCache | null = null;
 
+const DISPLAY_CURRENCY_NORMALIZERS = [
+  {
+    replace: (_match: string, amount: string) => `${amount} BGN`,
+    pattern:
+      /(\d+(?:[.,]\d+)?)\s*(?:bgn|lv|leva?|лв\.?|лева|лев)(?![\p{L}\p{N}_])/giu,
+  },
+  {
+    replace: (_match: string, amount: string) => `${amount} euro`,
+    pattern:
+      /(\d+(?:[.,]\d+)?)\s*(?:eur|euro|evro|€|евро|евра)(?![\p{L}\p{N}_])/giu,
+  },
+  {
+    replace: (_match: string, amount: string) => `${amount} USD`,
+    pattern:
+      /(\d+(?:[.,]\d+)?)\s*(?:usd|us\$|\$|dollars?|долари|долара|долар)(?![\p{L}\p{N}_])/giu,
+  },
+  {
+    replace: (_match: string, amount: string) => `${amount} GBP`,
+    pattern:
+      /(\d+(?:[.,]\d+)?)\s*(?:gbp|£|pounds?|паунди|паунда|паунд)(?![\p{L}\p{N}_])/giu,
+  },
+  {
+    replace: (_match: string, prefix: string) => `${prefix}BGN`,
+    pattern: /(^|[^\p{L}\p{N}_])(?:bgn|lv|leva?|лв\.?|лева|лев)(?![\p{L}\p{N}_])/giu,
+  },
+  {
+    replace: (_match: string, prefix: string) => `${prefix}euro`,
+    pattern: /(^|[^\p{L}\p{N}_])(?:eur|euro|evro|евро|евра)(?![\p{L}\p{N}_])/giu,
+  },
+  {
+    replace: (_match: string, prefix: string) => `${prefix}USD`,
+    pattern: /(^|[^\p{L}\p{N}_])(?:usd|dollars?|долари|долара|долар)(?![\p{L}\p{N}_])/giu,
+  },
+  {
+    replace: (_match: string, prefix: string) => `${prefix}GBP`,
+    pattern: /(^|[^\p{L}\p{N}_])(?:gbp|pounds?|паунди|паунда|паунд)(?![\p{L}\p{N}_])/giu,
+  },
+] as const;
+
 const CURRENCY_ALIAS_SOURCES = [
   {
     code: "BGN",
@@ -114,6 +153,15 @@ function normalizeCurrencyCodeFromText(value: string) {
   if (hasPattern(USD_PATTERN, value)) return "USD";
   if (hasPattern(GBP_PATTERN, value)) return "GBP";
   return "";
+}
+
+export function normalizeCurrencyAliasesInText(value: string) {
+  return DISPLAY_CURRENCY_NORMALIZERS.reduce(
+    (normalized, { pattern, replace }) => normalized.replace(pattern, replace),
+    value
+  )
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function parseBudget(value: string): ParsedBudget | null {

@@ -1,10 +1,11 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import * as Speech from "expo-speech";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleProp, StyleSheet, Text, TextStyle, View } from "react-native";
 
 import { useAppLanguage } from "../../../components/app-language-provider";
 import { FontWeight, Radius, Spacing, TypeScale } from "../../../constants/design-system";
+import { normalizeCurrencyAliasesInText } from "../../../utils/currency";
 import type { AppLanguage } from "../../../utils/translations";
 
 const SPEECH_LOCALES: Record<AppLanguage, string> = {
@@ -15,10 +16,64 @@ const SPEECH_LOCALES: Record<AppLanguage, string> = {
   fr: "fr-FR",
 };
 
+const SPEECH_CURRENCY_LABELS: Record<
+  AppLanguage,
+  { bgn: string; euro: string; gbp: string; usd: string }
+> = {
+  bg: {
+    bgn: "български лева",
+    euro: "евро",
+    gbp: "британски паунда",
+    usd: "щатски долара",
+  },
+  en: {
+    bgn: "Bulgarian lev",
+    euro: "euro",
+    gbp: "British pounds",
+    usd: "US dollars",
+  },
+  de: {
+    bgn: "bulgarische Lew",
+    euro: "Euro",
+    gbp: "britische Pfund",
+    usd: "US Dollar",
+  },
+  es: {
+    bgn: "lev búlgaros",
+    euro: "euros",
+    gbp: "libras esterlinas",
+    usd: "dólares estadounidenses",
+  },
+  fr: {
+    bgn: "levs bulgares",
+    euro: "euros",
+    gbp: "livres sterling",
+    usd: "dollars américains",
+  },
+};
+
 function stripMarkdownForSpeech(text: string): string {
   return text
     .replace(/\*\*([^*]+)\*\*/g, "$1")
     .replace(/^[\s]*[-*]\s+/gm, "")
+    .replace(/\n+/g, ". ")
+    .replace(/([.!?])([^\s])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function createSpeechText(text: string, language: AppLanguage): string {
+  const labels = SPEECH_CURRENCY_LABELS[language];
+
+  return stripMarkdownForSpeech(text)
+    .replace(/(\d+(?:[.,]\d+)?)\s*BGN\b/gi, `$1 ${labels.bgn}`)
+    .replace(/(\d+(?:[.,]\d+)?)\s*euro\b/gi, `$1 ${labels.euro}`)
+    .replace(/(\d+(?:[.,]\d+)?)\s*USD\b/gi, `$1 ${labels.usd}`)
+    .replace(/(\d+(?:[.,]\d+)?)\s*GBP\b/gi, `$1 ${labels.gbp}`)
+    .replace(/\bBGN\b/gi, labels.bgn)
+    .replace(/\beuro\b/gi, labels.euro)
+    .replace(/\bUSD\b/gi, labels.usd)
+    .replace(/\bGBP\b/gi, labels.gbp)
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -28,10 +83,7 @@ function renderInlineMarkdownSegments(text: string, baseStyle: StyleProp<TextSty
     const isBold = segment.startsWith("**") && segment.endsWith("**") && segment.length > 4;
 
     return (
-      <Text
-        key={`segment-${index}`}
-        style={[baseStyle, isBold && styles.messageTextBold]}
-      >
+      <Text key={`segment-${index}`} style={[baseStyle, isBold && styles.messageTextBold]}>
         {isBold ? segment.slice(2, -2) : segment}
       </Text>
     );
@@ -91,12 +143,26 @@ type ChatMessageBubbleProps = {
   };
   displayedText: string;
   role: "user" | "assistant";
+  speechText?: string;
 };
 
-export function ChatMessageBubble({ colors, displayedText, role }: ChatMessageBubbleProps) {
+export function ChatMessageBubble({
+  colors,
+  displayedText,
+  role,
+  speechText,
+}: ChatMessageBubbleProps) {
   const isAssistant = role === "assistant";
   const { t, language } = useAppLanguage();
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const normalizedDisplayedText = useMemo(
+    () => normalizeCurrencyAliasesInText(displayedText),
+    [displayedText]
+  );
+  const normalizedSpeechText = useMemo(
+    () => createSpeechText(normalizeCurrencyAliasesInText(speechText ?? normalizedDisplayedText), language),
+    [language, normalizedDisplayedText, speechText]
+  );
 
   useEffect(() => {
     return () => {
@@ -111,28 +177,24 @@ export function ChatMessageBubble({ colors, displayedText, role }: ChatMessageBu
       return;
     }
 
-    const spoken = stripMarkdownForSpeech(displayedText);
-    if (!spoken) {
+    if (!normalizedSpeechText) {
       return;
     }
 
     await Speech.stop().catch(() => {});
     setIsSpeaking(true);
-    Speech.speak(spoken, {
+    Speech.speak(normalizedSpeechText, {
       language: SPEECH_LOCALES[language] ?? "en-US",
       onDone: () => setIsSpeaking(false),
       onStopped: () => setIsSpeaking(false),
       onError: () => setIsSpeaking(false),
+      pitch: 1,
+      rate: 0.95,
     });
   };
 
   return (
-    <View
-      style={[
-        styles.messageRow,
-        !isAssistant && styles.userMessageRow,
-      ]}
-    >
+    <View style={[styles.messageRow, !isAssistant && styles.userMessageRow]}>
       {isAssistant ? (
         <View
           style={[
@@ -169,7 +231,7 @@ export function ChatMessageBubble({ colors, displayedText, role }: ChatMessageBu
           ]}
         >
           <FormattedMessageText
-            text={displayedText}
+            text={normalizedDisplayedText}
             textStyle={[
               styles.messageText,
               isAssistant
@@ -177,19 +239,24 @@ export function ChatMessageBubble({ colors, displayedText, role }: ChatMessageBu
                 : [styles.userMessageText, { color: colors.buttonTextOnAction }],
             ]}
           />
-          {isAssistant && displayedText.trim().length > 0 ? (
+          {normalizedSpeechText.trim().length > 0 ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={
-                isSpeaking ? t("home.stopSpeaking") : t("home.speakMessage")
-              }
-              onPress={handleToggleSpeech}
+              accessibilityLabel={isSpeaking ? t("home.stopSpeaking") : t("home.speakMessage")}
               hitSlop={8}
+              onPress={handleToggleSpeech}
               style={({ pressed }) => [
                 styles.speakButton,
+                !isAssistant && styles.userSpeakButton,
                 {
-                  backgroundColor: isSpeaking ? colors.accent : colors.cardAlt,
-                  borderColor: colors.border,
+                  backgroundColor: isAssistant
+                    ? isSpeaking
+                      ? colors.accent
+                      : colors.cardAlt
+                    : isSpeaking
+                      ? colors.cardAlt
+                      : "rgba(255, 255, 255, 0.12)",
+                  borderColor: isAssistant ? colors.border : "rgba(255, 255, 255, 0.24)",
                   opacity: pressed ? 0.7 : 1,
                 },
               ]}
@@ -197,7 +264,13 @@ export function ChatMessageBubble({ colors, displayedText, role }: ChatMessageBu
               <MaterialIcons
                 name={isSpeaking ? "stop" : "volume-up"}
                 size={16}
-                color={isSpeaking ? colors.buttonTextOnAction : colors.textMuted}
+                color={
+                  isAssistant
+                    ? isSpeaking
+                      ? colors.buttonTextOnAction
+                      : colors.textMuted
+                    : colors.buttonTextOnAction
+                }
               />
             </Pressable>
           ) : null}
@@ -271,14 +344,14 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   messageBulletRow: {
-    flexDirection: "row",
     alignItems: "flex-start",
+    flexDirection: "row",
     marginBottom: Spacing.xs,
     paddingLeft: Spacing.xs,
   },
   messageBulletMark: {
-    width: Spacing.lg,
     fontWeight: FontWeight.extrabold,
+    width: Spacing.lg,
   },
   messageBulletText: {
     flex: 1,
@@ -295,5 +368,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginTop: Spacing.sm,
     width: 28,
+  },
+  userSpeakButton: {
+    alignSelf: "flex-end",
   },
 });

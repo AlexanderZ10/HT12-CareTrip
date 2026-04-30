@@ -1,5 +1,5 @@
 import { getAIApiKey, callAI } from "./ai";
-import { hasExplicitCurrency, normalizeBudgetToEuro } from "./currency";
+import { hasExplicitCurrency } from "./currency";
 import type { HomeChatMessage } from "./home-chat-storage";
 import type { DiscoverProfile } from "./trip-recommendations";
 import type { AppLanguage } from "./translations";
@@ -334,11 +334,64 @@ function parseMissingFields(value: unknown): PlannerIntakeField[] {
     );
 }
 
+function normalizeIntentText(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function isOfferGenerationIntent(value: string) {
+  const normalized = normalizeIntentText(value);
+
+  return (
+    normalized === "da" ||
+    normalized === "yes" ||
+    normalized === "ok" ||
+    normalized === "okay" ||
+    normalized === "generate" ||
+    normalized.includes("oferta") ||
+    normalized.includes("offer") ||
+    normalized.includes("generate") ||
+    normalized.includes("genери") ||
+    normalized.includes("дай оферта") ||
+    normalized.includes("дай ми оферта") ||
+    normalized.includes("искам оферта") ||
+    normalized.includes("napravi mi oferta") ||
+    normalized.includes("vsushtnost mi dai oferta") ||
+    normalized.includes("vsyshtnost mi dai oferta")
+  );
+}
+
+function shouldKeepTripStyle(
+  currentSnapshot: PlannerIntakeSnapshot,
+  result: PlannerIntakeResult,
+  latestUserInput: string
+) {
+  const proposedTripStyle = sanitizeString(result.tripStyle);
+
+  if (!proposedTripStyle) {
+    return currentSnapshot.tripStyle;
+  }
+
+  if (currentSnapshot.tripStyle.trim()) {
+    return proposedTripStyle;
+  }
+
+  if (isOfferGenerationIntent(latestUserInput)) {
+    return "";
+  }
+
+  return proposedTripStyle;
+}
+
 function mergeSnapshot(
   currentSnapshot: PlannerIntakeSnapshot,
   result: PlannerIntakeResult,
   language: AppLanguage,
-  profile: DiscoverProfile
+  profile: DiscoverProfile,
+  latestUserInput: string
 ) {
   const nextBudget = sanitizeString(result.budget) || currentSnapshot.budget;
   const combinedBudget =
@@ -352,7 +405,7 @@ function mergeSnapshot(
     rawOrigin && isCurrentOriginLabel(rawOrigin) ? resolveProfileOrigin(profile) : rawOrigin;
 
   return {
-    budget: normalizeBudgetToEuro(combinedBudget, language),
+    budget: combinedBudget,
     days: sanitizeString(result.days) || currentSnapshot.days,
     destination: sanitizeString(result.destination) || currentSnapshot.destination,
     notes: sanitizeString(result.notes) || currentSnapshot.notes,
@@ -362,7 +415,7 @@ function mergeSnapshot(
     transportPreference:
       sanitizeString(result.transportPreference) || currentSnapshot.transportPreference,
     travelers: sanitizeString(result.travelers) || currentSnapshot.travelers,
-    tripStyle: sanitizeString(result.tripStyle) || currentSnapshot.tripStyle,
+    tripStyle: shouldKeepTripStyle(currentSnapshot, result, latestUserInput),
   } satisfies PlannerIntakeSnapshot;
 }
 
@@ -449,6 +502,7 @@ function buildPrompt(params: {
     "- If the current budget is a number without currency and the latest user input is only a currency, combine them into one budget value.",
     "- Store the trip starting point in origin.",
     "- If the user says to use the current/profile location, set origin to the profile City and country.",
+    "- Never infer tripStyle or notes from short generation commands like 'generate', 'offer', 'дай оферта', 'искам оферта', or similar intent-only messages.",
     "- questionCount should represent how many assistant intake questions have been asked after this turn.",
     "- Do not exceed 7.",
     "- If enough information is available, set readyToGenerate to true.",
@@ -508,7 +562,13 @@ export async function runPlannerIntakeTurn(params: {
     };
   }
 
-  const mergedSnapshot = mergeSnapshot(params.snapshot, parsedResult, language, params.profile);
+  const mergedSnapshot = mergeSnapshot(
+    params.snapshot,
+    parsedResult,
+    language,
+    params.profile,
+    params.latestUserInput
+  );
   const missingRequiredFields = getMissingRequiredFields(mergedSnapshot);
   const aiMissingFields = parseMissingFields(parsedResult.missingFields);
   const nextQuestionCount = Math.min(

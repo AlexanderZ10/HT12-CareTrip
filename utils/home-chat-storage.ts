@@ -183,7 +183,7 @@ function parseStoredHomePlan(value: unknown): StoredHomePlan {
   }
 
   return {
-    budget: normalizeBudgetToEuro(sanitizeString(rawLatestPlan.budget)),
+    budget: sanitizeString(rawLatestPlan.budget),
     createdAtMs,
     days: sanitizeString(rawLatestPlan.days),
     destination: sanitizeString(rawLatestPlan.destination),
@@ -394,7 +394,7 @@ function parsePlannerStateFromRaw(
   const archivedPlans = parseArchivedPlanBlocks(rawState.archivedPlans);
   const messages = parsePlannerMessages(rawState.chatMessages ?? rawState.messages);
   const followUpMessages = parsePlannerMessages(rawState.followUpMessages);
-  const budget = normalizeBudgetToEuro(sanitizeString(rawState.budget));
+  const budget = sanitizeString(rawState.budget);
   const days = sanitizeString(rawState.days);
   const destination = sanitizeString(rawState.destination);
   const notes = sanitizeString(rawState.notes);
@@ -561,7 +561,7 @@ export async function saveHomePlannerStoreForUser(
               .slice(-8)
               .map((block) => ({
                 plan: {
-                  budget: normalizeBudgetToEuro(block.plan.budget),
+                  budget: block.plan.budget.trim(),
                   createdAtMs: block.plan.createdAtMs || Date.now(),
                   days: block.plan.days.trim(),
                   destination: block.plan.destination.trim(),
@@ -583,7 +583,7 @@ export async function saveHomePlannerStoreForUser(
                   })),
               })),
             awaitingGenerationConfirmation: chat.state.awaitingGenerationConfirmation === true,
-            budget: normalizeBudgetToEuro(chat.state.budget),
+            budget: chat.state.budget.trim(),
             days: chat.state.days.trim(),
             destination: chat.state.destination.trim(),
             followUpMessages: chat.state.followUpMessages
@@ -603,7 +603,7 @@ export async function saveHomePlannerStoreForUser(
             tripStyle: chat.state.tripStyle.trim(),
             latestPlan: chat.state.latestPlan
               ? {
-                  budget: normalizeBudgetToEuro(chat.state.latestPlan.budget),
+                  budget: chat.state.latestPlan.budget.trim(),
                   createdAtMs: chat.state.latestPlan.createdAtMs || Date.now(),
                   days: chat.state.latestPlan.days.trim(),
                   destination: chat.state.latestPlan.destination.trim(),

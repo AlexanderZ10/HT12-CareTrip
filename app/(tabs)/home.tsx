@@ -64,7 +64,7 @@ import {
   getHomePlannerErrorMessage,
   type GroundedTravelPlan,
 } from "../../utils/home-travel-planner";
-import { getCurrencyConversionAnswer } from "../../utils/currency";
+import { getCurrencyConversionAnswer, normalizeCurrencyAliasesInText } from "../../utils/currency";
 import { getProfileDisplayName } from "../../utils/profile-info";
 import { createTestCheckoutSession } from "../../utils/travel-offers";
 import { getBookingEstimate } from "../../utils/bookings";
@@ -540,11 +540,12 @@ export default function HomeTabScreen() {
           : language === "fr"
             ? "Offre"
             : "Оферта";
-  const effectivePlannerOrigin = currentPlannerState.origin.trim() || currentProfileOrigin;
-  const plannerOriginChip = effectivePlannerOrigin
+  const explicitPlannerOrigin = currentPlannerState.origin.trim();
+  const effectivePlannerOrigin = explicitPlannerOrigin || currentProfileOrigin;
+  const plannerOriginChip = explicitPlannerOrigin
     ? language === "en"
-      ? `Start: ${effectivePlannerOrigin}`
-      : `Старт: ${effectivePlannerOrigin}`
+      ? `Start: ${explicitPlannerOrigin}`
+      : `Старт: ${explicitPlannerOrigin}`
     : "";
   const plannerDestinationChip = currentPlannerState.destination.trim()
     ? language === "en"
@@ -553,8 +554,8 @@ export default function HomeTabScreen() {
     : "";
   const profileOriginActionLabel = currentProfileOrigin
     ? language === "en"
-      ? `Current from profile: ${currentProfileOrigin}`
-      : `Настояща от профила: ${currentProfileOrigin}`
+      ? `Use my profile location: ${currentProfileOrigin}`
+      : `Ползвай локацията от профила: ${currentProfileOrigin}`
     : "";
   const navigateToDiscoverFromOrigin = useCallback(() => {
     const target = effectivePlannerOrigin.trim();
@@ -575,7 +576,7 @@ export default function HomeTabScreen() {
           label: plannerOriginChip,
           onPress: effectivePlannerOrigin ? navigateToDiscoverFromOrigin : undefined,
         },
-        { key: "budget", label: currentPlannerState.budget },
+        { key: "budget", label: normalizeCurrencyAliasesInText(currentPlannerState.budget) },
         { key: "days", label: formatPlannerDaysLabel(currentPlannerState.days, language) },
         {
           key: "travelers",
@@ -747,6 +748,54 @@ export default function HomeTabScreen() {
       message.id === typingMessageId ? typingVisibleText || " " : message.text,
     [typingMessageId, typingVisibleText]
   );
+  const getMessageSpeechText = useCallback(
+    (messages: HomeChatMessage[], index: number) => {
+      const message = messages[index];
+      if (!message) {
+        return "";
+      }
+
+      const currentText = getDisplayedMessageText(message);
+      if (message.role !== "user") {
+        return currentText;
+      }
+
+      const nextMessage = messages[index + 1];
+      if (!nextMessage || nextMessage.role !== "assistant") {
+        return currentText;
+      }
+
+      const nextText = getDisplayedMessageText(nextMessage);
+      return [currentText, nextText].filter(Boolean).join(". ");
+    },
+    [getDisplayedMessageText]
+  );
+  const isOriginQuestionMessage = useCallback(
+    (text: string) => {
+      const normalized = text.trim().toLowerCase();
+      if (!normalized) {
+        return false;
+      }
+
+      if (language === "en") {
+        return (
+          normalized.includes("where are you starting from") ||
+          normalized.includes("where will your trip start")
+        );
+      }
+
+      return (
+        (normalized.includes("откъде") || normalized.includes("от къде")) &&
+        (normalized.includes("тръг") || normalized.includes("започ"))
+      );
+    },
+    [language]
+  );
+  const shouldShowProfileOriginAction =
+    !!currentProfileOrigin &&
+    currentPlannerState.origin.trim().length === 0 &&
+    lastPlannerMessage?.role === "assistant" &&
+    isOriginQuestionMessage(getDisplayedMessageText(lastPlannerMessage));
 
   const scrollMessagesToBottom = useCallback((animated: boolean) => {
     if (scrollTimerRef.current) {
@@ -1194,7 +1243,6 @@ export default function HomeTabScreen() {
     language,
     planning,
     scrollMessagesToBottom,
-    stopVoiceInput,
     t,
   ]);
 
@@ -1287,6 +1335,7 @@ export default function HomeTabScreen() {
     sortedChats,
     user,
     language,
+    currentProfileOrigin,
   ]);
 
   const replaceCurrentChat = async (
@@ -1711,6 +1760,8 @@ export default function HomeTabScreen() {
     return "Супер, нека го доуточним още малко. Можеш директно да добавиш повече информация или да ми кажеш какво да уточним първо: дестинация, дати, бюджет, транспорт, вайб или нещо друго.";
   };
 
+  void getOfferDeferralPrompt;
+
   const getOfferDeferralQuestion = (snapshot: PlannerIntakeSnapshot) => {
     if (!snapshot.origin.trim()) {
       if (language === "en") {
@@ -2017,7 +2068,7 @@ export default function HomeTabScreen() {
       return;
     }
 
-    const value = rawValue.trim();
+    const value = normalizeCurrencyAliasesInText(rawValue.trim());
 
     if (!value) {
       return;
@@ -3061,30 +3112,6 @@ export default function HomeTabScreen() {
                 </View>
               ) : null}
 
-              {currentProfileOrigin ? (
-                <TouchableOpacity
-                  activeOpacity={0.86}
-                  disabled={planning}
-                  onPress={handleUseProfileOrigin}
-                  style={[
-                    styles.currentOriginButton,
-                    {
-                      backgroundColor: colors.cardAlt,
-                      borderColor: colors.border,
-                    },
-                  ]}
-                >
-                  <MaterialIcons
-                    color={colors.accent}
-                    name="my-location"
-                    size={16}
-                  />
-                  <Text style={[styles.currentOriginButtonText, { color: colors.textPrimary }]}>
-                    {profileOriginActionLabel}
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
-
               <ScrollView
                 ref={messagesScrollRef}
                 style={styles.messagesContainer}
@@ -3113,24 +3140,50 @@ export default function HomeTabScreen() {
                   }
                 }}
               >
-                {currentPlannerState.messages.map((message) => (
-                  <ChatMessageBubble
-                    key={message.id}
-                    colors={colors}
-                    displayedText={getDisplayedMessageText(message)}
-                    role={message.role}
-                  />
-                ))}
+                  {currentPlannerState.messages.map((message, index) => (
+                    <ChatMessageBubble
+                      key={message.id}
+                      colors={colors}
+                      displayedText={getDisplayedMessageText(message)}
+                      role={message.role}
+                      speechText={getMessageSpeechText(currentPlannerState.messages, index)}
+                    />
+                  ))}
+
+                {shouldShowProfileOriginAction ? (
+                  <TouchableOpacity
+                    activeOpacity={0.86}
+                    disabled={planning}
+                    onPress={handleUseProfileOrigin}
+                    style={[
+                      styles.inlineOriginButton,
+                      {
+                        backgroundColor: colors.cardAlt,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <MaterialIcons
+                      color={colors.accent}
+                      name="my-location"
+                      size={16}
+                    />
+                    <Text style={[styles.inlineOriginButtonText, { color: colors.textPrimary }]}>
+                      {profileOriginActionLabel}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
 
                 {archivedPlans.map((block, blockIndex) => (
                   <React.Fragment key={`${block.plan.sourceKey}-${blockIndex}`}>
                     {renderPlanSection(block.plan, false)}
-                    {block.trailingMessages.map((message) => (
+                    {block.trailingMessages.map((message, index) => (
                       <ChatMessageBubble
                         key={message.id}
                         colors={colors}
                         displayedText={getDisplayedMessageText(message)}
                         role={message.role}
+                        speechText={getMessageSpeechText(block.trailingMessages, index)}
                       />
                     ))}
                   </React.Fragment>
@@ -3140,12 +3193,13 @@ export default function HomeTabScreen() {
                   renderPlanSection(latestPlan, true)
                 ) : null}
 
-                {followUpMessages.map((message) => (
+                {followUpMessages.map((message, index) => (
                   <ChatMessageBubble
                     key={message.id}
                     colors={colors}
                     displayedText={getDisplayedMessageText(message)}
                     role={message.role}
+                    speechText={getMessageSpeechText(followUpMessages, index)}
                   />
                 ))}
 
@@ -3425,20 +3479,20 @@ const styles = StyleSheet.create({
     ...TypeScale.labelSm,
     fontWeight: FontWeight.semibold,
   },
-  currentOriginButton: {
+  inlineOriginButton: {
     alignItems: "center",
+    alignSelf: "flex-start",
     borderRadius: Radius.full,
     borderWidth: 1,
     flexDirection: "row",
     gap: Spacing.xs,
     marginBottom: Spacing.md,
-    marginHorizontal: Spacing.lg,
+    marginLeft: 48,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
   },
-  currentOriginButtonText: {
+  inlineOriginButtonText: {
     ...TypeScale.labelMd,
-    flex: 1,
     fontWeight: FontWeight.semibold,
   },
   messagesContainer: {

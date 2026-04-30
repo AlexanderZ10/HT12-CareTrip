@@ -116,8 +116,9 @@ function formatCountriesInput(countries: string[]) {
 function getDefaultDiscoverFilters(profile: DiscoverProfile | null): DiscoverSearchFilters {
   return {
     countries: [],
+    destinationQuery: "",
     maxDistanceKm: null,
-    minDistanceKm: null,
+    minDistanceKm: 0,
     originLabel: profile?.personalProfile.homeBase || "",
     originLatitude: null,
     originLongitude: null,
@@ -368,9 +369,10 @@ export default function DiscoverTabScreen() {
   const [profile, setProfile] = useState<DiscoverProfile | null>(null);
   const [discoverData, setDiscoverData] = useState<StoredDiscoverData | null>(null);
   const [originInput, setOriginInput] = useState("");
-  const [minDistanceInput, setMinDistanceInput] = useState("");
+  const [minDistanceInput, setMinDistanceInput] = useState("0");
   const [maxDistanceInput, setMaxDistanceInput] = useState("");
   const [countriesInput, setCountriesInput] = useState("");
+  const [destinationTypeInput, setDestinationTypeInput] = useState("");
   const [settlementTypesInput, setSettlementTypesInput] = useState<DiscoverSettlementType[]>([
     "city",
     "village",
@@ -561,7 +563,7 @@ export default function DiscoverTabScreen() {
         setGenerating(false);
       }
     },
-    [discoverCopy.emptyState, language, languageForPrompt, todayKey]
+    [language, languageForPrompt, todayKey]
   );
 
   const generateAndStoreTripsRef = useRef(generateAndStoreTrips);
@@ -621,12 +623,13 @@ export default function DiscoverTabScreen() {
             hydratedFiltersSignatureRef.current = storedFiltersSignature;
             setOriginInput(storedFilters.originLabel);
             setMinDistanceInput(
-              storedFilters.minDistanceKm !== null ? String(storedFilters.minDistanceKm) : ""
+              storedFilters.minDistanceKm !== null ? String(storedFilters.minDistanceKm) : "0"
             );
             setMaxDistanceInput(
               storedFilters.maxDistanceKm !== null ? String(storedFilters.maxDistanceKm) : ""
             );
             setCountriesInput(formatCountriesInput(storedFilters.countries));
+            setDestinationTypeInput(storedFilters.destinationQuery ?? "");
             setSettlementTypesInput(
               storedFilters.settlementTypes.length === 0
                 ? ["city", "village"]
@@ -760,10 +763,11 @@ export default function DiscoverTabScreen() {
       return;
     }
 
-    const nextMinDistanceKm = parseDistanceInput(minDistanceInput);
+    const nextMinDistanceKm = parseDistanceInput(minDistanceInput) ?? 0;
     const nextMaxDistanceKm = parseDistanceInput(maxDistanceInput);
     const nextOriginLabel = originInput.trim() || profile.personalProfile.homeBase || "";
     const nextCountries = parseCountriesInput(countriesInput);
+    const nextDestinationQuery = destinationTypeInput.trim();
 
     if (
       nextMinDistanceKm !== null &&
@@ -802,6 +806,7 @@ export default function DiscoverTabScreen() {
 
     const nextFilters: DiscoverSearchFilters = {
       countries: nextCountries,
+      destinationQuery: nextDestinationQuery,
       maxDistanceKm: nextMaxDistanceKm,
       minDistanceKm: nextMinDistanceKm,
       originLabel: nextOriginLabel,
@@ -820,6 +825,52 @@ export default function DiscoverTabScreen() {
     }
 
     setOriginInput(currentProfileOrigin);
+  };
+
+  const handleRefresh = async () => {
+    if (!profile || generating) {
+      return;
+    }
+
+    const defaultFilters = getDefaultDiscoverFilters(profile);
+    const nextDiscoverData: StoredDiscoverData = {
+      filters: defaultFilters,
+      generatedAtMs: discoverData?.generatedAtMs ?? null,
+      language: discoverData?.language ?? languageForPrompt,
+      lastRefreshDateKey: discoverData?.lastRefreshDateKey ?? null,
+      profileSignature: getDiscoverProfileSignature(profile, defaultFilters),
+      refreshCountForDate: discoverData?.refreshCountForDate ?? 0,
+      sourceModel: discoverData?.sourceModel ?? GEMINI_MODEL,
+      summary: discoverData?.summary ?? "",
+      trips: discoverData?.trips ?? [],
+    };
+
+    hydratedFiltersSignatureRef.current = getDiscoverSearchFiltersSignature(defaultFilters);
+    setError("");
+    setOriginInput(defaultFilters.originLabel);
+    setMinDistanceInput(String(defaultFilters.minDistanceKm ?? 0));
+    setMaxDistanceInput(
+      defaultFilters.maxDistanceKm !== null ? String(defaultFilters.maxDistanceKm) : ""
+    );
+    setCountriesInput(formatCountriesInput(defaultFilters.countries));
+    setDestinationTypeInput(defaultFilters.destinationQuery);
+    setSettlementTypesInput(
+      defaultFilters.settlementTypes.length === 0 ? ["city", "village"] : defaultFilters.settlementTypes
+    );
+    setDiscoverData(nextDiscoverData);
+
+    if (!user) {
+      return;
+    }
+
+    await setDoc(
+      doc(db, "profiles", user.uid),
+      {
+        discover: nextDiscoverData,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
   };
 
   const handleSaveTrip = async (trip: TripRecommendation) => {
@@ -930,9 +981,33 @@ export default function DiscoverTabScreen() {
               { backgroundColor: colors.card, borderColor: colors.border },
             ]}
           >
-            <Text style={[styles.searchCardTitle, { color: colors.textPrimary }]}>
-              {discoverCopy.searchCardTitle}
-            </Text>
+            <View style={styles.searchCardHeader}>
+              <Text style={[styles.searchCardTitle, { color: colors.textPrimary }]}>
+                {discoverCopy.searchCardTitle}
+              </Text>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                disabled={generating || refreshLimitReached}
+                onPress={() => {
+                  void handleRefresh();
+                }}
+                style={[
+                  styles.searchHeaderRefreshButton,
+                  { backgroundColor: colors.accent },
+                  (generating || refreshLimitReached) && styles.refreshButtonDisabled,
+                ]}
+              >
+                <MaterialIcons name="refresh" size={16} color={colors.buttonTextOnAction} />
+                <Text
+                  style={[
+                    styles.searchHeaderRefreshButtonText,
+                    { color: colors.buttonTextOnAction },
+                  ]}
+                >
+                  {discoverCopy.refreshButton}
+                </Text>
+              </TouchableOpacity>
+            </View>
 
             <Text style={[styles.searchFieldLabel, { color: colors.textSecondary }]}>
               {discoverCopy.originLabel}
@@ -961,9 +1036,6 @@ export default function DiscoverTabScreen() {
             </Pressable>
             {currentProfileOrigin ? (
               <View style={styles.profileOriginRow}>
-                <Text style={[styles.profileOriginText, { color: colors.textMuted }]}>
-                  {`${discoverCopy.profileOriginLabel}: ${currentProfileOrigin}`}
-                </Text>
                 <TouchableOpacity
                   activeOpacity={0.85}
                   onPress={handleUseProfileOrigin}
@@ -974,7 +1046,9 @@ export default function DiscoverTabScreen() {
                 >
                   <MaterialIcons name="my-location" size={14} color={colors.accent} />
                   <Text style={[styles.profileOriginButtonText, { color: colors.textPrimary }]}>
-                    {discoverCopy.currentOriginButton}
+                    {language === "bg"
+                      ? `Ползвай локацията от профила: ${currentProfileOrigin}`
+                      : `${discoverCopy.currentOriginButton}: ${currentProfileOrigin}`}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -983,63 +1057,24 @@ export default function DiscoverTabScreen() {
             <Text style={[styles.searchFieldLabel, { color: colors.textSecondary }]}>
               {discoverCopy.settlementTypesLabel}
             </Text>
-            <View style={styles.settlementTypesRow}>
-              {(["city", "village"] as DiscoverSettlementType[]).map((typeKey) => {
-                const checked = settlementTypesInput.includes(typeKey);
-                const label =
-                  typeKey === "city"
-                    ? discoverCopy.settlementTypeCity
-                    : discoverCopy.settlementTypeVillage;
-                return (
-                  <Pressable
-                    key={typeKey}
-                    onPress={() => {
-                      setSettlementTypesInput((prev) => {
-                        const has = prev.includes(typeKey);
-                        if (has) {
-                          const next = prev.filter((item) => item !== typeKey);
-                          return next.length === 0 ? prev : next;
-                        }
-                        return [...prev, typeKey];
-                      });
-                    }}
-                    style={[
-                      styles.settlementTypeOption,
-                      {
-                        backgroundColor: checked ? colors.accentMuted : colors.inputBackground,
-                        borderColor: checked ? colors.accent : colors.border,
-                      },
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.settlementTypeCheckbox,
-                        {
-                          backgroundColor: checked ? colors.accent : "transparent",
-                          borderColor: checked ? colors.accent : colors.border,
-                        },
-                      ]}
-                    >
-                      {checked ? (
-                        <MaterialIcons
-                          name="check"
-                          size={14}
-                          color={colors.buttonTextOnAction}
-                        />
-                      ) : null}
-                    </View>
-                    <Text
-                      style={[
-                        styles.settlementTypeLabel,
-                        { color: colors.textPrimary },
-                      ]}
-                    >
-                      {label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <TextInput
+              value={destinationTypeInput}
+              onChangeText={setDestinationTypeInput}
+              placeholder={
+                language === "bg"
+                  ? "Например: море, планина, спа, природа"
+                  : "Example: beach, mountains, spa, nature"
+              }
+              placeholderTextColor={colors.textMuted}
+              style={[
+                styles.searchInput,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.border,
+                  color: colors.textPrimary,
+                },
+              ]}
+            />
 
             <View style={styles.distanceRow}>
               <View style={styles.distanceField}>
@@ -1085,9 +1120,11 @@ export default function DiscoverTabScreen() {
               </View>
             </View>
 
-            <Text style={[styles.searchFieldLabel, { color: colors.textSecondary }]}>
-              {discoverCopy.countriesLabel}
-            </Text>
+              <Text style={[styles.searchFieldLabel, { color: colors.textSecondary }]}>
+                {language === "bg"
+                  ? "Държави през, които може да минеш докато пътуваш до желаната дестинация"
+                  : discoverCopy.countriesLabel}
+              </Text>
             <TextInput
               value={countriesInput}
               onChangeText={setCountriesInput}
@@ -1668,10 +1705,29 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
     padding: Spacing.lg,
   },
+  searchCardHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: Spacing.md,
+    justifyContent: "space-between",
+    marginBottom: Spacing.md,
+  },
   searchCardTitle: {
     ...TypeScale.titleSm,
     fontWeight: FontWeight.bold,
-    marginBottom: Spacing.md,
+    flex: 1,
+  },
+  searchHeaderRefreshButton: {
+    alignItems: "center",
+    borderRadius: Radius.full,
+    flexDirection: "row",
+    gap: Spacing.xs,
+    minHeight: 38,
+    paddingHorizontal: Spacing.md,
+  },
+  searchHeaderRefreshButtonText: {
+    ...TypeScale.labelMd,
+    fontWeight: FontWeight.bold,
   },
   searchFieldLabel: {
     ...TypeScale.labelMd,
@@ -1762,34 +1818,6 @@ const styles = StyleSheet.create({
   countriesInput: {
     minHeight: 78,
     textAlignVertical: "top",
-  },
-  settlementTypesRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: Spacing.sm,
-    marginBottom: Spacing.xs,
-  },
-  settlementTypeOption: {
-    alignItems: "center",
-    borderRadius: Radius.full,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: Spacing.sm,
-    minHeight: 40,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-  },
-  settlementTypeCheckbox: {
-    alignItems: "center",
-    borderRadius: 4,
-    borderWidth: 1.5,
-    height: 18,
-    justifyContent: "center",
-    width: 18,
-  },
-  settlementTypeLabel: {
-    ...TypeScale.bodyMd,
-    fontWeight: FontWeight.medium,
   },
   profileOriginRow: {
     gap: Spacing.sm,
