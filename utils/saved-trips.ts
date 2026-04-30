@@ -19,6 +19,7 @@ export type SavedTrip = {
   id: string;
   latitude: number | null;
   longitude: number | null;
+  plan: GroundedTravelPlan | null;
   source: "discover" | "home";
   sourceKey: string;
   summary: string;
@@ -87,6 +88,76 @@ function parseTripDays(value: unknown) {
     .filter((day) => day.title || day.items.length > 0);
 }
 
+function parseStringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((item) => sanitizeString(item)).filter(Boolean);
+}
+
+function parseStructuredPlan(value: unknown): GroundedTravelPlan | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const rawPlan = value as Record<string, unknown>;
+  const rawLanguage = sanitizeString(rawPlan.language);
+
+  return {
+    budgetNote: sanitizeString(rawPlan.budgetNote),
+    language:
+      rawLanguage === "en" ||
+      rawLanguage === "de" ||
+      rawLanguage === "es" ||
+      rawLanguage === "fr" ||
+      rawLanguage === "bg"
+        ? rawLanguage
+        : "bg",
+    profileTip: sanitizeString(rawPlan.profileTip),
+    stayOptions: Array.isArray(rawPlan.stayOptions)
+      ? rawPlan.stayOptions
+          .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
+          .map((item) => ({
+            area: sanitizeString(item.area),
+            bookingUrl: sanitizeString(item.bookingUrl),
+            directBookingUrl: sanitizeString(item.directBookingUrl),
+            imageUrl: sanitizeString(item.imageUrl),
+            name: sanitizeString(item.name),
+            note: sanitizeString(item.note),
+            pricePerNight: sanitizeString(item.pricePerNight),
+            providerAccommodationId: sanitizeString(item.providerAccommodationId),
+            providerKey: sanitizeString(item.providerKey),
+            providerPaymentModes: parseStringArray(item.providerPaymentModes),
+            providerProductId: sanitizeString(item.providerProductId),
+            ratingLabel: sanitizeString(item.ratingLabel),
+            reservationMode: sanitizeString(item.reservationMode),
+            sourceLabel: sanitizeString(item.sourceLabel),
+            type: sanitizeString(item.type),
+          }))
+          .filter((stay) => stay.name || stay.area)
+      : [],
+    summary: sanitizeString(rawPlan.summary),
+    title: sanitizeString(rawPlan.title),
+    transportOptions: Array.isArray(rawPlan.transportOptions)
+      ? rawPlan.transportOptions
+          .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
+          .map((item) => ({
+            bookingUrl: sanitizeString(item.bookingUrl),
+            duration: sanitizeString(item.duration),
+            mode: sanitizeString(item.mode),
+            note: sanitizeString(item.note),
+            price: sanitizeString(item.price),
+            provider: sanitizeString(item.provider),
+            route: sanitizeString(item.route),
+            sourceLabel: sanitizeString(item.sourceLabel),
+          }))
+          .filter((transport) => transport.provider || transport.route)
+      : [],
+    tripDays: parseTripDays(rawPlan.tripDays),
+  };
+}
+
 export function getDiscoverSavedSourceKey(trip: TripRecommendation) {
   return `discover:${trip.id}`;
 }
@@ -132,6 +203,7 @@ export function buildSavedTripFromDiscover(trip: TripRecommendation): SavedTrip 
     id: `saved-discover-${trip.id}`,
     latitude: trip.latitude,
     longitude: trip.longitude,
+    plan: null,
     source: "discover",
     sourceKey: getDiscoverSavedSourceKey(trip),
     summary: trip.whyItFits,
@@ -187,6 +259,7 @@ export function buildSavedTripFromHome(params: {
     id: `saved-home-${Date.now()}`,
     latitude: null,
     longitude: null,
+    plan: params.plan,
     source: "home",
     sourceKey: getHomeSavedSourceKey({
       budget: params.budget,
@@ -218,6 +291,7 @@ export function parseSavedTrips(profileData: Record<string, unknown>) {
         id: sanitizeString(item.id, `saved-${index}`),
         latitude: sanitizeNumber(item.latitude),
         longitude: sanitizeNumber(item.longitude),
+        plan: parseStructuredPlan(item.plan),
         source: item.source === "home" ? "home" : "discover",
         sourceKey: sanitizeString(item.sourceKey, `saved-key-${index}`),
         summary: sanitizeString(item.summary),

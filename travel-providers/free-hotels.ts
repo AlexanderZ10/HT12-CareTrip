@@ -6,6 +6,7 @@
 export type FreeHotelOffer = {
   area: string;
   bookingUrl: string;
+  directBookingUrl?: string;
   imageUrl: string;
   name: string;
   note: string;
@@ -138,6 +139,28 @@ function normalizeExactHotelUrl(params: {
   }
 }
 
+function extractDirectHotelUrl(rawUrl?: string) {
+  const trimmedUrl = rawUrl?.trim() || "";
+
+  if (!trimmedUrl) {
+    return "";
+  }
+
+  try {
+    const parsedUrl = new URL(trimmedUrl);
+    const hostname = parsedUrl.hostname.toLowerCase();
+    const pathname = parsedUrl.pathname.toLowerCase();
+    const isGenericSearchPage =
+      (hostname.includes("booking.com") && pathname.includes("/searchresults")) ||
+      (hostname.includes("airbnb.") && pathname.includes("/s/")) ||
+      (hostname.includes("google.") && pathname.includes("/search"));
+
+    return isGenericSearchPage ? "" : trimmedUrl;
+  } catch {
+    return "";
+  }
+}
+
 // ── MakCorps Free Hotel API (no key needed) ─────────────────────────────────
 
 async function searchMakCorps(input: ReturnType<typeof normalizeSearchFreeHotelsInput>): Promise<FreeHotelOffer[]> {
@@ -172,6 +195,7 @@ async function searchMakCorps(input: ReturnType<typeof normalizeSearchFreeHotels
             hotelName: name,
             rawUrl: item.url || item.booking_url || item.link,
           }),
+          directBookingUrl: extractDirectHotelUrl(item.url || item.booking_url || item.link),
           imageUrl: item.image || item.photo || item.thumbnail || "",
           name,
           note:

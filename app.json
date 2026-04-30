@@ -14,6 +14,7 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
+      "bundleIdentifier": "com.martin5555.caretrip",
       "supportsTablet": true,
       "infoPlist": {
         "NSSpeechRecognitionUsageDescription": "Allow CareTrip to convert your speech into text for the AI Planner.",
@@ -21,6 +22,7 @@
       }
     },
     "android": {
+      "package": "com.martin5555.caretrip",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/CareTrip-non.png",
@@ -32,8 +34,7 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.RECORD_AUDIO"
-      ],
-      "package": "com.anonymous.CareTrip"
+      ]
     },
     "web": {
       "output": "static",
@@ -68,8 +69,8 @@
       [
         "expo-speech-recognition",
         {
-          "microphonePermission": "Allow CareTrip to use your microphone for voice input in the AI Planner.",
-          "speechRecognitionPermission": "Allow CareTrip to convert your speech into text for the AI Planner.",
+          "microphonePermission": "Allow CareTrip to use the microphone so you can dictate trip ideas to the AI planner.",
+          "speechRecognitionPermission": "Allow CareTrip to use speech recognition so the AI planner can understand your voice messages.",
           "androidSpeechServicePackages": [
             "com.google.android.googlequicksearchbox",
             "com.google.android.as",
@@ -87,8 +88,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "e901caaf-55b5-4458-b450-db0f3a438ddc"
+        "projectId": "630f6826-6a6c-4759-8d7b-c21ca0faae97"
       }
-    }
+    },
+    "owner": "martin_5555"
   }
 }

@@ -10,6 +10,18 @@ import type { StoredHomePlan } from "../../../utils/home-chat-storage";
 import { formatPlannerDaysLabel, formatPlannerTravelersLabel } from "../display-format";
 import { getTransportIconName } from "../helpers";
 
+function getHostLabel(value?: string) {
+  if (!value) {
+    return "";
+  }
+
+  try {
+    return new URL(value).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
 type PlanCardProps = {
   bookingError: string;
   bookingEstimateLabel: string;
@@ -46,8 +58,15 @@ export function PlanCard({
   const displayDays = formatPlannerDaysLabel(latestPlan.days, language);
   const displayTravelers = formatPlannerTravelersLabel(latestPlan.travelers, language);
   const hasVisiblePrice = (value?: string) => !!value?.match(/\d/);
+  const allTransportOptions = latestPlan.plan.transportOptions.map((option, index) => ({
+    index,
+    option,
+  }));
+  const pricedTransportOptions = allTransportOptions.filter(({ option }) =>
+    hasVisiblePrice(option.price)
+  );
   const hasBookableOptions =
-    latestPlan.plan.transportOptions.some((option) => hasVisiblePrice(option.price)) ||
+    pricedTransportOptions.length > 0 ||
     latestPlan.plan.stayOptions.some((stay) => hasVisiblePrice(stay.pricePerNight));
 
   const labels = language === "bg"
@@ -76,8 +95,12 @@ export function PlanCard({
       : language === "es"
         ? { transport: "Transporte", stay: "Alojamiento", days: "Estructura verificada del viaje", profileTip: "VerificaciГіn", viewOffer: "Ver oferta", buyTicket: "Comprar billete", bookStay: "Reservar", noTransport: "Todavia no se encontraron ofertas fiables de transporte en vivo para esta busqueda.", noStay: "Todavia no se encontraron ofertas fiables de alojamiento en vivo para esta busqueda.", transportPriceHint: "Tarifa exacta para esta bГєsqueda", stayPriceHint: "Total exacto para las fechas elegidas", saving: "Guardando...", saved: "Guardado", saveTrip: "Guardar viaje", payReserve: "Pagar y reservar", bookNow: "Reservar ahora" }
         : language === "fr"
-          ? { transport: "Transport", stay: "HГ©bergement", days: "Structure verifiГ©e du voyage", profileTip: "VГ©rification", viewOffer: "Voir l'offre", buyTicket: "Acheter", bookStay: "RГ©server", noTransport: "Aucune offre fiable de transport en direct n'a encore ete trouvee pour cette recherche.", noStay: "Aucune offre fiable d'hebergement en direct n'a encore ete trouvee pour cette recherche.", transportPriceHint: "Tarif exact pour cette recherche", stayPriceHint: "Total exact pour les dates choisies", saving: "Enregistrement...", saved: "EnregistrГ©", saveTrip: "Enregistrer le voyage", payReserve: "Payer et rГ©server", bookNow: "RГ©server" }
-          : { transport: "Transport", stay: "Stay", days: "Verified trip structure", profileTip: "Verification", viewOffer: "View offer", buyTicket: "Buy ticket", bookStay: "Book stay", noTransport: "No reliable live transport offers were found for this search yet.", noStay: "No reliable live accommodation offers were found for this search yet.", transportPriceHint: "Exact fare for the selected search", stayPriceHint: "Exact total for the selected dates", saving: "Saving...", saved: "Saved", saveTrip: "Save trip", payReserve: "Pay & reserve", bookNow: "Book now" };
+          ? { transport: "Transport", stay: "Hébergement", days: "Structure verifiée du voyage", profileTip: "Vérification", viewOffer: "Voir l'offre", buyTicket: "Acheter", bookStay: "Réserver", noTransport: "Aucune offre fiable de transport en direct n'a encore ete trouvee pour cette recherche.", noStay: "Aucune offre fiable d'hebergement en direct n'a encore ete trouvee pour cette recherche.", transportPriceHint: "Tarif exact pour cette recherche", stayPriceHint: "Total exact pour les dates choisies", saving: "Enregistrement...", saved: "Enregistré", saveTrip: "Enregistrer le voyage", payReserve: "Payer et réserver", bookNow: "Réserver" }
+          : { transport: "Транспорт", stay: "Настаняване", days: "Проверена структура на пътуването", profileTip: "Проверка", viewOffer: "Офертата", buyTicket: "Купи билет", bookStay: "Резервирай", noTransport: "Все още няма достатъчно надеждни live транспортни оферти за това търсене.", noStay: "Все още няма достатъчно надеждни live оферти за настаняване за това търсене.", transportPriceHint: "Точна цена за това търсене", stayPriceHint: "Точна обща цена за избраните дати", saving: "Запазване...", saved: "Запазено", saveTrip: "Запази пътуването", payReserve: "Плати и резервирай", bookNow: "Резервирай" };
+  const carrierLabel = language === "bg" ? "Компания" : "Carrier";
+  const bookingSiteLabel = language === "bg" ? "Сайт за резервация" : "Booking site";
+  const hotelSiteLabel = language === "bg" ? "Сайт на хотела" : "Hotel site";
+  const openHotelSiteLabel = language === "bg" ? "Сайт на хотела" : "Hotel site";
   const providerLabel =
     language === "bg"
       ? "Доставчик"
@@ -143,14 +166,14 @@ export function PlanCard({
 
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{labels.transport}</Text>
-        {latestPlan.plan.transportOptions.length === 0 ? (
+        {allTransportOptions.length === 0 ? (
           <Text style={[styles.emptySectionText, { color: colors.textSecondary }]}>
             {labels.noTransport}
           </Text>
         ) : null}
-        {latestPlan.plan.transportOptions.map((option, index) => (
+        {allTransportOptions.map(({ index: originalIndex, option }) => (
           <View
-            key={`${option.provider}-${index}`}
+            key={`${option.provider}-${originalIndex}`}
             style={[styles.optionCard, { backgroundColor: colors.card, borderColor: colors.border }]}
           >
             <View style={styles.optionTopRow}>
@@ -174,6 +197,9 @@ export function PlanCard({
             <Text style={[styles.optionProvider, { color: colors.textPrimary }]}>
               {option.provider}
             </Text>
+            <Text style={[styles.offerSourceText, { color: colors.textPrimary }]}>
+              {carrierLabel}: {option.provider}
+            </Text>
             <Text style={[styles.optionRoute, { color: colors.textSecondary }]}>
               {option.route}
             </Text>
@@ -185,7 +211,7 @@ export function PlanCard({
             ) : null}
             {option.sourceLabel ? (
               <Text style={[styles.offerSourceText, { color: colors.accent }]}>
-                {providerLabel}: {option.sourceLabel}
+                {bookingSiteLabel}: {option.sourceLabel}
               </Text>
             ) : null}
             <Text style={[styles.optionNote, { color: colors.textSecondary }]}>{option.note}</Text>
@@ -221,7 +247,7 @@ export function PlanCard({
                     option.bookingUrl ? styles.optionHalfButton : null,
                   ]}
                   onPress={() => {
-                    onBookTransport(index);
+                    onBookTransport(originalIndex);
                   }}
                   activeOpacity={0.9}
                 >
@@ -229,21 +255,6 @@ export function PlanCard({
                   <Text style={[styles.optionActionButtonText, { color: colors.buttonTextOnAction }]}>
                     {labels.buyTicket}
                   </Text>
-                </TouchableOpacity>
-              ) : option.bookingUrl ? (
-                <TouchableOpacity
-                  style={[
-                    styles.optionLinkButton,
-                    { backgroundColor: colors.cardAlt, borderColor: colors.border },
-                    styles.optionSingleButton,
-                  ]}
-                  onPress={() => {
-                    void Linking.openURL(option.bookingUrl!);
-                  }}
-                  activeOpacity={0.9}
-                >
-                  <MaterialIcons name="open-in-new" size={16} color={colors.textPrimary} />
-                  <Text style={[styles.optionLinkButtonText, { color: colors.textPrimary }]}>{labels.viewOffer}</Text>
                 </TouchableOpacity>
               ) : null}
             </View>
@@ -283,12 +294,39 @@ export function PlanCard({
             ) : null}
             {stay.sourceLabel ? (
               <Text style={[styles.offerSourceText, { color: colors.accent }]}>
-                {providerLabel}: {stay.sourceLabel}
+                {bookingSiteLabel}: {stay.sourceLabel}
+              </Text>
+            ) : null}
+            {stay.directBookingUrl ? (
+              <Text style={[styles.offerSourceText, { color: colors.textPrimary }]}>
+                {hotelSiteLabel}: {getHostLabel(stay.directBookingUrl)}
               </Text>
             ) : null}
             <Text style={[styles.optionNote, { color: colors.textSecondary }]}>{stay.note}</Text>
 
             <View style={styles.optionActionsRow}>
+              {stay.directBookingUrl ? (
+                <TouchableOpacity
+                  style={[
+                    styles.optionLinkButton,
+                    {
+                      backgroundColor: colors.cardAlt,
+                      borderColor: colors.border,
+                    },
+                    styles.optionThirdButton,
+                  ]}
+                  onPress={() => {
+                    void Linking.openURL(stay.directBookingUrl!);
+                  }}
+                  activeOpacity={0.9}
+                >
+                  <MaterialIcons name="language" size={16} color={colors.textPrimary} />
+                  <Text style={[styles.optionLinkButtonText, { color: colors.textPrimary }]}>
+                    {openHotelSiteLabel}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+
               {stay.bookingUrl ? (
                 <TouchableOpacity
                   style={[
@@ -297,7 +335,7 @@ export function PlanCard({
                       backgroundColor: colors.cardAlt,
                       borderColor: colors.border,
                     },
-                    styles.optionHalfButton,
+                    stay.directBookingUrl ? styles.optionThirdButton : styles.optionHalfButton,
                   ]}
                   onPress={() => {
                     void Linking.openURL(stay.bookingUrl!);
@@ -306,7 +344,7 @@ export function PlanCard({
                 >
                   <MaterialIcons name="open-in-new" size={16} color={colors.textPrimary} />
                   <Text style={[styles.optionLinkButtonText, { color: colors.textPrimary }]}>
-                    {labels.viewOffer}
+                    {bookingSiteLabel}
                   </Text>
                 </TouchableOpacity>
               ) : null}
@@ -316,7 +354,11 @@ export function PlanCard({
                   style={[
                     styles.optionActionButton,
                     { backgroundColor: colors.textPrimary },
-                    stay.bookingUrl ? styles.optionHalfButton : null,
+                    stay.bookingUrl && stay.directBookingUrl
+                      ? styles.optionThirdButton
+                      : stay.bookingUrl
+                        ? styles.optionHalfButton
+                        : null,
                   ]}
                   onPress={() => {
                     onBookStay(index);
@@ -573,6 +615,7 @@ const styles = StyleSheet.create({
   },
   optionActionsRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     marginTop: Spacing.md,
   },
   optionHalfButton: {
@@ -581,6 +624,10 @@ const styles = StyleSheet.create({
   optionSingleButton: {
     flex: 1,
   },
+  optionThirdButton: {
+    flex: 1,
+    minWidth: 116,
+  },
   optionLinkButton: {
     borderRadius: Radius.lg,
     paddingVertical: Spacing.sm + 2,
@@ -588,6 +635,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     flexDirection: "row",
     marginRight: Spacing.sm,
+    marginBottom: Spacing.sm,
     borderWidth: 1,
     minHeight: 40,
   },
@@ -603,6 +651,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     flexDirection: "row",
     minHeight: 40,
+    marginBottom: Spacing.sm,
   },
   optionActionButtonText: {
     ...TypeScale.bodySm,

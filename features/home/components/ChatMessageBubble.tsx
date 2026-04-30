@@ -1,9 +1,27 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import React from "react";
-import { StyleProp, StyleSheet, Text, TextStyle, View } from "react-native";
+import * as Speech from "expo-speech";
+import React, { useEffect, useState } from "react";
+import { Pressable, StyleProp, StyleSheet, Text, TextStyle, View } from "react-native";
 
 import { useAppLanguage } from "../../../components/app-language-provider";
 import { FontWeight, Radius, Spacing, TypeScale } from "../../../constants/design-system";
+import type { AppLanguage } from "../../../utils/translations";
+
+const SPEECH_LOCALES: Record<AppLanguage, string> = {
+  bg: "bg-BG",
+  en: "en-US",
+  de: "de-DE",
+  es: "es-ES",
+  fr: "fr-FR",
+};
+
+function stripMarkdownForSpeech(text: string): string {
+  return text
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/^[\s]*[-*]\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function renderInlineMarkdownSegments(text: string, baseStyle: StyleProp<TextStyle>) {
   return text.split(/(\*\*[^*]+\*\*)/g).map((segment, index) => {
@@ -77,7 +95,36 @@ type ChatMessageBubbleProps = {
 
 export function ChatMessageBubble({ colors, displayedText, role }: ChatMessageBubbleProps) {
   const isAssistant = role === "assistant";
-  const { t } = useAppLanguage();
+  const { t, language } = useAppLanguage();
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      Speech.stop().catch(() => {});
+    };
+  }, []);
+
+  const handleToggleSpeech = async () => {
+    if (isSpeaking) {
+      await Speech.stop().catch(() => {});
+      setIsSpeaking(false);
+      return;
+    }
+
+    const spoken = stripMarkdownForSpeech(displayedText);
+    if (!spoken) {
+      return;
+    }
+
+    await Speech.stop().catch(() => {});
+    setIsSpeaking(true);
+    Speech.speak(spoken, {
+      language: SPEECH_LOCALES[language] ?? "en-US",
+      onDone: () => setIsSpeaking(false),
+      onStopped: () => setIsSpeaking(false),
+      onError: () => setIsSpeaking(false),
+    });
+  };
 
   return (
     <View
@@ -130,6 +177,30 @@ export function ChatMessageBubble({ colors, displayedText, role }: ChatMessageBu
                 : [styles.userMessageText, { color: colors.buttonTextOnAction }],
             ]}
           />
+          {isAssistant && displayedText.trim().length > 0 ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                isSpeaking ? t("home.stopSpeaking") : t("home.speakMessage")
+              }
+              onPress={handleToggleSpeech}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.speakButton,
+                {
+                  backgroundColor: isSpeaking ? colors.accent : colors.cardAlt,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <MaterialIcons
+                name={isSpeaking ? "stop" : "volume-up"}
+                size={16}
+                color={isSpeaking ? colors.buttonTextOnAction : colors.textMuted}
+              />
+            </Pressable>
+          ) : null}
         </View>
       </View>
     </View>
@@ -214,5 +285,15 @@ const styles = StyleSheet.create({
   },
   messageSpacer: {
     height: Spacing.sm,
+  },
+  speakButton: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    height: 28,
+    justifyContent: "center",
+    marginTop: Spacing.sm,
+    width: 28,
   },
 });

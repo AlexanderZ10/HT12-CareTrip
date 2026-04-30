@@ -57,6 +57,7 @@ import {
   type SocialPostComment,
   type SocialPost,
 } from "../../utils/social";
+import { moderateSocialImage } from "../../utils/social-image-moderation";
 import {
   parseTripRequest,
   sortTripRequestsByActivity,
@@ -1194,6 +1195,25 @@ export function useGroupsScreen(options: UseGroupsScreenOptions = {}) {
       setPostingSocialPost(true);
       clearFeedback();
 
+      if (postImageUri) {
+        const verdict = await moderateSocialImage(postImageUri);
+        if (!verdict.allowed) {
+          if (!verdict.travelRelated) {
+            setError(
+              "This photo doesn't look travel-related. Please choose a travel photo."
+            );
+          } else {
+            setError(
+              verdict.reason
+                ? `Photo blocked: ${verdict.reason}`
+                : "This photo isn't appropriate for CareTrip. Please choose another."
+            );
+          }
+          setSuccessMessage("");
+          return false;
+        }
+      }
+
       const now = Date.now();
       const newPostRef = doc(collection(db, "socialPosts"));
 
@@ -1322,6 +1342,23 @@ export function useGroupsScreen(options: UseGroupsScreenOptions = {}) {
     try {
       setPostingSocialPost(true);
       clearFeedback();
+
+      const verdict = await moderateSocialImage(postImageUri);
+      if (!verdict.allowed) {
+        if (!verdict.travelRelated) {
+          setError(
+            "This photo doesn't look travel-related. Please choose a travel photo."
+          );
+        } else {
+          setError(
+            verdict.reason
+              ? `Photo blocked: ${verdict.reason}`
+              : "This photo isn't appropriate for CareTrip. Please choose another."
+          );
+        }
+        setSuccessMessage("");
+        return false;
+      }
 
       const now = Date.now();
       const newPostRef = doc(collection(db, "socialPosts"));

@@ -40,6 +40,7 @@ function getHomeCopy(language: AppLanguage) {
       timing: "When",
       timingQuestion: (transportPreference: string) =>
         `Great. I will mainly search for options with ${transportPreference.toLowerCase()}. When do you want to travel?`,
+      tripChatTitle: (destination: string) => `Trip to ${destination}`,
       transportFallback: "Any transport",
       transport: "Transport",
       transportQuestion: (travelers: string) =>
@@ -73,6 +74,7 @@ function getHomeCopy(language: AppLanguage) {
       timing: "Wann",
       timingQuestion: (transportPreference: string) =>
         `Super. Ich suche vor allem nach Optionen mit ${transportPreference.toLowerCase()}. Wann m\u00F6chtet ihr reisen?`,
+      tripChatTitle: (destination: string) => `Reise nach ${destination}`,
       transportFallback: "Beliebig",
       transport: "Transport",
       transportQuestion: (travelers: string) =>
@@ -106,6 +108,7 @@ function getHomeCopy(language: AppLanguage) {
       timing: "Cu\u00E1ndo",
       timingQuestion: (transportPreference: string) =>
         `Perfecto. Buscar\u00E9 sobre todo opciones con ${transportPreference.toLowerCase()}. \u00BFCu\u00E1ndo quieres viajar?`,
+      tripChatTitle: (destination: string) => `Viaje a ${destination}`,
       transportFallback: "Sin preferencia",
       transport: "Transporte",
       transportQuestion: (travelers: string) =>
@@ -139,6 +142,7 @@ function getHomeCopy(language: AppLanguage) {
       timing: "Quand",
       timingQuestion: (transportPreference: string) =>
         `Parfait. Je vais surtout chercher des options avec ${transportPreference.toLowerCase()}. Quand voulez-vous voyager ?`,
+      tripChatTitle: (destination: string) => `Voyage \u00E0 ${destination}`,
       transportFallback: "Sans préférence",
       transport: "Transport",
       transportQuestion: (travelers: string) =>
@@ -171,6 +175,7 @@ function getHomeCopy(language: AppLanguage) {
     timing: "Кога",
     timingQuestion: (transportPreference: string) =>
       `Супер. Ще търся варианти основно с ${transportPreference.toLowerCase()}. Кога искате да е пътуването?`,
+    tripChatTitle: (destination: string) => `Пътуване до ${destination}`,
     transportFallback: "Без значение",
     transport: "Транспорт",
     transportQuestion: (travelers: string) =>
@@ -400,21 +405,51 @@ export function getDefaultChatTitle(chatCount: number, language: AppLanguage = "
   return chatCount <= 0 ? prefix : `${prefix} ${chatCount + 1}`;
 }
 
+function normalizeTitleText(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+export function getDestinationChatTitle(
+  destination: string,
+  language: AppLanguage = "bg"
+) {
+  const cleanDestination = normalizeTitleText(destination);
+
+  if (!cleanDestination) {
+    return "";
+  }
+
+  return getHomeCopy(language).tripChatTitle(cleanDestination);
+}
+
 export function getAutoChatTitle(
   currentTitle: string,
   destination: string,
   planTitle: string,
   language: AppLanguage = "bg"
 ) {
-  const { autoChatPrefix, currentChat } = getHomeCopy(language);
+  const copy = getHomeCopy(language);
+  const currentTitleText = normalizeTitleText(currentTitle);
+  const planTitleText = normalizeTitleText(planTitle);
+  const generatedDestinationTitle = getDestinationChatTitle(destination, language);
+  const translatedTripPrefixes = [
+    "Trip to ",
+    "Reise nach ",
+    "Viaje a ",
+    "Voyage à ",
+    "Пътуване до ",
+  ];
   const isDefaultTitle =
-    currentTitle.trim().startsWith(autoChatPrefix) || currentTitle.trim() === currentChat;
+    currentTitleText.startsWith(copy.autoChatPrefix) ||
+    currentTitleText === copy.currentChat ||
+    (!!planTitleText && currentTitleText === planTitleText) ||
+    translatedTripPrefixes.some((prefix) => currentTitleText.startsWith(prefix));
 
   if (!isDefaultTitle) {
     return currentTitle;
   }
 
-  return planTitle || destination || currentTitle;
+  return generatedDestinationTitle || planTitleText || normalizeTitleText(destination) || currentTitle;
 }
 
 export function getPlannerGenerationDefaults(language: AppLanguage = "bg") {

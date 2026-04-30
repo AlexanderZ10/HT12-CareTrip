@@ -18,6 +18,7 @@ export type PlannerTransportOption = {
 export type PlannerStayOption = {
   area: string;
   bookingUrl?: string;
+  directBookingUrl?: string;
   imageUrl?: string;
   name: string;
   note: string;
@@ -397,12 +398,112 @@ function hasPositiveAmount(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
+const ROUTE_ESTIMATE_TRANSPORT_SOURCE_TERMS = [
+  "google maps",
+  "rome2rio",
+  "rome 2 rio",
+];
+
+const ROUTE_ESTIMATE_TRANSPORT_URL_TERMS = [
+  "google.com/maps",
+  "rome2rio.com",
+];
+
+const THIRD_PARTY_FARE_SOURCE_TERMS = [
+  "booking.com",
+  "cheapflights",
+  "edreams",
+  "expedia",
+  "gotogate",
+  "kayak",
+  "kiwi",
+  "lastminute",
+  "momondo",
+  "mytrip",
+  "omio",
+  "opodo",
+  "skyscanner",
+  "trip.com",
+];
+
+const THIRD_PARTY_FARE_URL_TERMS = [
+  "booking.com",
+  "cheapflights.com",
+  "edreams.com",
+  "expedia.com",
+  "gotogate.com",
+  "kayak.com",
+  "kiwi.com",
+  "lastminute.com",
+  "momondo.com",
+  "mytrip.com",
+  "omio.com",
+  "opodo.com",
+  "skyscanner.com",
+  "skyscanner.net",
+  "trip.com",
+];
+
+function normalizeTransportSourceText(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function getTransportUrlHostAndPath(value: string) {
+  try {
+    const url = new URL(value);
+    return `${url.hostname}${url.pathname}`.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function isBlockedTransportSource(offer: LiveTravelOffersResponse["transportOptions"][number]) {
+  const provider = normalizeTransportSourceText(offer.provider);
+  const sourceLabel = normalizeTransportSourceText(offer.sourceLabel);
+  const hostAndPath = getTransportUrlHostAndPath(offer.bookingUrl);
+
+  return (
+    ROUTE_ESTIMATE_TRANSPORT_SOURCE_TERMS.some(
+      (term) =>
+        provider === term ||
+        sourceLabel === term ||
+        provider.includes(term) ||
+        sourceLabel.includes(term)
+    ) ||
+    ROUTE_ESTIMATE_TRANSPORT_URL_TERMS.some((term) => hostAndPath.includes(term)) ||
+    THIRD_PARTY_FARE_SOURCE_TERMS.some(
+      (term) => provider === term || provider.includes(term)
+    ) ||
+    THIRD_PARTY_FARE_URL_TERMS.some((term) => provider.includes(term))
+  );
+}
+
 function hasExactProviderTransportOffer(offer: LiveTravelOffersResponse["transportOptions"][number]) {
   return (
     hasPositiveAmount(offer.priceAmount) &&
     !!offer.bookingUrl.trim() &&
-    !!offer.provider.trim()
+    !!offer.provider.trim() &&
+    !!offer.sourceLabel.trim() &&
+    !isBlockedTransportSource(offer)
   );
+}
+
+function dedupePlannerTransportOptions(options: PlannerTransportOption[]) {
+  const seen = new Set<string>();
+
+  return options.filter((option) => {
+    const key = [option.provider, option.bookingUrl || option.route]
+      .map(normalizeLooseText)
+      .filter(Boolean)
+      .join("|");
+
+    if (!key || seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
 }
 
 function hasExactProviderStayOffer(offer: LiveTravelOffersResponse["stayOptions"][number]) {
@@ -1055,7 +1156,7 @@ function buildTransportContext(options: PlannerTransportOption[]) {
     .slice(0, 3)
     .map(
       (option, index) =>
-        `${index + 1}. ${option.mode} | ${option.provider} | ${option.route} | ${option.price} | ${option.duration}${option.sourceLabel ? ` | ${option.sourceLabel}` : ""}`
+        `${index + 1}. ${option.mode} | carrier/operator: ${option.provider} | ${option.route} | ${option.price} | ${option.duration}${option.sourceLabel ? ` | booking site: ${option.sourceLabel}` : ""}`
     )
     .join("\n");
 }
@@ -1069,7 +1170,7 @@ function buildStayContext(options: PlannerStayOption[]) {
     .slice(0, 3)
     .map(
       (option, index) =>
-        `${index + 1}. ${option.name} | ${option.type} | ${option.area} | ${option.pricePerNight}${option.ratingLabel ? ` | ${option.ratingLabel}` : ""}${option.sourceLabel ? ` | ${option.sourceLabel}` : ""}`
+        `${index + 1}. ${option.name} | ${option.type} | ${option.area} | ${option.pricePerNight}${option.ratingLabel ? ` | ${option.ratingLabel}` : ""}${option.sourceLabel ? ` | booking site: ${option.sourceLabel}` : ""}${option.directBookingUrl ? ` | hotel site: ${option.directBookingUrl}` : ""}`
     )
     .join("\n");
 }
@@ -1138,6 +1239,7 @@ function buildGroundedResearchPrompt(params: {
     "5. One honest caution or thing that still needs direct provider or local verification",
     "",
     "Important rules:",
+    "- If the user's extra notes mention a specific airline, hotel chain, or provider by name, you MUST prioritize that provider in the plan. Research it via grounding and include it.",
     "- Use grounded web knowledge for areas, attractions, local logistics, seasonality, and practical pacing.",
     "- Do not invent prices, transport providers, hotel providers, or booking facts.",
     "- Do not mention any booking link unless it was already provided in the verified options.",
@@ -1152,6 +1254,7 @@ function buildStructuredNarrativeSystemPrompt(language: AppLanguage) {
     "Return only a valid JSON object.",
     "Use grounded research only for factual destination guidance, realistic neighborhoods, and activity ideas.",
     "Use verified transport and stay options as the only source of truth for providers, stay names, prices, and durations.",
+    "If the user's notes request a specific airline, hotel, or provider, prioritize it in the transport or stay options — include it even if it is not the cheapest.",
     "Never invent booking links, live prices, availability, or provider names.",
     "Keep the result concise, polished, and practical.",
   ].join("\n");
@@ -1317,7 +1420,7 @@ export function formatGroundedTravelPlan(
     `${copy.stayHeading}:`,
     ...plan.stayOptions.map(
       (stay) =>
-        `- ${stay.name} (${stay.type}) | ${stay.area} | ${stay.pricePerNight} | ${stay.sourceLabel || ""}`
+        `- ${stay.name} (${stay.type}) | ${stay.area} | ${stay.pricePerNight} | ${stay.sourceLabel || ""}${stay.directBookingUrl ? ` | ${stay.directBookingUrl}` : ""}`
     ),
     "",
     `${copy.daysHeading}:`,
@@ -1353,14 +1456,24 @@ export async function generateGroundedTravelPlan(params: {
   };
   const offers = await searchTravelOffers(searchParams);
   const presentedStayOffers = offers.stayOptions.filter(hasExactProviderStayOffer);
-  const presentedTransportOffers = offers.transportOptions.filter(hasExactProviderTransportOffer);
+  let presentedTransportOffers = offers.transportOptions.filter(hasExactProviderTransportOffer);
+
+  if (presentedTransportOffers.length === 0) {
+    presentedTransportOffers = offers.transportOptions.filter(
+      (offer) =>
+        !!offer.bookingUrl.trim() &&
+        !!offer.provider.trim() &&
+        !!offer.sourceLabel.trim() &&
+        !isBlockedTransportSource(offer)
+    );
+  }
   const presentedOffers = {
     ...offers,
     stayOptions: presentedStayOffers,
     transportOptions: presentedTransportOffers,
   } satisfies LiveTravelOffersResponse;
 
-  const transportOptions = presentedOffers.transportOptions.map((offer) => ({
+  const exactTransportOptions = presentedOffers.transportOptions.map((offer) => ({
     bookingUrl: offer.bookingUrl,
     duration: formatDuration(offer.durationMinutes, language),
     mode: offer.mode,
@@ -1370,10 +1483,12 @@ export async function generateGroundedTravelPlan(params: {
     route: cleanTransportRouteLabel(offer.route, params.destination, language),
     sourceLabel: offer.sourceLabel,
   })) satisfies PlannerTransportOption[];
+  const transportOptions = dedupePlannerTransportOptions(exactTransportOptions).slice(0, 4);
 
   const stayOptions = presentedOffers.stayOptions.map((offer) => ({
     area: offer.area,
     bookingUrl: offer.bookingUrl,
+    directBookingUrl: offer.directBookingUrl,
     imageUrl: offer.imageUrl,
     name: offer.name,
     note: offer.note,
